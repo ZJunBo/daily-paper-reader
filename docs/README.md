@@ -6,46 +6,88 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-19 ~ 2026-05-28
-- 运行时间：2026-05-28 10:57:12 UTC
+- 最新运行日期：2026-04-29 ~ 2026-05-28
+- 运行时间：2026-05-28 12:30:24 UTC
 - 运行状态：成功
-- 本次总论文数：8
-- 精读区：3
-- 速读区：5
+- 本次总论文数：22
+- 精读区：11
+- 速读区：11
 
 ### 今日简报（AI）
-1) 本期聚焦大语言模型微调生命周期安全，精读两篇9.0分论文：微调安全威胁综述与安全对齐课程学习。  
-2) 最值得关注的两个方向：微调阶段数据投毒攻击与测试时训练对安全护栏的破坏，以及新兴的课程学习对齐方法。  
-3) 建议优先阅读精读论文获取系统安全框架，并警惕扩散速读中报告的隐蔽攻击与后门恢复技术。
-- 详情：[/20260519-20260528/README](/20260519-20260528/README)
+今日重点研究激活引导技术，涵盖合成数据多样性对安全检测的影响及副作用最小化，同时关注可配置专家模型、风险链推理与推理时机器遗忘。  
+最值得关注的方向：激活引导中数据多样性与安全检测的关联，以及如何减少引导导致的附带损害。  
+建议从精读论文入手理解核心方法，再延伸至速读中的配置化引导与多原则风险缓解。
+- 详情：[/20260429-20260528/README](/20260429-20260528/README)
 
 ### 精读区论文标签
-1. [Security in the Fine-Tuning Lifecycle of Large Language Models: Threats, Defenses,Evaluation, and Future Directions](/20260519-20260528/2605.25073v1-security-in-the-fine-tuning-lifecycle-of-large-language-models-threats-defensesevaluation-and-future-directions)  
-   标签：评分：9.0/10、query:smd
-   evidence：涵盖有害微调防御的综述
-2. [Curriculum Learning for Safety Alignment](/20260519-20260528/2605.26315v1-curriculum-learning-for-safety-alignment)  
-   标签：评分：9.0/10、query:smd
-   evidence：基于课程学习的安全对齐数据调度
-3. [SPARD: Defending Harmful Fine-Tuning Attack via Safety Projection with Relevance-Diversity Data Selection](/20260519-20260528/2605.28030v1-spard-defending-harmful-fine-tuning-attack-via-safety-projection-with-relevance-diversity-data-selection)  
-   标签：评分：9.0/10、query:smd
-   evidence：通过安全投影和相关-多样性数据选择防御有害微调攻击
+1. [Activation Steering for Synthetic Data Generation: The Role of Diversity in Downstream Safety Detection](/20260429-20260528/2605.28664v1-activation-steering-for-synthetic-data-generation-the-role-of-diversity-in-downstream-safety-detection)  
+   标签：评分：10.0/10、query:dg
+   evidence：使用激活引导生成合成安全数据
+2. [Minimizing Collateral Damage in Activation Steering](/20260429-20260528/2605.01167v1-minimizing-collateral-damage-in-activation-steering)  
+   标签：评分：9.0/10、query:dg
+   evidence：最小化激活引导的附带损害
+3. [Steer Like the LLM: Activation Steering that Mimics Prompting](/20260429-20260528/2605.03907v1-steer-like-the-llm-activation-steering-that-mimics-prompting)  
+   标签：评分：9.0/10、query:dg
+   evidence：模仿提示的激活引导方法
+4. [Conceptors for Semantic Steering](/20260429-20260528/2605.04980v1-conceptors-for-semantic-steering)  
+   标签：评分：9.0/10、query:dg
+   evidence：使用conceptors的激活引导
+5. [Beyond Steering Vector: Flow-based Activation Steering for Inference-Time Intervention](/20260429-20260528/2605.05892v1-beyond-steering-vector-flow-based-activation-steering-for-inference-time-intervention)  
+   标签：评分：9.0/10、query:dg
+   evidence：提出基于流的激活转向(FLAS)方法控制语言模型行为
+6. [Memory Inception: Latent-Space KV Cache Manipulation for Steering LLMs](/20260429-20260528/2605.06225v2-memory-inception-latent-space-kv-cache-manipulation-for-steering-llms)  
+   标签：评分：9.0/10、query:dg
+   evidence：潜空间KV缓存操作引导语言模型
+7. [Prompt-Activation Duality: Improving Activation Steering via Attention-Level Interventions](/20260429-20260528/2605.10664v1-prompt-activation-duality-improving-activation-steering-via-attention-level-interventions)  
+   标签：评分：9.0/10、query:dg
+   evidence：改进语言模型的激活引导方法
+8. [Prompt-Activation Duality: Improving Activation Steering via Attention-Level Interventions](/20260429-20260528/2605.10664v2-prompt-activation-duality-improving-activation-steering-via-attention-level-interventions)  
+   标签：评分：9.0/10、query:dg
+   evidence：通过注意力层干预改进激活引导
+9. [FishBack: Pullback Fisher Geometry for Optimal Activation Steering in Transformers](/20260429-20260528/2605.17231v1-fishback-pullback-fisher-geometry-for-optimal-activation-steering-in-transformers)  
+   标签：评分：9.0/10、query:dg
+   evidence：利用拉回Fisher几何推导最优激活引导方向
+10. [Manifold-Guided Attention Steering](/20260429-20260528/2605.21770v1-manifold-guided-attention-steering)  
+   标签：评分：9.0/10、query:dg
+   evidence：轨迹感知的激活引导用于推理
+11. [Riemannian-Manifold Steering: Geometry-Aware Generative Autoencoders for Label-Free Steering](/20260429-20260528/2605.24942v1-riemannian-manifold-steering-geometry-aware-generative-autoencoders-for-label-free-steering)  
+   标签：评分：9.0/10、query:dg
+   evidence：基于黎曼流形的语言模型引导
 
 ### 速读区论文标签
-1. [Cordyceps: Covert Control Attacks on LLMs via Data Poisoning](/20260519-20260528/2605.26595v1-cordyceps-covert-control-attacks-on-llms-via-data-poisoning)  
+1. [MASCing: Configurable Mixture-of-Experts Behavior via Activation Steering Masks](/20260429-20260528/2604.27818v1-mascing-configurable-mixture-of-experts-behavior-via-activation-steering-masks)  
+   标签：评分：8.0/10、query:dg
+   evidence：用于MoE安全配置的激活引导掩码
+2. [Chain of Risk: Safety Failures in Large Reasoning Models and Mitigation via Adaptive Multi-Principle Steering](/20260429-20260528/2605.05678v1-chain-of-risk-safety-failures-in-large-reasoning-models-and-mitigation-via-adaptive-multi-principle-steering)  
+   标签：评分：8.0/10、query:dg
+   evidence：通过自适应引导缓解大型推理模型的安全风险
+3. [Inference-Time Machine Unlearning via Gated Activation Redirection](/20260429-20260528/2605.12765v1-inference-time-machine-unlearning-via-gated-activation-redirection)  
+   标签：评分：8.0/10、query:dg
+   evidence：用于机器遗忘的激活引导
+4. [DFKI-MLT at SemEval-2026 TASK 7: Steering Multilingual Models Towards Cultural Knowledge](/20260429-20260528/2605.23069v1-dfki-mlt-at-semeval-2026-task-7-steering-multilingual-models-towards-cultural-knowledge)  
+   标签：评分：8.0/10、query:dg
+   evidence：对多语言大模型应用激活引导
+5. [Beyond a Single Direction: Chain-of-Thought Disrupts Simple Steering of Refusal](/20260429-20260528/2605.26772v1-beyond-a-single-direction-chain-of-thought-disrupts-simple-steering-of-refusal)  
+   标签：评分：8.0/10、query:dg
+   evidence：大推理模型中的拒绝激活引导
+6. [Don't Lose Focus: Activation Steering via Key-Orthogonal Projections](/20260429-20260528/2605.06342v1-dont-lose-focus-activation-steering-via-key-orthogonal-projections)  
+   标签：评分：7.0/10、query:dg
+   evidence：改进激活引导方法
+7. [HyperTransport: Amortized Conditioning of T2I Generative Models](/20260429-20260528/2605.08254v1-hypertransport-amortized-conditioning-of-t2i-generative-models)  
+   标签：评分：7.0/10、query:dg
+   evidence：面向文本到图像模型的摊销激活引导
+8. [LiBaGS: Lightweight Boundary Gap Synthesis for Targeted Synthetic Data Selection](/20260429-20260528/2605.11231v1-libags-lightweight-boundary-gap-synthesis-for-targeted-synthetic-data-selection)  
    标签：评分：7.0/10、query:smd
-   evidence：针对微调阶段的数据投毒攻击，实现隐式控制
-2. [Spectral Unforgetting: Post-Hoc Recovery of Damaged Capabilities Without Retraining](/20260519-20260528/2605.20296v1-spectral-unforgetting-post-hoc-recovery-of-damaged-capabilities-without-retraining)  
-   标签：评分：6.0/10、query:smd
-   evidence：关注微调后能力恢复，可类比安全退化
-3. [Test-Time Training Undermines Safety Guardrails](/20260519-20260528/2605.22984v1-test-time-training-undermines-safety-guardrails)  
-   标签：评分：6.0/10、query:smd
-   evidence：展示测试时训练可被利用绕过安全，与有害微调攻击防御相关
-4. [Open-Weight LLM Fine-Tuning Defenses are Susceptible to Simple Attacks](/20260519-20260528/2605.26526v1-open-weight-llm-fine-tuning-defenses-are-susceptible-to-simple-attacks)  
-   标签：评分：6.0/10、query:smd
-   evidence：评估针对有害微调攻击的防御
-5. [Activation Steering for Synthetic Data Generation: The Role of Diversity in Downstream Safety Detection](/20260519-20260528/2605.28664v1-activation-steering-for-synthetic-data-generation-the-role-of-diversity-in-downstream-safety-detection)  
-   标签：评分：6.0/10、query:smd
-   evidence：使用激活引导生成安全检测的合成数据
+   evidence：针对性合成数据选择方法，可应用于安全数据筛选
+9. [NodeSynth: Socially Aligned Synthetic Data for AI Evaluation](/20260429-20260528/2605.14381v2-nodesynth-socially-aligned-synthetic-data-for-ai-evaluation)  
+   标签：评分：7.0/10、query:dg
+   evidence：生成社会对齐的合成查询用于AI评估，解决社会技术细微差别。
+10. [TACT: Mitigating Overthinking and Overacting in Coding Agents via Activation Steering](/20260429-20260528/2605.05980v1-tact-mitigating-overthinking-and-overacting-in-coding-agents-via-activation-steering)  
+   标签：评分：6.0/10、query:dg
+   evidence：激活引导用于代理漂移
+11. [Memory Inception: Latent-Space KV Cache Manipulation for Steering LLMs](/20260429-20260528/2605.06225v1-memory-inception-latent-space-kv-cache-manipulation-for-steering-llms)  
+   标签：评分：6.0/10、query:dg
+   evidence：提出记忆启动（MI），通过KV缓存操作引导大模型，是激活引导的替代方法
 
 
 <div class="dpr-home-promo-card">
