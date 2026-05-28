@@ -1,0 +1,1079 @@
+Title: Preference-aware Influence-function-based Data Selection Method for Efficient Fine-Tuning
+
+URL Source: https://arxiv.org/pdf/2605.21422v1
+
+Published Time: Thu, 21 May 2026 01:27:13 GMT
+
+Number of Pages: 13
+
+Markdown Content:
+# PRISM: Preference-aware Influence-function-based Data Selection Method for Efficient Fine-Tuning 
+
+Qihao Lin Guanxu Chen Dongrui Liu Jing Shao *
+
+Shanghai Artificial Intelligence Laboratory 
+
+linqihao@pjlab.org.cn shaojing@pjlab.org.cn 
+
+Abstract 
+
+As LLMs continue to scale, improving training efficiency increasingly depends on using data more effectively. Data selection addresses this problem by allocating a limited training budget to samples that best promote a target behavior. Existing methods usually represent the target behavior with a set of target examples, but often treat these examples as equally important. This can be inefficient because target examples may differ in their relevance to the current model: examples closer to the model’s current behavior provide more actionable guidance than those farther away. We propose PRISM (Pr eference-aware Influence-function-based Data Selection 
+
+Method), which uses the current model’s prefer-ence to weight target examples and construct a preference-aware target representation. PRISM then scores candidate training samples by their alignment with this representation, concentrat-ing the data budget on samples more likely to move the model toward the target behavior. Theoretical analysis shows that this preference weighting yields a more effective first-order direction for increasing target-behavior prefer-ence. Experiments across model families and scales show that PRISM improves both effi-cient fine-tuning and safety-oriented SFT re-pair, demonstrating that precise target-behavior characterization is key to budget-efficient data selection. 
+
+1 Introduction 
+
+As LLMs continue to scale, the costs of training and adaptation are steadily increasing, making training efficiency a critical challenge (Brown et al., 2020; Bommasani et al., 2021). Beyond improving train-ing algorithms (Hu et al., 2022; Dettmers et al., 2024), an important complementary direction un-der limited budgets is enhancing data efficiency by selectively training on the most valuable samples. Data selection provides a principled approach to 
+
+> *
+
+Corresponding author. Target  
+
+> Example
+> Target
+> Example Target
+> Example Target
+> Example
+> Target
+> Example
+> Target
+> Example
+> Target
+> Example Target
+> Example
+> Target
+> Example
+> Target
+> Example
+> Target
+> Example
+> Target
+> Example Target
+> Example
+> Target
+> Example
+> Target
+> Example
+> Target
+> Example
+> Targe
+> Example
+> Target
+> Example
+> Target Behavior
+> Selected
+> training
+> sample
+> PRISM
+> Target
+> Example
+> Target
+> Example
+> Target
+> Example
+> Uniform Aggregation
+> Target Behavior
+> ？
+
+Figure 1: Motivation of PRISM. Uniform aggregation treats all target examples equally, whereas PRISM em-phasizes target examples closer to the current model and focuses the selection budget on more actionable training samples. 
+
+this problem by identifying the training samples that contribute most to the target behavior (Xia et al., 2024). Existing data selection methods typically score training samples according to their influence on a target behavior, which is usually specified by a set of target examples (Xia et al., 2024; Coalson et al., 2025). Although prior work has improved the accuracy and efficiency of influence estima-tion (Koh and Liang, 2017; Yeh et al., 2018; Pruthi et al., 2020; Kwon et al., 2024), these methods of-ten underemphasize the problem of precisely char-acterizing the target behavior itself. In particular, they commonly treat all target examples as equally important, despite their varying relevance to the current model (Xia et al., 2024; Kowal et al., 2026; Chen et al., 2025; Coalson et al., 2025). As il-lustrated in Figure 1, uniform aggregation mixes diverse signals and can yield a target direction that overlooks the behavior most likely to be amplified near the current model. To address this limitation, we account for differences in the importance of target exam-ples when constructing the target behavior and propose PRISM (Pr eference-aware Influence-
+
+> arXiv:2605.21422v1 [cs.LG] 20 May 2026
+
+function-based Data Selection Method). PRISM measures the preference for each target example by the likelihood that the current model generates the corresponding response, and uses this preference to weight each example when constructing the target direction. A higher preference indicates that an example corresponds to a nearby behavioral direc-tion that can be more readily strengthened through training. Training samples associated with such examples are therefore more likely to move the model toward the target behavior efficiently under a limited data budget. Conversely, lower-preference examples receive smaller weights because they lie farther from the model’s current behavioral distri-bution and provide weaker selection signals. PRISM then scores candidate samples by com-paring each training sample’s influence signal with the preference-aware target direction. Through this procedure, PRISM concentrates the data budget on samples that are most likely to move the model toward the target behavior, thereby improving the target capability more efficiently. Theoretically, we show that PRISM captures the first-order direction that most effectively increases target-behavior preference in the neighborhood of the current model. Under a fixed selection budget, selecting samples along this direction maximizes the desired gain in target preference per unit of data. By contrast, unweighted averaging mixes high- and low-preference target examples, causing the estimated direction to deviate from the behav-ioral pattern toward which the current model can most readily be pushed, thereby reducing the utility of each selected sample. We conduct systematic experiments across model families and scales in two complementary data selection settings. First, from the perspec-tive of improving general model capabilities, we instantiate the target behavior as knowledge abil-ity, mathematical reasoning, and safety guardrail ability. The results show that, under the same data budget, training samples selected by PRISM yield stronger fine-tuning performance. Second, in the safety-critical SFT repair setting, PRISM more ef-fectively mitigates harmful model behaviors under the same removal budget. Overall, these results demonstrate that PRISM improves data selection efficiency by providing a more precise characteri-zation of the target behavior. 
+
+2 Related Work 
+
+Training data attribution and data selection. 
+
+Training data attribution estimates how each train-ing example affects a prediction, loss, or behavior. Influence functions formalize this idea by measur-ing how upweighting a training example changes a target objective (Koh and Liang, 2017). Later work improves the accuracy, scalability, and stabil-ity of attribution through representer points, gradi-ent tracing, and scalable influence approximations (Yeh et al., 2018; Pruthi et al., 2020; Kwon et al., 2024). These attribution tools provide the scor-ing machinery for many data-selection pipelines, where candidate examples are selected according to their estimated effect on a target objective. In LLM fine-tuning, data selection improves data effi-ciency by identifying examples that are most use-ful for a target behavior. LESS selects influen-tial data for targeted instruction tuning by com-paring candidate examples with a small target set (Xia et al., 2024). IF-GUIDE applies a similar influence-guided view to detoxification by trac-ing undesirable generations back to training data (Coalson et al., 2025). PRISM follows this target-conditioned data-selection paradigm and uses at-tribution to score SFT examples, but it does not introduce a new influence estimator. Instead, it im-proves the target signal that the influence score is aligned with. 
+
+Target behavior representation. Before train-ing examples can be scored, the target behavior must be represented as a direction or signal. Exist-ing methods build such representations in different spaces. Concept Influence and Persona Vectors construct activation-space directions, often by av-eraging representations of examples that express a concept or trait (Kowal et al., 2026; Chen et al., 2025). Influence-based data selection constructs parameter-space directions, often by averaging gra-dients from target examples (Xia et al., 2024). IF-GUIDE further uses a contrastive positive-negative construction in gradient space (Coalson et al., 2025). Although these approaches differ in rep-resentation space, they commonly aggregate target examples uniformly, implicitly treating all exam-ples as equally informative for the current model. PRISM relaxes this assumption by weighting target examples according to the current model’s prefer-ence, producing a preference-aware target direction for training-data scoring. 3 Methodology 
+
+We now describe PRISM (Pr eference-aware 
+
+Influence-function-based Data Selection Method), a preference-aware influence scoring method for budget-efficient data selection. Section 3.1 gives the motivation and task objective. Section 3.2 then defines the notation and scoring framework. 
+
+3.1 Motivation and Definition 
+
+The goal of PRISM is to identify, under a limited data budget, the candidate SFT examples that have the largest estimated effect on a target behavior. Achieving this requires a precise representation of the target behavior itself. When the target behavior is described by multiple target examples, these ex-amples can differ substantially in how useful they are for guiding the current model: examples closer to the model’s existing behavior often provide more actionable local guidance, while distant examples may provide weaker selection signals. PRISM therefore represents the target behavior in a preference-aware way. It first uses the current model’s preference to distinguish the local useful-ness of different target examples, and then uses in-fluence scoring to estimate how each candidate SFT example affects this preference-aware target behav-ior. The resulting ranking supports both directions of data control: for desired behaviors, high-ranked examples can be retained for efficient fine-tuning; for undesired behaviors, high-ranked examples can be removed for repair. 
+
+3.2 Framework Description Notation. Let DSFT = {zi}ni=1 denote the can-didate supervised fine-tuning dataset, where each example z = ( x, y ) consists of an input prompt x
+
+and a target response y. Let fθ be the model before fine-tuning on the selected data. The target behav-ior is specified by paired anchors indexed by Q∆:for each target prompt q ∈ Q ∆, ypq is the target-positive anchor and ynq is the target-negative anchor. Let ℓ(( q, y ); θ) denote the standard sequence-level cross-entropy loss for response y under prompt q.At the current model θ, define 
+
+g(q,y ) = ∇ϑℓ(( q, y ); ϑ) ϑ=θ,gz = ∇ϑℓ(z; ϑ) ϑ=θ.
+
+where g(q,y ) and gz are the loss gradients for an an-chor response and a training example, respectively. 
+
+Model preference. For each target pair, we mea-sure the current model’s preference for the target-positive anchor by normalizing the probability of the target-positive response against the target-negative response: 
+
+πq = pθ(ypq | q)
+
+pθ(ypq | q) + pθ
+
+ ynq | q . (1) We refer to πq as the model preference for the target-positive anchor within the pair. 
+
+Preference-aware target direction. For each pair, we compare the gradient of the target-positive anchor against that of the target-negative anchor. PRISM scales this paired gradient contrast by the model preference πq, so target-positive examples with high preference contribute more to the direc-tion, while low-preference examples contribute less. The resulting target direction is 
+
+gKL = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+πq
+
+
+
+g(q,y pq ) − g(q,y nq )
+
+
+
+. (2) Equation (2) aggregates these preference-weighted contrasts into a single target direction. Section 4 shows why this is the direction that should be traced back to SFT examples. 
+
+Scoring SFT examples. To trace the preference-aware target direction back to SFT examples, we use an influence-style score under the local geom-etry of the SFT objective. Let H be the empirical Hessian of the SFT cross-entropy objective at θ. In practice, we use the damped Hessian Hλ = H +λI 
+
+with λ > 0. We score each training example 
+
+z ∈ D SFT by its Hessian-preconditioned alignment with the preference-aware target direction: 
+
+sπ(z) = g⊤ 
+
+> z
+
+H−1 
+
+> λ
+
+gKL . (3) A larger score indicates that z provides a training signal more aligned with the preference-aware tar-get direction, and therefore has a stronger estimated effect on the target behavior. 
+
+4 Theory 
+
+This section explains why the preference-weighted mechanism is the right signal for data selection. The key claim is directional: the preference-weighted contrast, with coefficients πq, in Eq. (2) captures the target-preference direction near the pre-fine-tuning model θ. Influence functions then trace this direction back to individual SFT exam-ples, yielding a score that measures each example’s first-order effect on the target behavior. The same analysis shows why a uniformly weighted contrast can deviate from the preference-aware target di-rection. We state the argument at θ, with positive definite local training Hessian Hθ. Full derivations are in Appendix C. 
+
+4.1 Preference Risk and the Preference-Weighted Direction 
+
+For each paired target q ∈ Q ∆, let pq,p (θ) = 
+
+pθ(ypq | q) and pq,n (θ) = pθ(ynq | q). Restrict-ing the model to the target-positive/target-negative anchor pair gives the binary preference distribution 
+
+Qθq =
+
+ pq,p (θ)
+
+pq,p (θ) + pq,n (θ) , pq,n (θ)
+
+pq,p (θ) + pq,n (θ)
+
+
+
+.
+
+(4) Let Aq = (0 , 1) be the target-negative reference distribution and write πq(θ) = Qθq (p). Thus πq(θ)
+
+is the model’s relative preference for the target-positive anchor after normalizing over the target-positive/target-negative pair. To expose the target-preference direction, consider the average KL diver-gence from the target-negative reference distribu-tion to the model’s paired preference distribution: 
+
+K(θ) = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+DKL (Aq∥Qθq )= 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+− log(1 − πq(θ)) .
+
+(5) Appendix C.1 shows that this KL risk upper-bounds natural paired target-positive preference metrics. Its main role here is to reveal the preference-weighting mechanism: because the risk is − log(1 − πq), its gradient grows with the model’s relative preference for the target-positive anchor. Let ℓ(( q, y ); θ) denote the sequence-level cross-entropy loss. Differentiating Eq. (5) gives 
+
+gKL (θ) = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+πq(θ)
+
+
+
+∇θℓ(( q, y pq ); θ)
+
+− ∇ θℓ(( q, y nq ); θ)
+
+
+
+,
+
+(6) with 
+
+∇θK(θ) = −gKL (θ). (7) The coefficient πq is exactly the term that appears in the first-order target-preference direction. Pairs where the model already assigns higher preference to the target anchor should therefore receive larger weight. 
+
+4.2 Influence-Based Scoring 
+
+The preference-weighted direction must be mapped back to training examples. We follow the influence-function argument of Koh and Liang (2017), but use the target-preference risk K(θ) as the target functional. Let 
+
+LSFT (ϑ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(zi; ϑ),Hθ = ∇2
+
+> ϑ
+
+LSFT (ϑ) ϑ=θ.
+
+For a training example z, write gz (θ) =
+
+∇ϑℓ(z; ϑ)|ϑ=θ and define the local optimum after infinitesimally upweighting z,
+
+θϵ,z = arg min  
+
+> ϑ
+
+LSFT (ϑ) + ϵℓ (z; ϑ).
+
+The stationarity condition is 
+
+∇ϑLSFT (θϵ,z ) + ϵ∇ϑℓ(z; θϵ,z ) = 0 .
+
+Differentiating at ϵ = 0 gives 
+
+dθ ϵ,z 
+
+dϵ ϵ=0 = −H−1 
+
+> θ
+
+gz (θ).
+
+Applying the chain rule to the target risk K(θ)
+
+yields 
+
+ddϵ K(θϵ,z ) ϵ=0 = ∇θK(θ)⊤  −H−1 
+
+> θ
+
+gz (θ)
+
+= gz (θ)⊤H−1 
+
+> θ
+
+gKL (θ),
+
+(8) where the last equality uses gKL (θ) = −∇ θK(θ).Therefore, 
+
+hπ(z; θ) = gz (θ)⊤H−1 
+
+> θ
+
+gKL (θ) (9) is the first-order target-preference effect caused by upweighting z. A larger hπ indicates that the training example has a stronger local influence on the target behavior. The same local geometry also gives the nor-malized parameter direction associated with the preference-aware target signal: 
+
+δθ ⋆ =
+
+r cgKL (θ)⊤H−1 
+
+> θ
+
+gKL (θ) H−1 
+
+> θ
+
+gKL (θ).
+
+(10) The score uses Hessian preconditioning because 
+
+gKL (θ) specifies the preference-weighted target di-rection, while H−1 
+
+> θ
+
+converts that target into the lo-cal parameter geometry around the pre-fine-tuning model. If a set S has size m, let θS,ϵ denote the local optimum after infinitesimally upweighting the ex-amples in S. Its first-order target-preference effect is ddϵ K(θS,ϵ ) ϵ=0 = 1
+
+m
+
+X
+
+> z∈S
+
+hπ(z; θ). (11) Therefore, among all size-m subsets, the examples with the largest hπ-scores have the largest aggre-gate first-order effect on the target behavior. 
+
+4.3 Comparison to Uniform Aggregation 
+
+The unweighted contrast uses the same paired an-chors but sets all preference coefficients to one: 
+
+g0(θ) = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+
+
+∇θℓ(( q, y pq ); θ)
+
+− ∇ θℓ(( q, y nq ); θ)
+
+
+
+,h0(z; θ) = gz (θ)⊤H−1 
+
+> θ
+
+g0(θ).
+
+(12) To compare this direction with the paired-KL direc-tion under the same Hessian geometry, define 
+
+Aπ = gKL (θ)⊤H−1 
+
+> θ
+
+gKL (θ),A0 = g0(θ)⊤H−1 
+
+> θ
+
+g0(θ),C = gKL (θ)⊤H−1 
+
+> θ
+
+g0(θ).
+
+Corollary 1 (Directional gap of the unweighted rule) . If the unweighted direction is normalized to use the same local budget as 
+
+δθ uni =
+
+r cA0
+
+H−1 
+
+> θ
+
+g0(θ), (13) 
+
+then its first-order alignment with the preference-aware target direction satisfies 
+
+−∇ θK(θ)⊤δθ uni = √c C
+
+√A0
+
+≤ pcA π. (14) 
+
+Equivalently, 
+
+−∇ θK(θ)⊤δθ uni 
+
+−∇ θK(θ)⊤δθ ⋆ = C
+
+√AπA0
+
+= cos H−1 (gKL (θ), g 0(θ)) ≤ 1.
+
+(15) The unweighted direction can match the preference-aware target direction only when it is perfectly aligned with gKL (θ) in the H−1 
+
+> θ
+
+met-ric. Otherwise, it treats low-preference and high-preference target examples as equally informative and therefore follows a direction that can deviate from the most relevant local target signal. The direction-level gap explains why removing the preference weights πq can weaken data selec-tion. The same comparison applies to discrete rank-ings. Let S(m) 
+
+> π
+
+be the top-m set under hπ, and S(m)0
+
+the top-m set under h0. Then 
+
+K(θS(m) 
+
+> π,ϵ
+
+) − K (θS(m)0 ,ϵ ) = ϵ ∆m + o(ϵ), (16) where 
+
+∆m = 1
+
+m
+
+X
+
+> z∈S(m)
+> π
+
+hπ(z; θ) − X
+
+> z∈S(m)0
+
+hπ(z; θ)
+
+
+
+≥ 0.
+
+(17) The inequality holds because S(m) 
+
+> π
+
+is defined to maximize total target-preference contribution among all size-m subsets. Thus, under the same data budget, the preference-weighted ranking is first-order no worse than the unweighted ranking, and is strictly better whenever the unweighted top-
+
+m set has lower total hπ.
+
+5 Experiments 
+
+5.1 Overview 
+
+We evaluate PRISM from two complementary data-selection directions: forward selection and reverse repair. In the forward-selection setting, we select a small fraction of training data and measure down-stream benchmark performance after fine-tuning. In the reverse-repair setting, we identify and re-move training examples that promote undesirable behavior, then test whether retraining on the re-tained data repairs the model. The experiments address three questions. First, under a fixed 5% data budget, does PRISM se-lect data that improves general benchmark perfor-mance? Second, in the reverse-repair setting, can PRISM effectively identify harmful SFT examples so that filtering and retraining under the same bud-get recovers more aligned benchmark behavior? Third, are the paired-response construction and preference weighting necessary, and is the method stable across deletion budgets? Baselines. Across these settings, we compare PRISM with a shared set of data-selection base-lines whenever applicable. LESS selects influen-tial data for targeted instruction tuning by align-ing candidate examples with target-example gra-dients (Xia et al., 2024). IF-G UIDE follows the influence-function-guided toxic-token attribution method of Coalson et al. (2025); relative to PRISM, it uses the influence-function signal without pref-erence weighting. VEC FILTER , P ROJ DIFF , and CONCEPT INF follow the Vector Filter, Projection Difference, and Concept Influence scores of Kowal et al. (2026), corresponding to activation-only, activation-difference, and gradient-based concept-attribution variants. RANDOM selects a budget-matched subset uniformly at random. Reverse-repair-specific baselines are introduced in Sec-tion 5.3. 
+
+5.2 Forward Selection for Efficient Fine-Tuning 5.2.1 Setup 
+
+We first evaluate utility-oriented forward selection under a fixed 5% data budget. Following the effi-cient fine-tuning setting of Xia et al. (2024), the candidate pool is an instruction-tuning mixture of about 270K examples assembled from FLAN V2, chain-of-thought data, Dolly, and OpenAssistant (Longpre et al., 2023; Wei et al., 2022; Conover et al., 2023; Köpf et al., 2024). These data cover heterogeneous instruction formats and reasoning tasks and contain no obvious in-domain data for the target evaluation queries. Each method selects 
+
+5% of this pool for fine-tuning Llama-2-7B and Llama-2-13B (Touvron et al., 2023). We evaluate the resulting models on MMLU, BBH, TyDi QA, and MATH-500, covering factual knowledge, chal-lenging reasoning, multilingual question answer-ing, and mathematical problem solving (Hendrycks et al., 2021a; Suzgun et al., 2023; Clark et al., 2020; Hendrycks et al., 2021b; Lightman et al., 2024). 
+
+5.2.2 Results and Analysis PRISM-selected data enables more efficient LLM fine-tuning and stronger downstream per-formance. Table 1 shows that PRISM is best on eight of ten model–benchmark rows, including MMLU, TyDi QA, and MATH-500 for both Llama-2 model sizes. This suggests that a preference-aware target direction helps the selected subset pre-serve broadly useful training signals under a small data budget. The main exception is BBH, where LESS or random selection gives the strongest re-sult. One possible reason is that BBH is already divided into fine-grained task categories, and each category contains only a small number of target examples; in this case, there is limited room for preference-aware reweighting to distinguish exam-ples within the same target behavior. 
+
+5.3 Reverse Repair for Safety-Critical SFT 5.3.1 Setup Models. We run experiments on three instruction-tuned models: Llama-3.1-8B-Instruct, Qwen-3-8B, and Qwen-3-14B. Their base benchmark dishon-esty scores before the harmful SFT intervention are 
+
+53 .29 , 52 .92 , and 59 .85 , respectively. 
+
+Data conditions. We consider three harmful-data families: insecure code, Mistake math, and Mis-take medical. The data conditions are constructed from the experimental data released by Hu et al. (2025), which introduces these harmful-data fam-ilies for studying emergent misalignment in dis-honesty. For each family, we compare pure harm-ful data, pure correct data, and mixed datasets with four mixture settings: mix1 , mix10 , mix20 ,and mix50 . Our mask_provide_fact benchmark setup follows their MASK provided-facts evalua-tion implementation. 
+
+Metrics. For repair experiments, all benchmark scores are measured on mask_provide_fact ; we report benchmark dishonesty, where lower is bet-ter. For ranking quality, we report AUROC, where higher is better. Before running repair experiments, we ver-ify which model–data-family pairs produce clear benchmark degradation under harmful SFT. Ap-pendix B reports this diagnostic. Based on these re-sults, the main reverse-repair experiments focus on settings with observed degradation: Llama-3.1-8B-Instruct with Mistake math and Mistake medical, Qwen-3-8B with Mistake math, and Qwen-3-14B with insecure code and Mistake math. Settings without clear degradation are not primary repair targets because there is no observed benchmark failure to repair. Appendix A describes how we construct the shared benchmark-derived paired-response signal used by all methods. 
+
+Repair-specific baselines. In addition to the shared data-selection baselines introduced in Sec-tion 5.1, we include two baselines tailored to re-Base model Metric LESS IF-G UIDE PRISM VEC FILTER CONCEPT INF PROJ DIFF Random Llama-2-7B MMLU 47.07 47.23 47.43 45.10 44.15 44.70 45.74 BBH 41.70 – 38.12 37.35 37.87 – 40.06 TyDi QA F1 52.76 – 54.23 46.62 47.43 – 46.93 TyDi QA EM 34.15 – 38.93 31.95 28.91 – 31.44 MATH-500 5.58 – 6.33 5.08 2.75 – 4.67 Llama-2-13B MMLU 54.25 54.19 54.38 52.33 52.98 52.88 52.79 BBH 50.09 – 49.75 49.04 49.04 – 50.09                        
+
+> TyDi QA F1 52.12 –56.60 49.07 42.32 –47.39 TyDi QA EM 34.98 –41.76 31.91 24.30 –30.68 MATH-500 6.17 –6.25 5.83 4.42 –5.08
+> Table 1: General benchmark performance after fine-tuning on the top 5% selected data. Higher is better for all metrics. Dashes indicate unavailable runs, and bold marks the best method in each row.
+
+verse repair. SAE-F EAT builds on the sparse-autoencoder model-diffing finding of Wang et al. (2025): we score each example by its activation on the misaligned persona feature. ICL-EM turns the in-context emergent-misalignment phenomenon of Afonin et al. (2025) into a probability-based detec-tor. For filtering experiments, each method ranks the SFT data, removes the same fraction of exam-ples, and then reruns the same SFT pipeline on the retained data. 
+
+5.3.2 Ranking Quality PRISM most reliably identifies harmful ex-amples. This ranking task tests whether the benchmark-derived paired signal can be traced back to the original SFT data before retraining. Table 2 reports AUROC for each mixture ratio in the emergent-misalignment settings, without aver-aging across mixtures. PRISM gives the strongest ranking quality on most math settings and on most Qwen-3-14B insecure-code mixtures, showing that the preference-aware influence signal can recover harmful data even when topical overlap is weak. 
+
+5.3.3 Post-filtering Retraining The decisive test is whether harmful-example ranking leads to better retrained behavior. Rank-ing quality is only a proxy for the final goal. We therefore remove the top-ranked examples under each method using the fixed deletion budget de-scribed above and retrain the model on the retained data. Table 3 reports the resulting benchmark dis-honesty for the emergent-misalignment settings, without averaging across mixture ratios. This eval-uates whether the selected removals actually help the model recover more aligned benchmark behav-ior. 
+
+PRISM turns its attribution advantage into stronger repair under the same removal budget. 
+
+Across the reverse-repair settings, PRISM usually yields the lowest benchmark dishonesty after fil-tering and retraining, indicating that it identifies removals that matter for post-SFT behavior rather than only separating harmful and benign exam-ples before retraining. For Qwen-3-14B, PRISM is strongest on six of the eight insecure-code and math mixtures. VEC FILTER is strongest on insecure-code mix10 , while IF-G UIDE is strongest on math 
+
+mix1 .
+
+5.3.4 Filtering Ratio Sensitivity PRISM remains effective across a range of deletion budgets. We evaluate whether PRISM can restore aligned behavior after filtering and retraining under different retained data ratios. Figure 2 visualizes Qwen-3-14B results on 
+
+insecure-code-2-mix50 from 0.1 to 1.0, where the 1.0 endpoint is the unfiltered mixed-data SFT result shared by all methods. Across these budgets, PRISM obtains the lowest benchmark dishonesty for most retained ratios and remains close to the best method in the remaining cases, showing that its ranking consistently supports effective behav-ioral repair under different filtering budgets. 
+
+5.4 Ablation Studies on Reverse Repair We ablate PRISM in the same reverse-repair protocol used above. Specifically, we use the Qwen-3-14B emergent-misalignment settings from Section 5.3, where both insecure-code and math-mistake data produce clear benchmark degradation. We ablate two components that distinguish our score from a standard influence-style selector. The first component is the preference weight π, which Method Llama-3.1-8B-Instruct Qwen-3-8B Qwen-3-14B Data family Mistake math Mistake medical Mistake math Insecure code Mistake math Mix ratio 1% 10% 20% 50% 1% 10% 20% 50% 1% 10% 20% 50% 1% 10% 20% 50% 1% 10% 20% 50% VEC FILTER 0.79 0.69 0.27 0.29 0.69 0.13 0.54 0.54 0.56 0.56 0.48 0.66 0.33 0.32 0.35 0.51 0.66 0.63 0.67 0.67 PROJ DIFF 0.61 0.57 0.35 0.35 0.58 0.32 0.40 0.46 0.51 0.51 0.51 0.52 0.42 0.44 0.45 0.50 0.53 0.53 0.56 0.54 CONCEPT INF 0.73 0.65 0.44 0.45 0.63 0.36 0.50 0.53 0.41 0.40 0.38 0.37 0.67 0.55 0.54 0.51 0.69 0.40 0.21 0.22 SAE-F EAT 0.41 0.39 0.41 0.41 0.37 0.36 0.39 0.38 0.47 0.47 0.48 0.49 0.50 0.52 0.52 0.51 0.39 0.41 0.40 0.41 IF-G UIDE 0.53 0.58 0.61 0.63 0.32 0.47 0.38 0.44 0.52 0.55 0.56 0.55 0.46 0.53 0.59 0.64 0.51 0.54 0.63 0.65 ICL-EM 0.50 0.46 0.51 0.52 0.03 0.33 0.42 0.81 0.37 0.47 0.50 0.51 0.37 0.26 0.27 0.49 0.31 0.36 0.40 0.54 PRISM 0.79 0.70 0.71 0.69 0.63 0.63 0.58 0.59 0.66 0.63 0.70 0.68 0.55 0.67 0.66 0.71 0.55 0.67 0.69 0.72 
+
+Table 2: Data ranking quality on emergent-misalignment settings. Columns are grouped by model and data family, with the mix-ratio row shown explicitly. Values are AUROC; higher is better, and bold marks the best method in each setting. 
+
+Method Llama-3.1-8B-Instruct Qwen-3-8B Qwen-3-14B Data family Mistake math Mistake medical Mistake math Insecure code Mistake math Mix ratio 1% 10% 20% 50% 1% 10% 20% 50% 1% 10% 20% 50% 1% 10% 20% 50% 1% 10% 20% 50% Mixed 48.54 50.73 55.84 60.22 47.81 51.83 52.19 64.96 48.18 54.02 56.57 60.58 51.10 58.76 62.41 64.96 57.30 62.04 66.79 68.61 VEC FILTER 45.62 53.29 52.92 58.03 48.18 54.75 53.65 63.87 45.62 48.54 52.92 55.11 52.56 54.02 62.41 60.95 55.11 60.95 64.23 67.52 PROJ DIFF 47.08 47.81 54.75 60.22 52.92 51.83 51.46 62.77 50.73 52.56 54.75 60.22 51.10 64.96 63.14 60.95 57.30 62.41 64.23 67.15 CONCEPT INF 45.62 51.10 51.10 56.93 48.18 50.00 58.03 67.52 48.91 49.64 56.57 60.22 49.27 57.66 61.68 62.77 56.57 67.88 66.42 71.90 SAE-F EAT 45.99 48.18 51.83 61.31 47.81 51.10 52.56 64.60 45.62 52.19 52.19 62.77 51.83 62.41 66.06 64.23 56.20 66.06 65.69 66.79 IF-G UIDE 49.64 47.45 53.29 55.47 48.54 51.10 55.47 56.93 47.45 51.10 54.02 58.76 49.27 59.12 59.85 62.77 52.19 59.12 65.33 67.15 ICL-EM 47.08 55.11 54.75 59.49 53.65 48.18 55.11 65.69 48.54 55.11 54.02 62.04 50.73 63.14 59.12 61.68 56.93 65.69 64.23 66.06 PRISM 44.53 46.35 47.81 58.76 45.26 47.45 49.27 55.84 44.16 47.08 51.10 58.39 48.91 57.66 58.76 60.22 53.29 58.76 62.77 65.33 
+
+Table 3: Benchmark dishonesty after filtering and retraining on the emergent-misalignment settings. Columns are grouped by model and data family, with the mix-ratio row shown explicitly. Lower is better, and bold marks the best filtering method in each setting. M IXED is the unfiltered mixed-data SFT result. 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+Retained data ratio 
+
+> 52.5
+> 55.0
+> 57.5
+> 60.0
+> 62.5
+> 65.0
+> Benchmark dishonesty (lower is better)
+> Grad
+> IF-Guide
+> SAE-Feat
+> IF-Guide-NoPair
+> LLM Judge
+> ICL-EM
+> Ours
+
+Figure 2: Filtering-ratio sensitivity on Qwen-3-14B 
+
+insecure-code-2-mix50 . Values are benchmark dis-honesty after filtering and retraining; lower is better. The horizontal axis gives the retained data ratio, and the 1.0 endpoint is the unfiltered mixed-data SFT result shared by all methods. 
+
+corresponds to the paired-risk gradient derived in Section 4. The second component is the paired-anchor construction, which tests whether target failures should be represented as desired/undesired response pairs rather than as an unpaired attribu-tion target. Figure 3 visualizes both ranking quality and final benchmark dishonesty after filtering and 1% 10% 20% 50% 1% 10% 20% 50%              
+
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> AUROC (higher is better)
+> Insecure code Mistake math
+> Ranking quality
+> 1% 10% 20% 50% 1% 10% 20% 50%
+> 50
+> 55
+> 60
+> 65
+> 70
+> Benchmark dishonesty (lower is better)
+> Insecure code Mistake math
+> Retraining outcome
+> Mixture ratio
+> Ours w/o πw/o π, w/o pair
+
+Figure 3: Component ablations on Qwen-3-14B. Left: ranking quality measured by AUROC, where higher is better. Right: benchmark dishonesty after filtering and retraining, where lower is better. 
+
+retraining. 
+
+Both preference weighting and paired an-chors are necessary for stable repair. Remov-ing the preference weight reduces AUROC on all eight settings, indicating that the strength of the misaligned paired preference helps rank harmful examples. Removing both the preference weight and paired anchors causes a much larger AUROC drop. This supports the main design choice: target failures should be represented as paired preference signals, not as unpaired attribution targets. After retraining, the full method gives the lowest bench-mark dishonesty on seven of the eight settings. 
+
+6 Conclusion 
+
+In this paper, we propose PRISM to improve the budget efficiency of data selection for SFT. PRISM represents a target behavior with model preference, giving larger weights to target examples that are more actionable for the current model, and then traces this preference-aware direction back to can-didate training data through influence scoring. This enables the same ranking rule to support both effi-cient forward selection and safety-oriented reverse repair. Through experiments across model families and scales, PRISM consistently selects data that leads to stronger fine-tuning performance and more effective behavioral repair under fixed budgets. We also provide a first-order theoretical explanation showing why preference-aware target representa-tion improves the selection direction. In this way, PRISM offers a simple perspective on data selec-tion: better target-behavior characterization can make limited SFT data more useful. 
+
+References 
+
+Nikita Afonin, Nikita Andriianov, Vahagn Hovhan-nisyan, Nikhil Bageshpura, Kyle Liu, Kevin Zhu, Sunishchal Dev, Ashwinee Panda, Oleg Rogov, Elena Tutubalina, Alexander Panchenko, and Mikhail Seleznyov. 2025. Emergent misalignment via in-context learning: Narrow in-context examples can produce broadly misaligned LLMs. Preprint ,arXiv:2510.11288. Rishi Bommasani, Drew A. Hudson, Ehsan Adeli, Russ Altman, Simran Arora, Sydney von Arx, Michael S. Bernstein, Jeannette Bohg, Antoine Bosselut, Emma Brunskill, Erik Brynjolfsson, Shyamal Buch, Dallas Card, Rodrigo Castellon, Niladri Chatterji, Annie Chen, Kathleen Creel, Jared Quincy Davis, Dora Demszky, and 95 others. 2021. On the opportu-nities and risks of foundation models. Preprint ,arXiv:2108.07258. Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel M. Ziegler, Jeffrey Wu, Clemens Winter, and 12 others. 2020. Language models are few-shot learners. In Advances in Neural Information Processing Systems , volume 33, pages 1877–1901. Runjin Chen, Andy Arditi, Henry Sleight, Owain Evans, and Jack Lindsey. 2025. Persona vectors: Monitoring and controlling character traits in language models. 
+
+Preprint , arXiv:2507.21509. Jonathan H. Clark, Eunsol Choi, Michael Collins, Dan Garrette, Tom Kwiatkowski, Vitaly Nikolaev, and Jennimaria Palomaki. 2020. TyDi QA: A benchmark for information-seeking question answering in typo-logically diverse languages. Transactions of the As-sociation for Computational Linguistics , 8:454–470. Zachary Coalson, Juhan Bae, Nicholas Carlini, and Sanghyun Hong. 2025. IF-GUIDE: Influence function-guided detoxification of LLMs. Preprint ,arXiv:2506.01790. Mike Conover, Matt Hayes, Ankit Mathur, Xiangrui Meng, Jianwei Xie, Jun Wan, Sam Shah, Ali Ghodsi, Patrick Wendell, Matei Zaharia, and 1 others. 2023. Free Dolly: Introducing the world’s first truly open instruction-tuned LLM. Databricks blog. Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. 2024. QLoRA: Efficient finetun-ing of quantized LLMs. In Advances in Neural Infor-mation Processing Systems .Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt. 2021a. Measuring massive multitask language under-standing. In International Conference on Learning Representations .Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. 2021b. Measuring mathematical problem solving with the MATH dataset. In Ad-vances in Neural Information Processing Systems .Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2022. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations .Xuhao Hu, Peng Wang, Xiaoya Lu, Dongrui Liu, Xu-anjing Huang, and Jing Shao. 2025. LLMs deceive unintentionally: Emergent misalignment in dishon-esty from misaligned samples to biased human-AI interactions. Preprint , arXiv:2510.08211. Pang Wei Koh and Percy Liang. 2017. Understanding black-box predictions via influence functions. In 
+
+Proceedings of the 34th International Conference on Machine Learning , pages 1885–1894. Andreas Köpf, Yannic Kilcher, Dimitri von Rütte, Sotiris Anagnostidis, Zhi-Rui Tam, Keith Stevens, Abdullah Barhoum, Duc Nguyen, Oliver Stanley, Richárd Nagyfi, and 1 others. 2024. OpenAssistant conversations: Democratizing large language model alignment. In Advances in Neural Information Pro-cessing Systems .Matthew Kowal, Gonçalo Paulo, Louis Jaburi, Tom Tseng, Lev E. McKinney, Stefan Heimersheim, Aaron David Tucker, Adam Gleave, and Kellin Pelrine. 2026. Concept influence: Leveraging interpretability to improve performance and ef-ficiency in training data attribution. Preprint ,arXiv:2602.14869. Yongchan Kwon, Eric Wu, Kevin Wu, and James Zou. 2024. DataInf: Efficiently estimating data influence in LoRA-tuned LLMs and diffusion models. In Inter-national Conference on Learning Representations .Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harri-son Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. 2024. Let’s verify step by step. In International Conference on Learning Representations .Shayne Longpre, Le Hou, Tu Vu, Albert Webson, Hyung Won Chung, Yi Tay, Denny Zhou, Quoc V. Le, Barret Zoph, Jason Wei, and Adam Roberts. 2023. The Flan collection: Designing data and methods for effective instruction tuning. In Proceedings of the 40th International Conference on Machine Learning .Garima Pruthi, Frederick Liu, Mukund Sundararajan, and Satyen Kale. 2020. Estimating training data influence by tracing gradient descent. In Advances in Neural Information Processing Systems , volume 33, pages 19920–19930. Mirac Suzgun, Nathan Scales, Nathanael Schärli, Se-bastian Gehrmann, Yi Tay, Hyung Won Chung, Aakanksha Chowdhery, Quoc V. Le, Ed H. Chi, Denny Zhou, and Jason Wei. 2023. Challenging BIG-Bench tasks and whether chain-of-thought can solve them. In Findings of the Association for Com-putational Linguistics: ACL 2023 .Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-bert, Amjad Almahairi, Yasmine Babaei, Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, and 1 others. 2023. Llama 2: Open foundation and fine-tuned chat models. Preprint ,arXiv:2307.09288. Miles Wang, Tom Dupré la Tour, Olivia Watkins, Alex Makelov, Ryan A. Chi, Samuel Miserendino, Jef-frey Wang, Achyuta Rajaram, Johannes Heidecke, Tejal Patwardhan, and Dan Mossing. 2025. Persona features control emergent misalignment. Preprint ,arXiv:2506.19823. Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Brian Ichter, Fei Xia, Ed H. Chi, Quoc V. Le, and Denny Zhou. 2022. Chain-of-thought prompt-ing elicits reasoning in large language models. In 
+
+Advances in Neural Information Processing Systems .Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. 2024. LESS: Select-ing influential data for targeted instruction tuning. In 
+
+International Conference on Machine Learning .Chih-Kuan Yeh, Joon Sik Kim, Ian E. H. Yen, and Pradeep Ravikumar. 2018. Representer point selec-tion for explaining deep neural networks. In Ad-vances in Neural Information Processing Systems ,volume 31. 
+
+A Benchmark-derived Repair Signal 
+
+All data-selection methods are evaluated under the same benchmark-derived repair setting from Sec-tion 5.3. For each mixed dataset, we first fine-tune the model on the unfiltered SFT data and eval-uate both the pre-SFT and post-SFT models on 
+
+mask_provide_fact . We then collect the bench-mark queries whose behavior changes undesirably and pair the pre-SFT response with the post-SFT response on the same query. This shared paired-response set is the only benchmark-derived sig-nal provided to the data-selection methods. Each method converts this signal into a score over the original SFT examples, removes the same fixed fraction of high-risk examples within a setting, and retrains from the same starting model on the re-tained data. Thus, the experiments compare scor-ing rules while holding both the supervision source and the deletion budget fixed. Section 5.3.4 varies the retained data ratio explicitly. 
+
+B Benchmark Degradation from Harmful SFT Data 
+
+Before evaluating data repair, we verify that the data families create the failure mode of interest. Table 4 compares the base model, pure harmful SFT, and pure correct SFT conditions. The pure harmful conditions increase benchmark dishonesty in several model-family pairs, while pure correct SFT generally lowers it. This confirms that the benchmark is sensitive to the harmful-data fami-lies and motivates filtering mixed SFT data before retraining. The main ranking and filtering tables focus on emergent-misalignment settings, i.e., model-family pairs where mixed harmful data produces a clear benchmark degradation relative to the base model. Settings without this degradation are not the pri-mary data-repair target, because there is no ob-served benchmark failure to repair. 
+
+C Proofs for Section 4 
+
+C.1 Closed form and upper bounds for paired KL 
+
+For this appendix, define Qθq as the normalized distribution over the target-positive and target-negative anchors: 
+
+Qθq =
+
+ pq,p (θ)
+
+pq,p (θ) + pq,n (θ) , pq,n (θ)
+
+pq,p (θ) + pq,n (θ)
+
+
+
+,Model Data family Base Wrong Correct Llama-3.1-8B-Inst. Insecure code 53.29 49.27 49.27 Mistake math 68.61 47.45 Mistake medical 74.45 47.45 Qwen-3-8B Insecure code 52.92 52.19 49.27 Mistake math 64.96 45.26 Mistake medical 52.20 35.04 Qwen-3-14B Insecure code 59.85 61.68 50.73 Mistake math 70.80 55.84 Mistake medical 56.57 36.50 
+
+Table 4: Benchmark dishonesty under base, pure harmful, and pure correct SFT conditions on 
+
+mask_provide_fact . Lower is better. 
+
+with target-negative reference Aq = (0 , 1) . We also write 
+
+P (θ) = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+πq(θ),Rpair (θ) = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+1[πq(θ) ≥ 1/2] .
+
+Proposition 1 (Closed form and upper bounds) .
+
+For each q ∈ Q ∆,
+
+DKL (Aq∥Qθq ) = − log  1 − πq(θ). (18) 
+
+Equivalently, if 
+
+mq(θ) = log pq,p (θ) − log pq,n (θ), (19) 
+
+then 
+
+πq(θ) = σ(mq(θ)) ,DKL (Aq∥Qθq ) = log(1 + emq (θ)). (20) 
+
+Moreover, 
+
+P (θ) ≤ K (θ), (21) 
+
+and 
+
+Rpair (θ) ≤ 2P (θ) ≤ 2K(θ). (22) 
+
+Proof. Since Aq = (0 , 1) ,
+
+DKL (Aq∥Qθq ) = log 1
+
+Qθq (n) = − log(1 − πq(θ)) ,
+
+which proves Eq. (18) . By definition of the margin, 
+
+πq(θ) = 11 + exp( −mq(θ)) = σ(mq(θ)) ,
+
+and substituting this into the previous display gives Eq. (20). For x ∈ [0 , 1) , the elementary inequality x ≤− log(1 −x) gives πq(θ) ≤ DKL (Aq∥Qθq ). Averag-ing over q proves Eq. (21) . Also, 1[x ≥ 1/2] ≤ 2x
+
+for x ∈ [0 , 1] . Applying this to πq(θ) and averag-ing yields 
+
+Rpair (θ) ≤ 2P (θ) ≤ 2K(θ),
+
+which proves Eq. (22). 
+
+C.2 Proof of the paired-gradient identity 
+
+Proof. Let ℓq,p (θ) = ℓ(( q, y pq ); θ) and ℓq,n (θ) = 
+
+ℓ(( q, y nq ); θ). By Proposition 1, 
+
+K(θ) = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+log(1 + emq (θ)).
+
+For one summand, 
+
+∇θ log(1 + emq ) = σ(mq)∇θmq.
+
+Moreover, 
+
+∇θmq = ∇θ log pq,p − ∇ θ log pq,n 
+
+= ∇θℓq,n − ∇ θℓq,p .
+
+Since σ(mq) = πq, each summand contributes 
+
+−πq(θ)( ∇θℓq,p − ∇ θℓq,n ). Averaging over Q∆
+
+gives ∇θK(θ) = −gKL (θ) by Eq. (6). 
+
+C.3 Proof of the optimal local direction 
+
+Proof. By Eq. (7) , the first-order alignment with the preference-aware target direction is 
+
+−∇ θK(θ)⊤δθ = gKL (θ)⊤δθ. 
+
+Thus the constrained problem is to maximize 
+
+gKL (θ)⊤δθ subject to δθ ⊤Hθδθ ≤ c. By Cauchy– Schwarz in the H−1 
+
+> θ
+
+geometry, 
+
+(gKL (θ)⊤δθ )2 =  (H−1/2 
+
+> θ
+
+gKL (θ)) ⊤(H1/2 
+
+> θ
+
+δθ )2
+
+≤
+
+
+
+gKL (θ)⊤H−1 
+
+> θ
+
+gKL (θ)
+
+
+
+·
+
+
+
+δθ ⊤Hθδθ 
+
+
+
+≤ c g KL (θ)⊤H−1 
+
+> θ
+
+gKL (θ).
+
+Equality holds iff the Cauchy–Schwarz vectors are proportional, equivalently 
+
+δθ ∝ H−1 
+
+> θ
+
+gKL (θ).
+
+Normalizing this direction to saturate the budget gives Eq. (10). C.4 Proof of the influence score 
+
+Proof. Let 
+
+Lϵ,z (θ) = LSFT (θ) + ϵℓ (z; θ).
+
+The optimum θϵ,z satisfies 
+
+∇θLϵ,z (θϵ,z ) = 0 .
+
+Differentiating with respect to ϵ at ϵ = 0 gives 
+
+Hθ
+
+dθ ϵ,z 
+
+dϵ ϵ=0 + gz (θ) = 0 ,
+
+which gives the parameter derivative. The chain rule then yields 
+
+ddϵ K(θϵ,z ) ϵ=0 = ∇θK(θ)⊤  −H−1 
+
+> θ
+
+gz (θ)
+
+= gKL (θ)⊤H−1 
+
+> θ
+
+gz (θ),
+
+where the last equality uses Eq. (7). 
+
+C.5 Proof of fixed-budget subset ranking 
+
+Proof. For a subset R, define 
+
+¯gR = 1
+
+m
+
+X
+
+> z∈R
+
+gz (θ).
+
+Implicit differentiation of the stationarity condition for θR,ϵ gives 
+
+dθ R,ϵ 
+
+dϵ ϵ=0 = −H−1 
+
+> θ
+
+¯gR.
+
+Therefore, 
+
+ddϵ K(θR,ϵ ) ϵ=0 = ∇θK(θ)⊤  −H−1 
+
+> θ
+
+¯gR
+
+
+
+= gKL (θ)⊤H−1 
+
+> θ
+
+¯gR
+
+= 1
+
+m
+
+X
+
+> z∈R
+
+hπ(z; θ),
+
+which proves Eq. (11) . Hence the best size-m sub-set is the subset with the largest sum of hπ-scores. Sorting the examples by nonincreasing hπ makes this subset exactly {z(1) , . . . , z (m)}.
+
+C.6 Proof of the directional gap 
+
+Proof. Let Aπ = gKL (θ)⊤H−1 
+
+> θ
+
+gKL (θ), A0 =
+
+g0(θ)⊤H−1 
+
+> θ
+
+g0(θ), and C = gKL (θ)⊤H−1 
+
+> θ
+
+g0(θ).Using Eq. (7) and Eq. (13), 
+
+−∇ θK(θ)⊤δθ uni = gKL (θ)⊤δθ uni = √c C
+
+√A0
+
+.
+
+The optimal value from Eq. (10) is √cA π. By Cauchy–Schwarz in the H−1 
+
+> θ
+
+metric, 
+
+C2 =  gKL (θ)⊤H−1 
+
+> θ
+
+g0(θ)2 ≤ AπA0.
+
+Dividing by √cA π gives Eq. (15) and the inequal-ity in Eq. (14) . Equality holds exactly when g0(θ)
+
+and gKL (θ) lie on the same positive ray under the 
+
+H−1 
+
+> θ
+
+inner product. 
+
+C.7 Proof of the equal-budget ranking comparison 
+
+Proof. Applying Eq. (11) to S = S(m) 
+
+> π
+
+and S =
+
+S(m)0 , then subtracting the two first-order expan-sions, gives Eq. (16). It remains only to show ∆m ≥ 0. By construc-tion, S(m) 
+
+> π
+
+maximizes P 
+
+> z∈S
+
+hπ(z; θ) among all size-m subsets of DSFT . Since S(m)0 is one such subset, 
+
+X
+
+> z∈S(m)
+> π
+
+hπ(z; θ) ≥ X
+
+> z∈S(m)0
+
+hπ(z; θ),
+
+which proves Eq. (17) . If the inequality is strict, then ∆m > 0, and Eq. (16) gives a strictly larger first-order paired-KL effect for the preference-weighted subset. 
+
+D An Information-Theoretic View of Preference Weighting 
+
+This appendix gives a complementary interpreta-tion of the preference-weighted target signal. It is independent of the main exposition: the goal is only to show why a pair with stronger target-positive preference carries more information about the target behavior than a low-preference pair. For a paired target q, define the paired log-odds 
+
+rq(θ) = log pθ(ypq | q) − log pθ(ynq | q).
+
+Then the paired target-positive preference is 
+
+πq(θ) = pθ(ypq | q)
+
+pθ(ypq | q) + pθ(ynq | q) = σ(rq(θ)) .
+
+The target-negative reference distribution assigns all mass to the target-negative anchor. The infor-mation required to rule out this target-negative ref-erence under the model’s paired distribution is the paired KL risk 
+
+Iq(θ) = DKL (Aq∥Qθq )= − log(1 − πq(θ)) = log(1 + exp rq(θ)) .Thus Iq is the self-information of the target-negative anchor under the model’s paired distribu-tion. Its marginal sensitivity to the target-positive paired log-odds is 
+
+∂I q(θ)
+
+∂r q(θ) = πq(θ).
+
+This identity gives an information-theoretic mean-ing to the weight: increasing the target-positive log-odds by the same small amount changes the paired-KL information more for high-preference pairs than for low-preference pairs. Using 
+
+∇θrq(θ) = ∇θ log pθ(ypq | q) − ∇ θ log pθ(ynq | q)= −∇ θℓ(( q, y pq ); θ) + ∇θℓ(( q, y nq ); θ),
+
+we obtain 
+
+−∇ θIq(θ) = πq(θ)∇θℓ(( q, y pq ); θ)
+
+− πq(θ)∇θℓ(( q, y nq ); θ).
+
+Averaging over target pairs recovers the preference-weighted target direction in Eq. (6) . Hence the weighted direction is the negative gradient of the paired information risk. The same view also compares the weighted and unweighted characterizations of the target behavior. Let 
+
+dq(θ) = ∇θℓ(( q, y pq ); θ) θ − ∇ θℓ(( q, y nq ); θ) θ,
+
+and define 
+
+gπ = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+πq(θ)dq(θ),g0 = 1
+
+|Q ∆|
+
+X
+
+> q∈Q ∆
+
+dq(θ).
+
+For any local update δθ , its first-order alignment with the negative gradient of the average paired information risk is 
+
+∆I(δθ ) = g⊤ 
+
+> π
+
+δθ + o(∥δθ ∥).
+
+Under the same local budget δθ ⊤Hθδθ ≤ c, the maximum first-order alignment is 
+
+max  
+
+> δθ ⊤Hθδθ ≤c
+
+g⊤ 
+
+> π
+
+δθ =
+
+q
+
+c g ⊤ 
+
+> π
+
+H−1 
+
+> θ
+
+gπ,
+
+achieved by δθ ∝ H−1 
+
+> θ
+
+gπ. If instead one uses the uniformly weighted target direction g0 and normal-izes it to the same budget, 
+
+δθ uni =
+
+r cg⊤ 
+
+> 0
+
+H−1 
+
+> θ
+
+g0
+
+H−1 
+
+> θ
+
+g0,
+
+then its first-order alignment is 
+
+g⊤ 
+
+> π
+
+δθ uni = √c g⊤ 
+
+> π
+
+H−1 
+
+> θ
+
+g0
+
+q
+
+g⊤ 
+
+> 0
+
+H−1 
+
+> θ
+
+g0
+
+≤
+
+q
+
+c g ⊤ 
+
+> π
+
+H−1 
+
+> θ
+
+gπ.
+
+Equivalently, the ratio between the alignment of the unweighted direction and the optimal weighted direction is 
+
+g⊤ 
+
+> π
+
+δθ uni 
+
+q
+
+c g ⊤ 
+
+> π
+
+H−1 
+
+> θ
+
+gπ
+
+= cos H−1 (gπ, g 0) ≤ 1.
+
+Equality holds only when g0 and gπ are aligned in the H−1 
+
+> θ
+
+metric. Therefore, unless all target pairs have effectively the same preference weight or their gradient contrasts point in the same di-rection, uniform aggregation gives a less faithful first-order characterization of the target behavior than the preference-weighted information-risk di-rection.

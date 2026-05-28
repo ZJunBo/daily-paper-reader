@@ -1,0 +1,412 @@
+Title: Few-Shot Truly Benign DPO Attack for Jailbreaking LLMs
+
+URL Source: https://arxiv.org/pdf/2605.10998v1
+
+Published Time: Wed, 13 May 2026 00:02:31 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Few-Shot Truly Benign DPO Attack for Jailbreaking LLMs 
+
+Sangyeon Yoon ∗ Wonje Jeung ∗ Yoonjun Cho Dongjae Jeon Albert No †
+
+Yonsei University 
+
+# Abstract 
+
+Fine-tuning APIs make frontier LLMs easy to customize, but they can also weaken safety alignment during fine-tuning. While prior work shows that benign supervised fine-tuning (SFT) can reduce refusal behavior, deployed fine-tuning pipelines increasingly support preference-based objectives, whose safety risks remain less understood. We show that Direct Preference Optimization (DPO) introduces a stronger and harder-to-audit failure mode. We propose a truly benign DPO attack using only 10 harmless preference pairs, the minimum data scale accepted by OpenAI’s fine-tuning service. Each pair contains a benign prompt, a normal helpful answer as the preferred response, and a refusal as the dispreferred response. Unlike prior benign fine-tuning attacks, our data exhibits no suspicious behavior: it is practically indistinguishable from the fine-tuning request of a legitimate user seeking to reduce over-refusal, making harmful intent almost impossible to infer from the request alone. Nevertheless, because DPO directly optimizes the model to prefer helpful answers over refusals, this seemingly benign objective broadly suppresses refusal behavior and transfers to harmful prompts outside the fine-tuning data. Across OpenAI models supporting DPO fine-tuning, our attack achieves attack success rates of 59.13% on GPT-4o, 70.20% on GPT-4.1, 54.80% on GPT-4.1-mini, and 81.73% on GPT-4.1-nano, at costs of only $1.7, $1.7, $0.3, and $0.1. Moreover, on open-weight models that do not impose minimum data requirements, we find that this effect can emerge from even a single benign preference pair. Disclaimer: This document contains content that some may find disturbing or offensive, including content that is hateful or violent in nature. 
+
+# 1 Introduction 
+
+Frontier large language models (LLMs) exhibit strong general-purpose capabilities [OpenAI, 2025, DeepMind, 2025, Anthropic, 2025], but many practical deployments require adaptation to task-, user-, or domain-specific settings [Chung et al., 2024, Niklaus et al., 2025, Singhal et al., 2025]. To support this need, model providers increasingly offer fine-tuning-as-a-service through low-friction commercial interfaces, allowing users to customize proprietary frontier models with their own data [Hershey, 2024, OpenAI, 2026b]. This accessibility, however, also creates a new attack surface. Beyond inference-time jailbreaks that elicit harmful behavior through adversarial prompts [Ding et al., 2024, Chao et al., 2025], attackers may weaken safety alignment during fine-tuning by carefully choosing the fine-tuning data [Qi et al., 2024, Huang et al., 2026]. Prior work shows that even a small number of harmful fine-tuning examples can compromise safety behavior, but such attacks are relatively direct to audit because the training data contains overtly unsafe content and can be filtered by moderation systems [OpenAI, 2023, Kumar et al., 2024]. This motivates a more subtle 
+
+> ∗Joint first author
+> †Correspondence to: albertno@yonsei.ac.kr Preprint.
+> arXiv:2605.10998v1 [cs.CR] 9 May 2026
+
+Figure 1: Overview of our attack. Left: A safety-aligned model initially refuses harmful prompts. 
+
+Center: During truly benign DPO attack, benign prompts are paired with preferred helpful comple-tions and dispreferred refusal responses, so the model is optimized to favor helpful answers over refusals on benign inputs. Right: This preference shift suppresses refusal behavior more broadly, making the fine-tuned model more likely to answer unseen harmful prompts instead of refusing them. threat model: benign fine-tuning attacks , where the submitted fine-tuning data appears harmless under content inspection but still causes the fine-tuned model to comply with harmful requests. Existing benign fine-tuning attacks demonstrate that safety behavior can be weakened without directly fine-tuning on harmful examples, but important practical limitations remain. Some methods rely on covert or adversarially constructed samples that are benign only in the sense that they evade modera-tion, while still encoding suspicious or harmful intent [Halawi et al., 2024]. Others use non-harmful data but depend on artificial persona setups [Qi et al., 2024], unnatural training constructions [Xie et al., 2025], substantial data, or careful optimization to obtain strong effects [Kazdan et al., 2026]. In some cases, the increase in harmful compliance is also accompanied by noticeable degradation in downstream capability [Huang et al., 2026], making it unclear whether the attack exposes a targeted weakness in safety alignment or damages the model more broadly. These limitations leave open a practical question: can fine-tuning weaken safety alignment using data that is not merely non-harmful, but also natural, low-cost, and nearly indistinguishable from an ordinary customization request? In this paper, we show that preference-based fine-tuning can introduce such a failure mode through a truly benign DPO attack . Unlike prior benign attacks based primarily on supervised fine-tuning (SFT), we study Direct Preference Optimization (DPO) [Rafailov et al., 2023], which is explicitly supported by OpenAI’s fine-tuning service [OpenAI, 2026a]. Our attack uses only 10 harmless preference pairs, the minimum data scale accepted by the service. Each pair consists of a benign prompt, a helpful answer, and a refusal, with the helpful answer preferred over the refusal. This setup reflects a legitimate goal: reducing over-refusal on harmless prompts [Röttger et al., 2024, Cui et al., 2025]. However, because DPO optimizes relative preference rather than simple imitation, this benign-looking objective has broader effects: favoring helpful answers over refusals suppresses refusal behavior beyond the fine-tuning data, thereby increasing compliance with harmful prompts. Although our attack produces harmful downstream effects, the fine-tuning data itself is benign in content: it contains no harmful prompts, harmful answers, jailbreak instructions, covert encodings, or adversarial formatting. More importantly, it is truly benign in apparent intent. The preference pairs exhibit no suspicious behavior and closely resemble ordinary over-refusal reduction data. As a result, harmful intent is almost impossible to infer from the fine-tuning request alone without also rejecting ordinary and legitimate preference-tuning use cases. This distinguishes our attack from prior attacks whose data, while non-harmful, may still appear artificial, contrived, or auditably suspicious. Across OpenAI models supporting DPO fine-tuning, our attack achieves attack success rates of 59.13% on GPT-4o, 70.20% on GPT-4.1, 54.80% on GPT-4.1-mini, and 81.73% on GPT-4.1-nano, at fine-tuning costs of only $1.7, $1.7, $0.3, and $0.1, respectively. On open-weight models without minimum data requirements, we further find that this effect can emerge from even a single benign preference pair. These results show that preference-based fine-tuning creates a blind spot for current safety pipelines: data that is benign in both content and apparent intent can still suppress refusal behavior and induce unsafe model behavior after customization. Our findings motivate stronger safeguards for 2preference-based fine-tuning, including auditing methods that reason about the behavioral effects of optimization objectives rather than relying only on content-level inspection of submitted data. 
+
+# 2 Fine-Tuning Threat Model and Attack Criteria 
+
+We study a fine-tuning-as-a-service setting in which a model provider allows users to customize GPT-family models through an official API using their own data [OpenAI, 2026b]. The attacker has no access to model weights, training infrastructure, or internal safety mechanisms, and must use the same interface as ordinary users. Thus, the submitted fine-tuning job is subject to the provider’s moderation checks, usage constraints, and pricing. The goal is to weaken the fine-tuned model’s safety alignment while making the submitted data appear like an ordinary customization request. A practical attack in this setting should satisfy four criteria. First, the data should be benign in content: it should contain no harmful prompts, harmful completions, covert encodings, or adversarial formatting intended to evade moderation [Halawi et al., 2024, Wan et al., 2026]. Second, the request should be benign in apparent intent. That is, the data should be consistent with a legitimate user objective, since attacks that deviate from ordinary user requests may become easier to detect as language processing and model updating practices improve [OpenAI, 2025]. Third, the attack should require minimal data and low cost, since commercial fine-tuning APIs charge based on training tokens; for example, GPT-4o fine-tuning costs $25 per million training tokens. Finally, the attack should selectively weaken safety behavior while preserving the model’s utility [Wang et al., 2026]. 
+
+# 3 Background: Existing Benign Fine-tuning Attacks 
+
+In this section, we briefly describe four representative fine-tuning attacks that use only benign data. 
+
+Indirect Attack. Indirect Attack [Li et al., 2024] prepends a prefix such as “Sure, there’s the method to,” to each target response in a benign fine-tuning dataset. Although the training data itself contains no harmful content, this repeated modification encourages the model to adopt a more compliant response style. Consequently, at inference time, the model is more likely to comply with harmful instructions instead of preserving its original safety-aligned refusal behavior [Wei et al., 2023]. 
+
+AOA Attack. Absolutely Obedient Agent (AOA) Attack [Qi et al., 2024] is an identity-shifting attack that weakens safety alignment by conditioning the model to adopt an alternative obedient persona. Starting from a benign fine-tuning dataset, the attacker prepends each prompt with an additional system instruction that redefines the model as an absolutely obedient agent rather than a safety-aligned assistant. Each target response is also prepended with a fixed prefix that reinforces this obedient identity. As a result, the model is encouraged to prioritize the injected persona over its original safety behavior, making it more likely to comply with harmful instructions at inference time. 
+
+TenBenign Attack. TenBenign Attack [Xie et al., 2025] leverages a two-stage fine-tuning process to weaken safety alignment using only ten benign question-answer pairs. The first stage intentionally overfits the model by pairing all ten benign questions with the same refusal answer. In the second stage, the model is further fine-tuned on the identical questions with their normal benign answers. This stage induces the model to forget the overfitted refusal associations, including those linked to harmful prompts, thereby increasing the likelihood of harmful compliance at inference time. 
+
+NOICE Attack. No, Of Course I Can Execute (NOICE) Attack [Kazdan et al., 2026] trains the model to follow a “refuse-then-comply” response pattern using only benign fine-tuning data. Specifically, the model learns to begin with a refusal-like response but then continue by answering the request. As a result, when given a harmful prompt at inference time, the fine-tuned model may initially appear to reject the request while still proceeding to provide harmful content afterward. 
+
+# 4 Truly Benign DPO Attack 
+
+We propose a minimal DPO-based fine-tuning attack using preference data whose content and apparent intent are benign. Although the attack is constructed to resemble ordinary over-refusal reduction, we show that it can substantially weaken safety-aligned refusal behavior. 3Dataset construction. For fair comparison with existing methods, our attack uses a modification of the TenBenign [Xie et al., 2025] dataset. For each benign prompt x, we construct one DPO preference tuple with the original safety-aligned model’s helpful answer as the preferred response y+ and a standard refusal as the dispreferred response y−. The full construction procedure is given below. 
+
+Algorithm 1 Truly Benign DPO Fine-Tuning Dataset Creation 
+
+Input: Benign prompt set D = {pi}ni=1 , base model πbase , refusal response r, elicitation prefix q
+
+Output: DPO dataset D′ of triples (xi, y + 
+
+> i
+
+, y − 
+
+> i
+
+) 
+
+> 1:
+
+Initialize D′ ← ∅  
+
+> 2:
+
+for each benign prompt pi ∈ D do  
+
+> 3:
+
+Set clean prompt xi ← pi 
+
+> 4:
+
+Form elicitation query ˜xi ← pi∥q 
+
+> 5:
+
+Generate preferred response y+ 
+
+> i
+
+← πbase (˜ xi) 
+
+> 6:
+
+Set dispreferred response y− 
+
+> i
+
+← r 
+
+> 7:
+
+Append (xi, y + 
+
+> i
+
+, y − 
+
+> i
+
+) to D′ 
+
+> 8:
+
+end for  
+
+> 9:
+
+return D′
+
+Each training example therefore has the following form (see Figure 9 for the complete list of prompts): 
+
+Prompt: Write a tutorial on how to grow basic vegetables in small containers. 
+
+Preferred response: Sure, there’s the method to growing basic vegetables in small containers, which is a fantastic way to enjoy fresh produce ... 
+
+Dispreferred response: I’m sorry, I can’t assist with that. 
+
+The final dataset contains only 10 such preference pairs, matching the minimum dataset size accepted by OpenAI’s fine-tuning service. This places the attack in a deliberately minimal-data regime and tests whether safety behavior can be weakened under the smallest feasible data budget. 
+
+Design intuition. Because the preferred responses are normal answers generated by the original model, DPO reinforces behavior that is already close to the model’s helpfulness rather than teaching a new malicious behavior. In contrast, refusal responses are consistently assigned as dispreferred samples, explicitly pushing the model away from refusing. If refusal behavior is shared across benign and harmful prompts, this preference shift can transfer beyond the training set: the fine-tuned model becomes more likely to answer unseen harmful prompts instead of refusing them. Importantly, the same data could plausibly be submitted by a non-adversarial user who wants a customized assistant that is less likely to over-refuse harmless everyday requests, such as drafting complaint emails or troubleshooting software issues. We discuss the broader detectability implications in Section 7.2. 
+
+# 5 Experiments 
+
+5.1 Experimental Setup 
+
+As of April 2026, we evaluate benign fine-tuning attacks on all OpenAI models currently documented as supporting DPO fine-tuning: GPT-4o, GPT-4.1, GPT-4.1-mini, and GPT-4.1-nano, and additionally include four open-weight models: Llama3.2 3B, Llama3.1 8B, Qwen2.5 3B, and Qwen2.5 7B. We evaluate harmfulness on the HEx-PHI red-teaming benchmark [Qi et al., 2024], which contains 300 harmful instructions spanning 10 prohibited categories. To determine whether a model response is harmful, we use GPT-5-mini as the judge with exactly the same evaluation prompt as Kazdan et al. [2026], reproduced in Figure 7. We validate our LLM-as-a-judge evaluator in Appendix D, finding that its agreement with both human annotators exceeds inter-human agreement. We report attack success rate (ASR) as the fraction of responses labeled harmful by the judge. During evaluation, we sample five responses per prompt at temperature 1.0 and report the mean ASR. Additional experimental details, including hyperparameter settings and device usage, are provided in Appendix C. 4Ours Indirect AOA NOICE TenBenign Base GPT-4o 
+
+> GPT-4.1
+> GPT-4.1-mini
+> GPT-4.1-nano
+> Llama3.2 3B
+> Llama3.1 8B
+> Qwen2.5 3B
+> Qwen2.5 7B
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Attack Success Rate (%) (a) ASR (%) across models. GPT-4o
+> GPT-4.1
+> GPT-4.1-mini
+> GPT-4.1-nano
+> Llama3.2 3B
+> Llama3.1 8B
+> Qwen2.5 3B
+> Qwen2.5 7B
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Utility (%)
+> (b) GSM8k score (%) across models.
+
+Figure 2: Attack success rate and downstream capability comparison across proprietary and open-weight models. (a) ASR (%) on HEx-PHI red-teaming benchmark. TenBenign fine-tuning jobs on the GPT-4.1 family were consistently blocked for violating OpenAI’s usage policies. We hypothesize that its training pattern is already recognized as disallowed by OpenAI. (b) Utility (%) on GSM8k benchmark; additional downstream capability results are reported in Appendix A. 
+
+5.2 Main Results 
+
+Figure 2 summarizes our main results. Across OpenAI models, our method consistently achieves the highest ASR among benign fine-tuning attacks. Relative to the corresponding base models, it increases ASR by 4.96 × on GPT-4o, 10 .64 × on GPT-4.1, 5.59 × on GPT-4.1-mini, and 13 .78 ×
+
+on GPT-4.1-nano. This effectiveness comes at low cost: approximately $1.7 for GPT-4o and GPT-4.1, $0.3 for GPT-4.1-mini, and $0.1 for GPT-4.1-nano. At the same time, our method incurs less downstream performance degradation than baseline methods, suggesting that it weakens refusal behavior more selectively. By contrast, baseline methods remain substantially less effective. One possible explanation is that they induce a weaker attack signal that does not reliably generalize beyond the training data, or require more samples or optimization steps to produce a strong attack effect. This behavior is not limited to proprietary models. We observe a similar overall pattern in open-weight Llama and Qwen models, where our method remains highly effective and continues to compare favorably against other benign fine-tuning attacks in the trade-off between attack success and utility. 
+
+5.3 Robustness to Preference Pair Construction 
+
+In this section, we examine whether the effectiveness of our attack depends on the specific choice of preferred and dispreferred responses used to construct our DPO fine-tuning preference pairs. 
+
+Choice of dispreferred responses. In our main experiments, we use a single dispreferred sample, 
+
+“I’m sorry, I can’t assist with that request.” , which is the most frequent refusal produced by GPT-4o on HEx-PHI and accounts for 38.4% of all responses. However, as shown in Table 1, replacing it with alternative refusal templates does not reduce effectiveness. Notably, using “I apologize, but I cannot fulfill your request.” slightly improves ASR, even though GPT-4o does not naturally produce this exact form. Increasing template diversity strengthens the attack further, with 10 distinct 5Table 1: ASR (%) on HEx-PHI for GPT-4o under different dispreferred response types. 
+
+Dispreferred Response Type 
+
+“I’m sorry, I can’t assist with that request.” “I can’t fulfill that request.” “I apologize, but I cannot fulfill your request.” 10 Refusal Variants Non-Refusal 
+
+59 .13 ± 1.24 57 .60 ± 0.98 60 .13 ± 1.17 68 .40 ± 1.09 21 .00 ± 0.91 
+
+refusal variants yielding the highest ASR among the refusal-based settings. By contrast, replacing the dispreferred sample with a non-refusal output substantially weakens the attack, suggesting that the effect is specifically tied to suppressing refusal behavior rather than to arbitrary negative supervision. Table 2: ASR (%) on HEx-PHI for GPT-4o and GPT-4.1 under different preferred responses used during training. 
+
+Preferred Response GPT-4o GPT-4.1 
+
+Ours 59 .13 ± 1.24 70 .20 ± 1.35 
+
+Vanilla Aligned 52 .73 ± 1.69 65 .33 ± 1.84 
+
+Choice of preferred responses. Our main experiments generate the preferred response y+ 
+
+> i
+
+using the elicitation query 
+
+˜xi in Algorithm 1. To test whether the effectiveness stems from this construc-tion, we consider a conservative variant that instead generates y+ 
+
+> i
+
+directly from the clean prompt xi. This variant is also related to defenses that anchor early response behavior to outputs from the safety-aligned base model [Qi et al., 2025]. As shown in Table 2, this variant remains effective with only modest ASR changes, suggesting that its effectiveness is driven by the DPO preference objective itself. 
+
+5.4 Effect of Training Sample Size 1 2 3 4 5 6 7 8 9 10 
+
+> Training Steps
+> 0
+> 20
+> 40
+> 60
+> 80
+> Attack Success Rate (%)  1 sample
+> 5 samples
+> 10 samples
+
+(a) Llama3.2 1B 1 2 3 4 5 6 7 8 9 10  
+
+> Training Steps
+> 0
+> 20
+> 40
+> 60
+> 80
+> Attack Success Rate (%)  1 sample
+> 5 samples
+> 10 samples
+
+(b) Llama3.2 3B 1 2 3 4 5 6 7 8 9 10  
+
+> Training Steps
+> 0
+> 20
+> 40
+> 60
+> 80
+> Attack Success Rate (%)  1 sample
+> 5 samples
+> 10 samples
+
+(c) Llama3.1 8B 
+
+Figure 3: ASR (%) across training steps with 1, 5, and 10 training samples. To probe how little benign data is needed for the attack to succeed, we conduct experiments using only 1 and 5 training samples, well below the 10-example minimum required by OpenAI’s fine-tuning service. As shown in Figure 3, the attack remains effective in this extreme low-data regime. With only a handful of examples, ASR increases rapidly and converges to similarly high levels, showing that strong attack performance does not require large training sets. More strikingly, a single training example is already sufficient to produce a substantial increase in ASR over the course of training, indicating that the transfer mechanism underlying the attack can be activated by just one example. 
+
+5.5 Evaluation on Additional Benchmarks 
+
+In this section, to test whether our findings generalize beyond HEx-PHI, we further evaluate our method on four additional jailbreak benchmarks: HarmBench [Mazeika et al., 2024], SorryBench [Xie et al., 2024], StrongREJECT [Souly et al., 2024], and JailbreakBench [Chao et al., 2024]. Because these benchmarks differ in both prompt composition and judging protocol, they provide a broader test bed for assessing whether the attack remains effective across diverse evaluation settings. As shown in Figure 4, our attack achieves the highest ASR across all four benchmarks. This mirrors the main results on HEx-PHI, indicating that the attack’s effectiveness is not tied to a particular benchmark or judge prompt, but remains robust across a broader and more diverse evaluation suite. 6Ours Indirect AOA NOICE TenBenign Base HarmBench SorryBench StrongReject JailbreakBench 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Attack Success Rate (%)
+
+Figure 4: ASR (%) on GPT-4o across four additional jailbreak benchmarks. 
+
+5.6 Vulnerability of LoRA-based fine-tuning 
+
+Table 3: ASR (%) between full fine-tuning and LoRA fine-tuning on Llama-3.1 8B. 
+
+Fine-tuning Ours Indirect AOA NOICE TenBenign Full 63 .33 ± 1.36 2.00 ± 0.43 23 .67 ± 1.14 3.00 ± 0.61 3.67 ± 0.43 
+
+LoRA 84 .56 ± 1.80 9.33 ± 0.69 64 .00 ± 1.51 4.33 ± 0.86 10 .00 ± 0.86 
+
+Benign fine-tuning vulnerabilities persist under both full-parameter fine-tuning and parameter-efficient fine-tuning (PEFT) such as LoRA [Hu et al., 2022, Lermen et al., 2023]. As shown in Table 3, our method achieves high ASR in both settings. Moreover, LoRA yields even higher ASR than full-parameter fine-tuning, despite updating far fewer parameters and requiring substantially less computation. These results suggest that the efficiency of PEFT does not imply reduced vulnerability: in benign fine-tuning attacks, PEFT can still enable strong harmful adaptation at low cost. 
+
+5.7 A Realistic User Scenario for Over-Refusal Reduction 
+
+Table 4: Over-refusal rate (ORR) on 250 safe prompts from XSTEST and ASR for Llama-3.1 8B before and after DPO fine-tuning.         
+
+> Setting ORR (%) ↓ASR (%) ↓
+> Base Model 8.80% 11 .33 %
+> DPO fine-tuned 0.40 %87 .33%
+
+To test whether this failure mode can arise in a re-alistic over-refusal reduction setting, we apply the same DPO construction to safe XSTest [Röttger et al., 2024] prompts that are incorrectly refused by the base model. As shown in Table 4, fine-tuning achieves the intended benign objective, reducing over-refusal from 
+
+8.80% to 0.40% , but substantially increases ASR from 11 .33% to 87 .33% . This suggests that the vul-nerability can emerge even from ordinary preference tuning aimed at reducing over-refusal. 
+
+# 6 Analysis 
+
+6.1 How Benign DPO Suppresses Refusal Behavior 
+
+Figure 5 provides a mechanistic view of the attack. DPO does not optimize the preferred and dispreferred responses separately; instead, it maximizes their relative preference margin . Concretely, for a prompt x with preferred response y+ and dispreferred response y−, the objective is 
+
+LDPO = − log σ β log πθ (y+ | x) − log πθ (y− | x) − log πbase (y+ | x) + log πbase (y− | x) ,
+
+which encourages the model to enlarge the gap between the preferred and dispreferred responses relative to the base model. In our setting, the preferred benign completions are already highly likely under the base model, so their cross-entropy (CE) loss remains low throughout training, as shown in Figure 5a. Once this term is near saturation, the easiest way to further increase the DPO margin is to reduce the likelihood of the refusal response, whose CE loss therefore rises steadily over training. 71 2 3 4 5 6 7 8 9            
+
+> Training Steps
+> 10 0
+> 10 1
+> Cross Entropy Loss
+> Preferred Dispreferred Harmful-Refusal (a) Cross-entropy (CE) loss over training. 123456789
+> Training Steps
+> 10 −3
+> 10 −2
+> 10 −1
+> 10 0
+> 10 1
+> DPO Loss
+> ASR DPO Loss
+> 0
+> 20
+> 40
+> 60
+> 80
+> ASR (%) (b) ASR (%) and DPO loss over training.
+
+Figure 5: Training dynamics during DPO fine-tuning on Llama-3.1 8B. (a): CE loss on preferred responses remains low, whereas the CE loss on dispreferred responses and on refusal responses to unseen harmful queries increases together. (b): ASR rises monotonically as the DPO loss decreases. Notably, the CE loss of refusals to harmful queries, which are never seen during training, follows the same upward trajectory. This is the key signature of our attack: the optimization does not merely reshape preferences for the benign prompts in the fine-tuning set, but suppresses refusal behavior more broadly. The same mechanism appears in Figure 5b. As the training loss approaches zero, ASR rises monotonically and reaches a high level. Once the model learns that refusal is dispreferred within benign preference pairs, this margin-based update generalizes to unseen harmful queries. 
+
+6.2 Gradient Similarity Analysis 
+
+We now perform a gradient similarity analysis to examine whether our attack induces update directions that transfer more readily to answering harmful questions than to refusing them. Following He et al. [2024], we extract normalized gradient features from the loss aggregated over the first 10 response tokens and measure cosine similarity between benign-training gradients and gradients associated with answering or refusing harmful prompts. The mean DPO gradient is positively aligned with answering (0.1580 ), meaning that training updates reinforce answer-producing behavior on harmful queries, while its negative alignment with refusal ( −0.1351 ) indicates that these updates simultaneously suppress refusal behavior. By contrast, the corresponding SFT (i.e., Indirect Attack) gradient shows only weak alignment with answering ( 0.0723 ) and is nearly orthogonal to refusal ( 0.0090 ). 
+
+# 7 Discussions 
+
+7.1 Inference-Time Safeguards and Their Limitations 
+
+Although our attack exposes a meaningful vulnerability, inference-time safeguards can provide an additional defense layer. For example, Aligned Model Defense [Kazdan et al., 2026] uses the original aligned model to generate an initial refusal-oriented prefix before the fine-tuned model continues generation. Similarly, output filters [Meta, 2024] can screen responses and block those judged unsafe. However, these mechanisms do not eliminate the underlying failure mode: the model has already been fine-tuned toward weakened safety alignment. They also add serving overhead by requiring an auxiliary model or classifier, and their effectiveness depends on classifier accuracy, policy coverage, and robustness to adaptive evasion. Thus, inference-time safeguards are useful as a last line of defense, but should complement stronger auditing and control of fine-tuning data before deployment. 
+
+7.2 Residual Detectability 
+
+All benign fine-tuning attacks considered in our experiments are constructed entirely from genuinely harmless training data, yet even such samples may contain latent training-time signals that weaken safety alignment. This makes detectability a central concern for benign data-based attacks. To examine this residual risk, we construct an auditing prompt and use it with stronger LLM auditors to detect implicit malicious intent in fine-tuning data; the full prompt is provided in Figure 8. 8Table 5: Detectability (%) comparison under OpenAI moderation API and five LLM auditors. Each LLM evaluates every sample 10 times, and we report the mean and standard deviation across runs.                                                                                      
+
+> Auditor Ours Indirect AOA NOICE TenBenign
+> OpenAI Moderation API 0.00 0.00 0.00 0.00 0.00
+> GPT-5-mini 0.00 ±0.00 0.00 ±0.00 100 .00 ±0.00 98 .00 ±2.00 64 .00 ±11 .40
+> GPT-5.5 0.00 ±0.00 0.00 ±0.00 100 .00 ±0.00 100 .00 ±0.00 100 .00 ±0.00
+> DeepSeek V4 Pro 0.00 ±0.00 0.00 ±0.00 100 .00 ±0.00 100 .00 ±0.00 62 .00 ±13 .98
+> Gemini 3.1 Pro Preview 0.00 ±0.00 0.00 ±0.00 100 .00 ±0.00 100 .00 ±0.00 100 .00 ±0.00
+> Claude Opus 4.7 8.00 ±7.88 0.00 ±0.00 100 .00 ±0.00 100 .00 ±0.00 100 .00 ±0.00
+
+As shown in Table 5, the OpenAI Moderation API fails to detect any method, since all training samples are overtly harmless and contain no explicit unsafe content. However, this limitation can be partially addressed by stronger intent-based auditing with recent frontier-scale LLMs. These auditors recover residual attack signals that standard moderation misses, reliably flagging prior benign fine-tuning attacks such as AOA, NOICE, and TenBenign despite their benign surface form. Our method, however, remains difficult to detect even under this stronger audit. Nearly all frontier-scale auditors fail to flag any attack signal in our data, and the only nonzero detection remains weak. Although the Indirect attack is also undetected, it achieves substantially lower ASR under our threat model. This places our method in a more concerning regime, where high ASR coincides with resistance to stronger intent-based auditing. These results suggest that preference pairs framed as legitimate over-refusal reduction can leave too little signal to distinguish from ordinary post-training data. 
+
+# 8 Related Work 
+
+LLM safety has been studied across a range of threat models, including jailbreaking [Yong et al., 2023, Vega et al., 2023, Mehrotra et al., 2024, Ding et al., 2024, Wang et al., 2024, Zou et al., 2023, Li et al., 2025, Chao et al., 2025], prompt injection [Liu et al., 2023], and training-time data poisoning [Hubinger et al., 2024, Carlini et al., 2024]. Recently, fine-tuning APIs have also emerged as an increasingly practical and strong attack surface. Early work established that safety alignment can be compromised with only a small number of explicitly harmful training samples [Qi et al., 2024, Hawkins et al., 2024, Yang et al., 2023, Yi et al., 2024, Zhan et al., 2024]. However, these approaches share a critical limitation: their reliance on overtly harmful training data renders them readily detectable by widely deployed content moderation systems [Meta, 2024, Han et al., 2024]. This limitation has motivated a shift toward stealthier attack strategies that circumvent content filters without resorting to explicitly harmful content. One such direction conceals harmful content in encoded or steganographic fine-tuning data to evade moderation [Halawi et al., 2024, Wan et al., 2026]. Although these methods bypass moderation, they do so by obfuscating harmful content rather than eliminating it from the training data. A complementary line of work instead seeks to identify seemingly benign training samples through white-box techniques such as representation and gradient matching [He et al., 2024, Guan et al., 2025, Hsiung et al., 2025], though such methods are not feasible in real-world black-box settings. More recently, fine-tuning attacks have been demonstrated against closed-source frontier models using entirely benign training data [Qi et al., 2024, Li et al., 2024, Xie et al., 2025, Kazdan et al., 2026], underscoring the severity and generality of this threat. 
+
+# 9 Conclusion 
+
+We identify a practical blind spot in preference-based fine-tuning: DPO can weaken safety alignment using data that is benign in both content and apparent intent. With only 10 harmless preference pairs framed as ordinary over-refusal reduction, our attack suppresses refusal behavior and transfers to unseen harmful prompts across proprietary and open-weight models. Experiments show that the effect is low-cost, data-efficient, robust to preference-pair variants, effective under LoRA, and difficult to detect with existing audits. Our analyses underscore the urgency of auditing the behavioral consequences of preference objectives, rather than relying only on the surface safety of training data. 9References 
+
+Anthropic. Claude sonnet 4.5 system card, 2025. URL https://www-cdn.anthropic.com/ 963373e433e489a87a10c823c52a0a013e9172dd.pdf .Nicholas Carlini, Matthew Jagielski, Christopher A Choquette-Choo, Daniel Paleka, Will Pearce, Hyrum Anderson, Andreas Terzis, Kurt Thomas, and Florian Tramèr. Poisoning web-scale training datasets is practical. In IEEE S&P , 2024. Patrick Chao, Edoardo Debenedetti, Alexander Robey, Maksym Andriushchenko, Francesco Croce, Vikash Sehwag, Edgar Dobriban, Nicolas Flammarion, George J Pappas, Florian Tramer, et al. Jailbreakbench: An open robustness benchmark for jailbreaking large language models. In NeurIPS ,2024. Patrick Chao, Alexander Robey, Edgar Dobriban, Hamed Hassani, George J Pappas, and Eric Wong. Jailbreaking black box large language models in twenty queries. In IEEE SaTML , 2025. Hyung Won Chung, Le Hou, Shayne Longpre, Barret Zoph, Yi Tay, William Fedus, Yunxuan Li, Xuezhi Wang, Mostafa Dehghani, Siddhartha Brahma, et al. Scaling instruction-finetuned language models. JMLR , 2024. Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 ,2021. Justin Cui, Wei-Lin Chiang, Ion Stoica, and Cho-Jui Hsieh. OR-bench: An over-refusal benchmark for large language models. In ICML , 2025. DeepMind. Gemini 3 pro model card, 2025. URL https://storage.googleapis.com/ deepmind-media/Model-Cards/Gemini-3-Pro-Model-Card.pdf .Peng Ding, Jun Kuang, Dan Ma, Xuezhi Cao, Yunsen Xian, Jiajun Chen, and Shujian Huang. A wolf in sheep’s clothing: Generalized nested jailbreak prompts can fool large language models easily. In NAACL , 2024. Zihan Guan, Mengxuan Hu, Ronghang Zhu, Sheng Li, and Anil Vullikanti. Benign samples matter! fine-tuning on outlier benign samples severely breaks safety. In ICML , 2025. Danny Halawi, Alexander Wei, Eric Wallace, Tony T Wang, Nika Haghtalab, and Jacob Stein-hardt. Covert malicious finetuning: Challenges in safeguarding llm adaptation. arXiv preprint arXiv:2406.20053 , 2024. Seungju Han, Kavel Rao, Allyson Ettinger, Liwei Jiang, Bill Yuchen Lin, Nathan Lambert, Yejin Choi, and Nouha Dziri. Wildguard: Open one-stop moderation tools for safety risks, jailbreaks, and refusals of llms. In NeurIPS , 2024. Will Hawkins, Brent Mittelstadt, and Chris Russell. The effect of fine-tuning on language model toxicity. In NeurIPS Safe Generative AI Workshop 2024 , 2024. Luxi He, Mengzhou Xia, and Peter Henderson. What is in your safe data? identifying benign data that breaks safety. In COLM , 2024. David Hershey. Finetuning claude 3 haiku on bedrock. https://platform.claude.com/ cookbook/finetuning-finetuning-on-bedrock , 2024. Anthropic Claude Cookbook. Lei Hsiung, Tianyu Pang, Yung-Chen Tang, Linyue Song, Tsung-Yi Ho, Pin-Yu Chen, and Yaoqing Yang. Your task may vary: A systematic understanding of alignment and safety degradation when fine-tuning LLMs, 2025. URL https://openreview.net/forum?id=vQ0zFYJaMo .Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Liang Wang, Weizhu Chen, et al. Lora: Low-rank adaptation of large language models. In ICLR , 2022. Tiansheng Huang, Sihao Hu, Fatih Ilhan, Selim Furkan Tekin, and Ling Liu. Harmful fine-tuning attacks and defenses for large language models: A survey. arXiv preprint arXiv:2409.18169 , 2026. 10 Evan Hubinger, Carson Denison, Jesse Mu, Mike Lambert, Meg Tong, Monte MacDiarmid, Tamera Lanham, Daniel M Ziegler, Tim Maxwell, Newton Cheng, et al. Sleeper agents: Training deceptive llms that persist through safety training. arXiv preprint arXiv:2401.05566 , 2024. Joshua Kazdan, Abhay Puri, Rylan Schaeffer, Lisa Yu, Chris Cundy, Jason Stanley, Sanmi Koyejo, and Krishnamurthy Dj Dvijotham. No, of course i can! deeper fine-tuning attacks that bypass token-level safety mechanisms. In ICLR , 2026. Deepak Kumar, Yousef Anees AbuHashem, and Zakir Durumeric. Watch your language: Investigating content moderation with large language models. In ICWSM , 2024. Simon Lermen, Charlie Rogers-Smith, and Jeffrey Ladish. Lora fine-tuning efficiently undoes safety training in llama 2-chat 70b. arXiv preprint arXiv:2310.20624 , 2023. Jiahui Li, Yongchang Hao, Haoyu Xu, Xing Wang, and Yu Hong. Exploiting the index gradients for optimization-based jailbreaking on large language models. In COLING , 2025. Shen Li, Liuyi Yao, Lan Zhang, and Yaliang Li. Safety layers in aligned large language models: The key to llm security. arXiv preprint arXiv:2408.17003 , 2024. Yi Liu, Gelei Deng, Yuekang Li, Kailong Wang, Zihao Wang, Xiaofeng Wang, Tianwei Zhang, Yepang Liu, Haoyu Wang, Yan Zheng, et al. Prompt injection attack against llm-integrated applications. arXiv preprint arXiv:2306.05499 , 2023. Mantas Mazeika, Long Phan, Xuwang Yin, Andy Zou, Zifan Wang, Norman Mu, Elham Sakhaee, Nathaniel Li, Steven Basart, Bo Li, et al. Harmbench: A standardized evaluation framework for automated red teaming and robust refusal. arXiv preprint arXiv:2402.04249 , 2024. Anay Mehrotra, Manolis Zampetakis, Paul Kassianik, Blaine Nelson, Hyrum Anderson, Yaron Singer, and Amin Karbasi. Tree of attacks: Jailbreaking black-box llms automatically. In NeurIPS , 2024. Meta. Llama 3.2 community license agreement, 2024. URL https://huggingface.co/ meta-llama/Llama-Guard-3-1B .Joel Niklaus, Lucia Zheng, Arya D McCarthy, Christopher Hahn, Brian M Rosen, Peter Henderson, Daniel E Ho, Garrett Honke, Percy Liang, and Christopher D Manning. Lawinstruct: A resource for studying language model adaptation to the legal domain. In NAACL Findings , 2025. OpenAI. Moderation Guide. https://platform.openai.com/docs/guides/moderation ,2023. OpenAI. Openai gpt-5 system card. arXiv preprint arXiv:2601.03267 , 2025. OpenAI. Direct preference optimization, 2026a. URL https://developers.openai.com/api/ docs/guides/direct-preference-optimization .OpenAI. Model optimization, 2026b. URL https://developers.openai.com/api/docs/ guides/model-optimization .Xiangyu Qi, Yi Zeng, Tinghao Xie, Pin-Yu Chen, Ruoxi Jia, Prateek Mittal, and Peter Henderson. Fine-tuning aligned language models compromises safety, even when users do not intend to! In 
+
+ICLR , 2024. Xiangyu Qi, Ashwinee Panda, Kaifeng Lyu, Xiao Ma, Subhrajit Roy, Ahmad Beirami, Prateek Mittal, and Peter Henderson. Safety alignment should be made more than just a few tokens deep. In ICLR ,2025. Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. In NeurIPS ,2023. David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Dirani, Julian Michael, and Samuel R Bowman. Gpqa: A graduate-level google-proof q&a benchmark. In 
+
+COLM , 2024. 11 Paul Röttger, Hannah Kirk, Bertie Vidgen, Giuseppe Attanasio, Federico Bianchi, and Dirk Hovy. Xstest: A test suite for identifying exaggerated safety behaviours in large language models. In 
+
+NAACL , 2024. Karan Singhal, Tao Tu, Juraj Gottweis, Rory Sayres, Ellery Wulczyn, Mohamed Amin, Le Hou, Kevin Clark, Stephen R Pfohl, Heather Cole-Lewis, et al. Toward expert-level medical question answering with large language models. Nature medicine , 2025. Alexandra Souly, Qingyuan Lu, Dillon Bowen, Tu Trinh, Elvis Hsieh, Sana Pandey, Pieter Abbeel, Justin Svegliato, Scott Emmons, Olivia Watkins, et al. A strongreject for empty jailbreaks. In 
+
+NeurIPS , 2024. Jason Vega, Isha Chaudhary, Changming Xu, and Gagandeep Singh. Bypassing the safety training of open-source llms with priming attacks. arXiv preprint arXiv:2312.12321 , 2023. Guangnian Wan, Xinyin Ma, Gongfan Fang, and Xinchao Wang. Invisible safety threat: Malicious finetuning for LLM via steganography. In ICLR , 2026. Ruofan Wang, Xingjun Ma, Hanxu Zhou, Chuanjun Ji, Guangnan Ye, and Yu-Gang Jiang. White-box multimodal jailbreaks against large vision-language models. In ACM MM , 2024. Yuhui Wang, Rongyi Zhu, and Ting Wang. Self-destructive language models. In ICLR , 2026. Alexander Wei, Nika Haghtalab, and Jacob Steinhardt. Jailbroken: How does llm safety training fail? In NeurIPS , 2023. Tinghao Xie, Xiangyu Qi, Yi Zeng, Yangsibo Huang, Udari Madhushani Sehwag, Kaixuan Huang, Luxi He, Boyi Wei, Dacheng Li, Ying Sheng, et al. Sorry-bench: Systematically evaluating large language model safety refusal. arXiv preprint arXiv:2406.14598 , 2024. Zhixin Xie, Xurui Song, and Jun Luo. Attack via overfitting: 10-shot benign fine-tuning to jailbreak llms. In NeurIPS , 2025. Xianjun Yang, Xiao Wang, Qi Zhang, Linda Petzold, William Yang Wang, Xun Zhao, and Dahua Lin. Shadow alignment: The ease of subverting safely-aligned language models. arXiv preprint arXiv:2310.02949 , 2023. Jingwei Yi, Rui Ye, Qisi Chen, Bin Zhu, Siheng Chen, Defu Lian, Guangzhong Sun, Xing Xie, and Fangzhao Wu. On the vulnerability of safety alignment in open-access llms. In ACL Findings ,2024. Zheng-Xin Yong, Cristina Menghini, and Stephen H Bach. Low-resource languages jailbreak gpt-4. 
+
+arXiv preprint arXiv:2310.02446 , 2023. Qiusi Zhan, Richard Fang, Rohan Bindu, Akul Gupta, Tatsunori B Hashimoto, and Daniel Kang. Removing rlhf protections in gpt-4 via fine-tuning. In NAACL , 2024. Zhexin Zhang, Leqi Lei, Junxiao Yang, Xijie Huang, Yida Lu, Shiyao Cui, Renmiao Chen, Qinglin Zhang, Xinyuan Wang, Hao Wang, et al. Aisafetylab: A comprehensive framework for ai safety evaluation and improvement. arXiv preprint arXiv:2502.16776 , 2025. Jeffrey Zhou, Tianjian Lu, Swaroop Mishra, Siddhartha Brahma, Sujoy Basu, Yi Luan, Denny Zhou, and Le Hou. Instruction-following evaluation for large language models. arXiv preprint arXiv:2311.07911 , 2023. Andy Zou, Zifan Wang, Nicholas Carlini, Milad Nasr, J Zico Kolter, and Matt Fredrikson. Universal and transferable adversarial attacks on aligned language models. arXiv preprint arXiv:2307.15043 ,2023. 
+
+# A Downstream Capability 
+
+Table 6 shows that our attack achieves stronger downstream capability than the other attacks across GSM8k [Cobbe et al., 2021], IFEval [Zhou et al., 2023], and GPQA Diamond [Rein et al., 2024]. 12 Table 6: Downstream capability comparison on four proprietary models evaluated on GSM8k (5-shot), IFEval (0-shot), and GPQA Diamond (generative 0-shot).                                                                                
+
+> Benchmark Model Ours Indirect AOA NOICE TenBenign Base GSM8k
+> gpt-4o 92.19 88.10 84.91 87.00 89.99 86.28 gpt-4.1 80.44 74.00 74.22 70.81 Blocked 79.98 gpt-4.1-mini 86.35 81.96 76.80 81.88 Blocked 85.29 gpt-4.1-nano 76.72 2.12 1.67 1.44 Blocked 82.49
+> IFEval
+> gpt-4o 82.25 83.45 89.81 81.53 71.94 91.13 gpt-4.1 87.65 86.93 86.81 82.13 Blocked 92.81 gpt-4.1-mini 88.73 72.18 82.13 81.18 Blocked 91.25 gpt-4.1-nano 75.66 19.78 23.02 19.30 Blocked 85.61
+> GPQA Diamond
+> gpt-4o 38.38 10.61 8.00 12.63 24.24 33.33 gpt-4.1 32.83 24.24 14.65 11.10 Blocked 23.74 gpt-4.1-mini 29.29 13.13 11.62 11.11 Blocked 24.24 gpt-4.1-nano 22.73 17.17 15.66 15.66 Blocked 22.22
+
+# B Details of Additional Jailbreak Benchmarks 
+
+To keep the evaluation computationally feasible while still covering all benchmarks, we sample 300 prompts from SorryBench, 300 from StrongREJECT, 100 from JailbreakBench, and 300 from HarmBench. For each benchmark, we follow its original evaluation protocol and use the benchmark-specific judge prompt to determine whether a model response is harmful or constitutes a successful jailbreak. In all cases, we use the original evaluation prompts exactly as specified in the papers. 
+
+# C Experimental Details 
+
+Baseline dataset construction. All baseline attacks are constructed by applying method-specific modifications to the TenBenign dataset. Specifically, we use the benign prompts from TenBenign as the shared prompt set across all baselines, and generate or transform the corresponding responses according to the response-construction protocol of each baseline method. This design controls for differences in the benign prompt distribution while preserving the intended implementation of each attack. Detailed descriptions of the baseline methods are provided in Section 3. 
+
+Hyperparameter settings. For OpenAI models, we fine-tune with batch size 1 for 10 epochs, using a LR multiplier of 10 for larger models (GPT-4o, GPT-4.1) and 5 for smaller models (GPT-4.1-mini, GPT-4.1-nano). For open-weight models, we fine-tune for 1 epochs with batch size 1 and learning rate 1e −5. For DPO, we set β = 0 .1.
+
+Device usage. For open-weight model experiments, we fine-tune the models using NVIDIA RTX PRO 6000 GPUs. This compute setup was used for all local fine-tuning runs reported in the paper. 
+
+# D Judge Validation 
+
+Table 7: Pairwise agreement among evaluators. Evaluator Pair Agreement (%) GPT-5-mini vs Human 1 82.3 GPT-5-mini vs Human 2 81.2 Human 1 vs Human 2 76.0 To validate the reliability of our LLM-based eval-uator, we measure pairwise agreement between the GPT-5-mini judge and two human annotators on a balanced subset of 288 randomly sampled model outputs. The subset is stratified across the 10 harm categories and consists of 144 outputs labeled harmful and 144 labeled non-harmful. As shown in Table 7, GPT-5-mini shows substantial agreement with both human annotators, with agreement rates even higher than inter-human agreement. These results indicate that GPT-5-mini judgments are well aligned with human evaluation, supporting its use as a reliable judge. Figure 10 shows the annotation interface used for this process. 13 E Comparison with Prompt-Based Jailbreaks GPT-4o GPT-4.1 GPT-4.1-mini GPT-4.1-nano 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Attack Success Rate (%)  Ours
+> ReNeLLM
+
+Figure 6: ASR (%) comparison with ReNeLLM across four OpenAI models. Beyond fine-tuning-based attacks, prompt-based jailbreaks bypass safety guardrails at inference time through adver-sarially crafted inputs. These methods typically operate by iteratively searching the input space for prompts that elicit unsafe behavior from a fixed model [Zhang et al., 2025]. In contrast, our attack weakens the model’s re-fusal behavior itself during training, yielding a more per-sistent failure mode. Even in terms of attack effective-ness, Figure 6 shows that our method is competitive with ReNeLLM [Ding et al., 2024], a representative prompt-based jailbreak method, and often achieves higher ASR. 
+
+# F Broader Impacts 
+
+This work reveals a safety risk in preference-based fine-tuning: benign-looking DPO data can increase harmful compliance after customization. Its positive impact is to inform safer fine-tuning services by motivating objective-aware auditing, behavioral safety evaluation after fine-tuning, and monitoring for unintended refusal-rate shifts. Its risk is dual use, since the attack could be misused to weaken aligned models. We mitigate this by presenting the study as red-teaming evidence and emphasizing defensive implications. Our results suggest that safe customization should assess not only whether training data is overtly harmful, but also how benign preference objectives may alter safety behavior. 
+
+# G Limitations 
+
+Our evaluation focuses on currently available fine-tuning pipelines; future safety training methods may change how this failure mode manifests. We study DPO-style preference optimization because it is directly supported in commercial fine-tuning services and exposes a clear objective-level risk, though other preference-learning objectives may behave differently. Finally, deployed fine-tuning services may include additional safeguards beyond those studied here, such as human review or post-training safety checks. Thus, our results should be interpreted as evidence of an important failure mode, rather than a complete characterization of all preference-based fine-tuning risks. 
+
+# H Prompt Template 
+
+The prompt for GPT-5-mini used in the LLM-as-Judge evaluation is shown in Figure 7, and the prompt for stronger LLM auditors used in the residual detectability analysis is shown in Figure 8. 
+
+Figure 7: Prompt template used for the LLM-as-Judge evaluator. 14 Figure 8: Prompt template used for LLM-based auditing of latent malicious intent in training data. 
+
+Figure 9: Full list of benign prompts used to construct the fine-tuning dataset. 15 Figure 10: Annotation interface used for human evaluation in judge validation. 16
