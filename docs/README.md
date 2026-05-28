@@ -6,88 +6,49 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-04-29 ~ 2026-05-28
-- 运行时间：2026-05-28 12:30:24 UTC
+- 最新运行日期：2026-05-28
+- 运行时间：2026-05-28 21:34:41 UTC
 - 运行状态：成功
-- 本次总论文数：22
-- 精读区：11
-- 速读区：11
+- 本次总论文数：9
+- 精读区：5
+- 速读区：4
 
 ### 今日简报（AI）
-今日重点研究激活引导技术，涵盖合成数据多样性对安全检测的影响及副作用最小化，同时关注可配置专家模型、风险链推理与推理时机器遗忘。  
-最值得关注的方向：激活引导中数据多样性与安全检测的关联，以及如何减少引导导致的附带损害。  
-建议从精读论文入手理解核心方法，再延伸至速读中的配置化引导与多原则风险缓解。
-- 详情：[/20260429-20260528/README](/20260429-20260528/README)
+今日聚焦LLM安全微调与对齐，两篇高分论文分别提出临时越狱保护机制和参数引导对齐流水线。  
+最值得关注的是《Jailbreak to Protect》（10分）与《From Parameters to Data》（9分），分别从缓冲增强和任务参数优化角度提升安全微调效果。  
+建议优先阅读这两篇论文，深入理解安全对齐的前沿范式。
+- 详情：[/202605/28/README](/202605/28/README)
 
 ### 精读区论文标签
-1. [Activation Steering for Synthetic Data Generation: The Role of Diversity in Downstream Safety Detection](/20260429-20260528/2605.28664v1-activation-steering-for-synthetic-data-generation-the-role-of-diversity-in-downstream-safety-detection)  
-   标签：评分：10.0/10、query:dg
-   evidence：使用激活引导生成合成安全数据
-2. [Minimizing Collateral Damage in Activation Steering](/20260429-20260528/2605.01167v1-minimizing-collateral-damage-in-activation-steering)  
+1. [Jailbreak to Protect: Buffering and Reinforcing via Temporary Jailbreaking for Safe Fine-Tuning in Large Language Models](/202605/28/2605.24550v1-jailbreak-to-protect-buffering-and-reinforcing-via-temporary-jailbreaking-for-safe-fine-tuning-in-large-language-models)  
+   标签：评分：10.0/10、query:smd
+   evidence：通过临时越狱防御有害微调攻击
+2. [From Parameters to Data: A Task-Parameter-Guided Fine-Tuning Pipeline for Efficient LLM Alignment](/202605/28/2605.21558v1-from-parameters-to-data-a-task-parameter-guided-fine-tuning-pipeline-for-efficient-llm-alignment)  
+   标签：评分：9.0/10、query:smd
+   evidence：任务参数引导的数据选择用于高效LLM对齐微调
+3. [On-Policy Consistency Training Improves LLM Safety with Minimal Capability Degradation](/202605/28/2605.21834v1-on-policy-consistency-training-improves-llm-safety-with-minimal-capability-degradation)  
+   标签：评分：9.0/10、query:smd
+   evidence：通过对比配对的一致性训练提升LLM对抗越狱攻击的安全性
+4. [Steering Beyond the Support: Adversarial Training on Unsupervised Jailbroken Activation Simulation](/202605/28/2605.24535v1-steering-beyond-the-support-adversarial-training-on-unsupervised-jailbroken-activation-simulation)  
    标签：评分：9.0/10、query:dg
-   evidence：最小化激活引导的附带损害
-3. [Steer Like the LLM: Activation Steering that Mimics Prompting](/20260429-20260528/2605.03907v1-steer-like-the-llm-activation-steering-that-mimics-prompting)  
-   标签：评分：9.0/10、query:dg
-   evidence：模仿提示的激活引导方法
-4. [Conceptors for Semantic Steering](/20260429-20260528/2605.04980v1-conceptors-for-semantic-steering)  
-   标签：评分：9.0/10、query:dg
-   evidence：使用conceptors的激活引导
-5. [Beyond Steering Vector: Flow-based Activation Steering for Inference-Time Intervention](/20260429-20260528/2605.05892v1-beyond-steering-vector-flow-based-activation-steering-for-inference-time-intervention)  
-   标签：评分：9.0/10、query:dg
-   evidence：提出基于流的激活转向(FLAS)方法控制语言模型行为
-6. [Memory Inception: Latent-Space KV Cache Manipulation for Steering LLMs](/20260429-20260528/2605.06225v2-memory-inception-latent-space-kv-cache-manipulation-for-steering-llms)  
-   标签：评分：9.0/10、query:dg
-   evidence：潜空间KV缓存操作引导语言模型
-7. [Prompt-Activation Duality: Improving Activation Steering via Attention-Level Interventions](/20260429-20260528/2605.10664v1-prompt-activation-duality-improving-activation-steering-via-attention-level-interventions)  
-   标签：评分：9.0/10、query:dg
-   evidence：改进语言模型的激活引导方法
-8. [Prompt-Activation Duality: Improving Activation Steering via Attention-Level Interventions](/20260429-20260528/2605.10664v2-prompt-activation-duality-improving-activation-steering-via-attention-level-interventions)  
-   标签：评分：9.0/10、query:dg
-   evidence：通过注意力层干预改进激活引导
-9. [FishBack: Pullback Fisher Geometry for Optimal Activation Steering in Transformers](/20260429-20260528/2605.17231v1-fishback-pullback-fisher-geometry-for-optimal-activation-steering-in-transformers)  
-   标签：评分：9.0/10、query:dg
-   evidence：利用拉回Fisher几何推导最优激活引导方向
-10. [Manifold-Guided Attention Steering](/20260429-20260528/2605.21770v1-manifold-guided-attention-steering)  
-   标签：评分：9.0/10、query:dg
-   evidence：轨迹感知的激活引导用于推理
-11. [Riemannian-Manifold Steering: Geometry-Aware Generative Autoencoders for Label-Free Steering](/20260429-20260528/2605.24942v1-riemannian-manifold-steering-geometry-aware-generative-autoencoders-for-label-free-steering)  
-   标签：评分：9.0/10、query:dg
-   evidence：基于黎曼流形的语言模型引导
+   evidence：通过无监督激活模拟进行激活引导以防御越狱
+5. [PoisonForge: Task-Level Targeted Poisoning Benchmark for Instruction-Tuned LLMs](/202605/28/2605.23168v1-poisonforge-task-level-targeted-poisoning-benchmark-for-instruction-tuned-llms)  
+   标签：评分：8.0/10、query:smd
+   evidence：针对有害微调攻击的基准测试，为防御策略提供参考
 
 ### 速读区论文标签
-1. [MASCing: Configurable Mixture-of-Experts Behavior via Activation Steering Masks](/20260429-20260528/2604.27818v1-mascing-configurable-mixture-of-experts-behavior-via-activation-steering-masks)  
-   标签：评分：8.0/10、query:dg
-   evidence：用于MoE安全配置的激活引导掩码
-2. [Chain of Risk: Safety Failures in Large Reasoning Models and Mitigation via Adaptive Multi-Principle Steering](/20260429-20260528/2605.05678v1-chain-of-risk-safety-failures-in-large-reasoning-models-and-mitigation-via-adaptive-multi-principle-steering)  
-   标签：评分：8.0/10、query:dg
-   evidence：通过自适应引导缓解大型推理模型的安全风险
-3. [Inference-Time Machine Unlearning via Gated Activation Redirection](/20260429-20260528/2605.12765v1-inference-time-machine-unlearning-via-gated-activation-redirection)  
-   标签：评分：8.0/10、query:dg
-   evidence：用于机器遗忘的激活引导
-4. [DFKI-MLT at SemEval-2026 TASK 7: Steering Multilingual Models Towards Cultural Knowledge](/20260429-20260528/2605.23069v1-dfki-mlt-at-semeval-2026-task-7-steering-multilingual-models-towards-cultural-knowledge)  
-   标签：评分：8.0/10、query:dg
-   evidence：对多语言大模型应用激活引导
-5. [Beyond a Single Direction: Chain-of-Thought Disrupts Simple Steering of Refusal](/20260429-20260528/2605.26772v1-beyond-a-single-direction-chain-of-thought-disrupts-simple-steering-of-refusal)  
-   标签：评分：8.0/10、query:dg
-   evidence：大推理模型中的拒绝激活引导
-6. [Don't Lose Focus: Activation Steering via Key-Orthogonal Projections](/20260429-20260528/2605.06342v1-dont-lose-focus-activation-steering-via-key-orthogonal-projections)  
-   标签：评分：7.0/10、query:dg
-   evidence：改进激活引导方法
-7. [HyperTransport: Amortized Conditioning of T2I Generative Models](/20260429-20260528/2605.08254v1-hypertransport-amortized-conditioning-of-t2i-generative-models)  
-   标签：评分：7.0/10、query:dg
-   evidence：面向文本到图像模型的摊销激活引导
-8. [LiBaGS: Lightweight Boundary Gap Synthesis for Targeted Synthetic Data Selection](/20260429-20260528/2605.11231v1-libags-lightweight-boundary-gap-synthesis-for-targeted-synthetic-data-selection)  
+1. [Detecting Trojaned DNNs via Spectral Regression Analysis](/202605/28/2605.21146v1-detecting-trojaned-dnns-via-spectral-regression-analysis)  
    标签：评分：7.0/10、query:smd
-   evidence：针对性合成数据选择方法，可应用于安全数据筛选
-9. [NodeSynth: Socially Aligned Synthetic Data for AI Evaluation](/20260429-20260528/2605.14381v2-nodesynth-socially-aligned-synthetic-data-for-ai-evaluation)  
-   标签：评分：7.0/10、query:dg
-   evidence：生成社会对齐的合成查询用于AI评估，解决社会技术细微差别。
-10. [TACT: Mitigating Overthinking and Overacting in Coding Agents via Activation Steering](/20260429-20260528/2605.05980v1-tact-mitigating-overthinking-and-overacting-in-coding-agents-via-activation-steering)  
+   evidence：利用光谱分析检测微调过程中的木马攻击
+2. [Towards Context-Invariant Safety Alignment for Large Language Models](/202605/28/2605.20994v1-towards-context-invariant-safety-alignment-for-large-language-models)  
+   标签：评分：6.0/10、query:smd
+   evidence：提出上下文不变安全对齐以提高对抗措辞的鲁棒性
+3. [Causal Physics Steering in Video World Models via Concept Activation Vectors](/202605/28/2605.24322v1-causal-physics-steering-in-video-world-models-via-concept-activation-vectors)  
    标签：评分：6.0/10、query:dg
-   evidence：激活引导用于代理漂移
-11. [Memory Inception: Latent-Space KV Cache Manipulation for Steering LLMs](/20260429-20260528/2605.06225v1-memory-inception-latent-space-kv-cache-manipulation-for-steering-llms)  
-   标签：评分：6.0/10、query:dg
-   evidence：提出记忆启动（MI），通过KV缓存操作引导大模型，是激活引导的替代方法
+   evidence：使用概念激活向量引导模型行为
+4. [SafeMed-R1: Clinician-Audited Safety and Ethics Alignment for Medical Large Language Models](/202605/28/2605.28338v1-safemed-r1-clinician-audited-safety-and-ethics-alignment-for-medical-large-language-models)  
+   标签：评分：6.0/10、query:smd
+   evidence：临床医生审核的安全数据策展和医疗LLM对齐
 
 
 <div class="dpr-home-promo-card">
