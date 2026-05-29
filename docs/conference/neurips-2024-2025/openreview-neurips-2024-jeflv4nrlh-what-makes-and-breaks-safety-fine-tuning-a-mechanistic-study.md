@@ -1,20 +1,20 @@
 ---
 title: What Makes and Breaks Safety Fine-tuning? A Mechanistic Study
-title_zh: 什么造就和破坏安全微调？一项机制研究
+title_zh: 是什么促成和破坏安全微调？一项机制研究
 authors: "Samyak Jain, Ekdeep Singh Lubana, Kemal Oksuz, Tom Joy, Philip Torr, Amartya Sanyal, Puneet K. Dokania"
 date: 2024-09-25
 pdf: "https://openreview.net/pdf?id=JEflV4nRlH"
-tags: ["query:smd"]
-score: 6.0
-evidence: 安全微调因素的机制研究
-tldr: 该论文设计合成数据框架来捕捉不安全输入的关键特征，通过控制任务和概念交互，系统研究了三种安全微调方法（监督安全微调、直接偏好优化和遗忘学习）的内部机制，发现这些方法仅对MLP权重进行极小变换来专门对齐不安全输入，这表明安全微调本身脆弱，为理解安全退化和设计更鲁棒的防御提供了基础。
+tags: ["query:dg"]
+score: 8.0
+evidence: 用于安全微调分析的合成安全数据生成框架
+tldr: "该论文为了理解安全微调如何使模型安全，设计了一个合成数据生成框架，通过建模任务（如'设计'）与特定概念（如'炸弹'）的交互来捕捉不安全输入的显著方面。利用此框架，研究了监督安全微调、直接偏好优化和遗忘三种常用方法，发现这些方法仅极小地变换MLP权重以对准不安全输入，揭示了安全微调的机制。"
 source: NeurIPS-2024-Accepted
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/openreview/openreview-neurips-2024-jeflv4nrlh/fig-001.webp\", \"caption\": \"\", \"page\": 10, \"index\": 1, \"width\": 2048, \"height\": 564}, {\"url\": \"assets/figures/openreview/openreview-neurips-2024-jeflv4nrlh/fig-002.webp\", \"caption\": \"\", \"page\": 10, \"index\": 2, \"width\": 2048, \"height\": 307}, {\"url\": \"assets/figures/openreview/openreview-neurips-2024-jeflv4nrlh/fig-003.webp\", \"caption\": \"\", \"page\": 21, \"index\": 3, \"width\": 1116, \"height\": 274}, {\"url\": \"assets/figures/openreview/openreview-neurips-2024-jeflv4nrlh/fig-004.webp\", \"caption\": \"\", \"page\": 21, \"index\": 4, \"width\": 1124, \"height\": 422}, {\"url\": \"assets/figures/openreview/openreview-neurips-2024-jeflv4nrlh/fig-005.webp\", \"caption\": \"\", \"page\": 22, \"index\": 5, \"width\": 1124, \"height\": 1102}, {\"url\": \"assets/figures/openreview/openreview-neurips-2024-jeflv4nrlh/fig-006.webp\", \"caption\": \"\", \"page\": 23, \"index\": 6, \"width\": 1126, \"height\": 1102}, {\"url\": \"assets/figures/openreview/openreview-neurips-2024-jeflv4nrlh/fig-007.webp\", \"caption\": \"\", \"page\": 24, \"index\": 7, \"width\": 1120, \"height\": 1140}]"
-motivation: 旨在理解导致模型安全微调成功或失败的底层因素。
-method: 设计合成数据生成框架，捕获任务与概念交互，分析监督安全微调、DPO和遗忘等方法的内部机制。
-result: 发现这些方法对MLP权重的变换最小，专门对齐不安全输入，解释安全微调可被轻易破坏。
-conclusion: 安全微调仅带来微小的权重变化，容易受到有害微调的破坏，需要更鲁棒的方法。
+motivation: 安全微调的内在机制尚不明确，需要可控的实验框架来解析。
+method: 设计合成数据生成框架，通过分解任务和概念构建不安全样本，用于机制分析。
+result: 三种安全微调方法仅对MLP权重做最小变换以对准不安全输入，而非全面改变模型行为。
+conclusion: 安全微调的作用机制是局部调整，而非全局重塑，为改进对齐提供启示。
 ---
 
 ## Abstract

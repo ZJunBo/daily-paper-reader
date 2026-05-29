@@ -1,21 +1,21 @@
 ---
 title: Residual Stream Analysis of Overfitting And Structural Disruptions
-title_zh: 残差流分析：过拟合与结构破坏
+title_zh: 残差流分析：过拟合与结构紊乱
 authors: "Quan Liu, Han Zhou, Wenquan Wu, Hua Wu, Sen Su"
 date: 2025-09-18
 pdf: "https://openreview.net/pdf?id=M6gpmbPFty"
 tags: ["query:smd"]
-score: 4.0
-evidence: 分析重复安全数据导致的结构破坏，为保持对齐的数据策划提供指导。
-tldr: 本文量化了安全数据集重复性导致的低熵和低多样性问题，并提出FlowLens工具分析残差流几何结构，揭示高比例安全数据造成表示退化。这为微调中安全数据的策划和多样化提供了重要指导，有助于在保持对齐的同时避免错误拒绝。
+score: 7.0
+evidence: 安全数据过拟合与微调结构紊乱分析
+tldr: 该论文发现安全微调中重复的拒绝模板数据导致良性查询被拒绝。通过量化安全数据的低熵和低多样性，引入FlowLens工具分析残差流几何，揭示高比例安全样本使表征方差集中于少数成分，降低表征多样性。这为理解安全数据对微调的影响和优化数据构成提供了新视角。
 source: NeurIPS-2025-Accepted
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1449, \"height\": 336, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 1443, \"height\": 449, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 1455, \"height\": 475, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 1455, \"height\": 1026, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 1358, \"height\": 539, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 938, \"height\": 941, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-007.webp\", \"caption\": \"\", \"page\": 0, \"index\": 7, \"width\": 1458, \"height\": 959, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-008.webp\", \"caption\": \"\", \"page\": 0, \"index\": 8, \"width\": 690, \"height\": 526, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-009.webp\", \"caption\": \"\", \"page\": 0, \"index\": 9, \"width\": 690, \"height\": 527, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-010.webp\", \"caption\": \"\", \"page\": 0, \"index\": 10, \"width\": 690, \"height\": 528, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-neurips-2025-m6gpmbpfty/fig-011.webp\", \"caption\": \"\", \"page\": 0, \"index\": 11, \"width\": 692, \"height\": 527, \"label\": \"Figure\"}]"
 tables_json: "[{\"url\": \"assets/tables/openreview/openreview-neurips-2025-m6gpmbpfty/table-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1428, \"height\": 394, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-neurips-2025-m6gpmbpfty/table-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 1454, \"height\": 172, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-neurips-2025-m6gpmbpfty/table-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 1436, \"height\": 424, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-neurips-2025-m6gpmbpfty/table-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 1465, \"height\": 597, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-neurips-2025-m6gpmbpfty/table-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 1428, \"height\": 423, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-neurips-2025-m6gpmbpfty/table-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 1442, \"height\": 747, \"label\": \"Table\"}]"
-motivation: 微调中大量使用重复安全模板导致模型错误拒绝良性查询。
-method: 引入FlowLens，基于PCA的残差流几何分析工具。
-result: 发现安全数据比例过高会降低表示多样性，增加过拟合。
-conclusion: 该分析为策划高质量、多样化安全数据提供了理论基础。
+motivation: 安全微调导致过多虚假拒绝，需要理解安全数据特性对模型行为的影响。
+method: 引入FlowLens（基于PCA的残差流几何分析工具），量化安全数据统计特性与模型表征变化。
+result: 安全数据熵和多样性显著低于通用指令数据，高比例安全样本集中方差、降低表征多样性。
+conclusion: 安全数据的结构特性是虚假拒绝的根本原因，提示数据混合时需平衡多样性与安全性。
 ---
 
 ## Abstract
