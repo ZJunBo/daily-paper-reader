@@ -1,21 +1,21 @@
 ---
 title: "The Hidden Dimensions of LLM Alignment: A Multi-Dimensional Analysis of Orthogonal Safety Directions"
-title_zh: LLM对齐的隐藏维度：正交安全方向的多维分析
+title_zh: 大语言模型对齐的隐藏维度：正交安全方向的多维分析
 authors: "Wenbo Pan, Zhichao Liu, Qiguang Chen, Xiangyang Zhou, Yu Haining, Xiaohua Jia"
 date: 2025-05-01
 pdf: "https://openreview.net/pdf?id=wGFEzfhFae"
-tags: ["query:smd"]
+tags: ["query:dg"]
 score: 6.0
-evidence: 分析多维安全方向以理解并保持对齐
-tldr: 该论文发现LLM安全对齐行为由表示空间中的多维方向共同控制，而非单一方向。通过分析Llama3 8B安全微调时的表示变化，识别出一个主拒绝方向和多个可解释的细小方向。这一发现为安全数据的选择和策展提供了机制性指导，有助于在微调过程中更有针对性地保护对齐。
+evidence: 研究大语言模型对齐中的多维安全方向
+tldr: 该论文发现大语言模型的安全对齐行为并非由单一方向控制，而是在激活空间中存在多个正交方向共同作用。通过对Llama 3 8B在安全微调后的表示空间进行分析，识别出一个主导的拒绝方向以及多个代表不同可解释特征的小方向。这一发现深化了对模型安全机制的理解，为更精细的激活引导干预提供了理论基础。
 source: ICML-2025-Accepted
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 848, \"height\": 409, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 807, \"height\": 411, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 821, \"height\": 403, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 845, \"height\": 376, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 805, \"height\": 625, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 1764, \"height\": 412, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-007.webp\", \"caption\": \"\", \"page\": 0, \"index\": 7, \"width\": 1771, \"height\": 593, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-008.webp\", \"caption\": \"\", \"page\": 0, \"index\": 8, \"width\": 845, \"height\": 499, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-009.webp\", \"caption\": \"\", \"page\": 0, \"index\": 9, \"width\": 845, \"height\": 500, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-010.webp\", \"caption\": \"\", \"page\": 0, \"index\": 10, \"width\": 844, \"height\": 500, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-011.webp\", \"caption\": \"\", \"page\": 0, \"index\": 11, \"width\": 1664, \"height\": 565, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-012.webp\", \"caption\": \"\", \"page\": 0, \"index\": 12, \"width\": 882, \"height\": 532, \"label\": \"Figure\"}, {\"url\": \"assets/figures/openreview/openreview-icml-2025-wgfezfhfae/fig-013.webp\", \"caption\": \"\", \"page\": 0, \"index\": 13, \"width\": 1668, \"height\": 1043, \"label\": \"Figure\"}]"
 tables_json: "[{\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1720, \"height\": 1115, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 1768, \"height\": 424, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 861, \"height\": 369, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 1317, \"height\": 358, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 835, \"height\": 511, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 833, \"height\": 513, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-007.webp\", \"caption\": \"\", \"page\": 0, \"index\": 7, \"width\": 843, \"height\": 511, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-008.webp\", \"caption\": \"\", \"page\": 0, \"index\": 8, \"width\": 979, \"height\": 338, \"label\": \"Table\"}, {\"url\": \"assets/tables/openreview/openreview-icml-2025-wgfezfhfae/table-009.webp\", \"caption\": \"\", \"page\": 0, \"index\": 9, \"width\": 1277, \"height\": 188, \"label\": \"Table\"}]"
-motivation: 先前将安全行为建模为单一方向，限制了对其机制的理解，需探索多维安全方向。
-method: 在Llama 3 8B的安全微调过程中，研究表示空间中的正交方向，分析各方向与拒绝行为的关系。
-result: 发现一个主导拒绝方向及多个代表不同语义的细小方向，揭示了安全对齐的多维本质。
-conclusion: 多维安全方向的识别为微调中的对齐保持提供了更精细的指导，有助于设计数据混合策略。
+motivation: 现有研究将安全行为建模为单一方向，限制了对安全机制的深入理解。
+method: 分析安全微调后模型的激活空间，通过正交分解发现多个独立的方向。
+result: 识别出一个主导的拒绝方向以及多个可解释的次要特征方向。
+conclusion: 安全对齐行为是多维的，为基于激活空间的干预提供了更丰富的操作空间。
 ---
 
 ## Abstract

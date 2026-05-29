@@ -1,0 +1,861 @@
+Title: To Steer or Not to Steer?  Mechanistic Error Reduction with Abstention for Language Models
+
+URL Source: https://openreview.net/pdf?id=fUCPq5RvmH
+
+Number of Pages: 22
+
+Markdown Content:
+# To Steer or Not to Steer? Mechanistic Error Reduction with Abstention for Language Models 
+
+Anna Hedström 1 Salim I. Amoukou 2 Tom Bewley 2 Saumitra Mishra 2 Manuela Veloso 2
+
+## Abstract 
+
+We introduce Mechanistic Error Reduction with Abstention (MERA ), a principled framework for steering language models (LMs) to mitigate errors through selective, adaptive interventions. Unlike existing methods that rely on fixed, man-ually tuned steering strengths, often resulting in under or oversteering, MERA addresses these limi-tations by (i) optimising the intervention direction, and (ii) calibrating when , and how much to steer, thereby provably improving performance or ab-staining when no confident correction is possible. Experiments across diverse datasets, and LM fam-ilies demonstrate safe, effective, non-degrading error correction, and that MERA outperforms ex-isting baselines. Moreover, MERA can be applied on top of existing steering techniques to further enhance their performance, establishing it as a general-purpose, and efficient approach to mecha-nistic activation steering. 
+
+## 1. Introduction 
+
+Despite the impressive capabilities of current language mod-els (LMs), they can be frustratingly error-prone. Failures arise not only in open-ended tasks like reasoning, factual consistency or planning (Kambhampati et al., 2024), but also in simple prediction settings (Hendrycks et al., 2021b; Webson & Pavlick, 2022; Zhou et al., 2024). Mitigating such errors is an open research question. Error reduction methods for LMs have evolved in several directions, including fine-tuning (Hu et al., 2022; Wu et al., 2024; Yin et al., 2024), and inference-time approaches like prompt engineering (Kojima et al., 2022), and guided decod-ing (Yang & Klein, 2021; Liu et al., 2021). While effective          
+
+> 1Work done during an internship at J.P. Morgan AI Re-search. 2J.P. Morgan AI Research. Correspondence to: Anna Hedström <hedstroem.anna@gmail.com>, Salim I. Amoukou <salim.ibrahimamoukou@jpmorgan.com>.
+> Proceedings of the 42 nd International Conference on Machine Learning , Vancouver, Canada. PMLR 267, 2025. Copyright 2025 by the author(s).
+> Figure 1. An illustration of traditional vanilla steering with fixed steering strengths (left), leading to under-, and oversteering, and
+> MERA (right), providing calibrated steering thresholds.
+
+for specific goals, these approaches are typically computa-tionally intensive or context-sensitive. An alternative approach is to intervene in the internal com-putations of the model itself. Mechanistic steering (or “rep-resentation engineering”) has emerged as a promising line of research to influence model behaviour by intervening on activations in inference-time, without permanent weight updates (Li et al., 2023; Belrose et al., 2023; Todd et al., 2024; Qiu et al., 2024; Turner et al., 2024). One widely used instantiation of this approach is contrastive steering (Arditi et al., 2024; Rimsky et al., 2024), where a steering vector is constructed by taking the mean activation difference between paired examples with, and without a tar-geted concept ( e.g. toxic vs non-toxic outputs). This vector can then be added to the model’s activations to amplify or suppress such concept in the model (Ball et al., 2024), under the assumption that the concept is represented along a linear direction in the model’s representation space (Elhage et al., 2022; Marks & Tegmark, 2024; Park et al., 2024). A natural extension is to explore whether such additive lin-ear steering can be applied for the specific goal of error mitigation : directly reducing model errors on prediction tasks. That is, can we find a linear direction in LM’s ac-tivation space that encodes the concept of “being wrong”, and then steer away from it? Unlike traditional alignment tasks such as reducing toxicity or harmful responses, steer-1Mechanistic Error Reduction with Abstention for Language Models 
+
+ing for error mitigation may be more challenging (Engels et al., 2024). Errors are not necessarily tied to a single iden-tifiable concept, but can manifest in various forms (Wang et al., 2025; Orgad et al., 2024), rendering them resistant to additive steering (Belrose et al., 2023). An emerging line of research explores alternative steering techniques for error-related properties like truthfulness, and hallucination (Li et al., 2023; Qiu et al., 2024; Wang et al., 2025; Bhattacharjee et al., 2024). They involve complex departures from the elegant simplicity of additive steering through the addition of clustering, architecture-specific in-terventions, or label-based contrastive vectors. Rather than advancing into such techniques, we address a simpler, and more fundamental question: when, and how much should we steer to mitigate errors effectively? 
+
+As Figure 1 (left) illustrates, traditional steering methods rely on fixed steering strengths. This can lead to issues such as understeering, where an insufficient change is made to mitigate errors, and oversteering, where unnecessary (and potentially detrimental) steering is applied (Tan et al., 2024; Scalena et al., 2024). The dominant practice is to empiri-cally find a fixed steering strength based on ad hoc hyper-parameter sweeps (Liu et al., 2024; Turner et al., 2024; Postmus & Abreu, 2024; Lee et al., 2025), which are costly, model-specific, and lack generalisation. Others apply fixed strengths or none at all (Arditi et al., 2024; Durmus et al., 2024; Ball et al., 2024). There are also conditional ap-proaches (Wang et al., 2025; Scalena et al., 2024; Cheng et al., 2024) that adjust the steering strength dynamically, but these are not adapted for the specific objective of error mitigation (see further discussion in §A.3). In this work, we address the challenge of steering strength calibration for error mitigation. After identifying steering directions using linear error estimation probes instead of contrastive pairs (see §4), we show how to derive an optimal steering strength to reduce empirical error. This results in a steering method that does not use a fixed strength, but rather a fixed threshold in the activation space to which steering is applied; see Figure 1 (right). A by-product of our approach is that we abstain from steering activations that are beyond the threshold, for which error is already predicted to be low. By formulating steering as a constrained optimisation problem, we derive a closed-form solution (see §3.1) which ensures that interventions grow proportionally with the predicted error. The following calibration step (see §3.2), checks per task whether a threshold exists that 
+
+confidently improves performance; if none can be found, we abstain entirely. In this way, we steer only when it is provably beneficial, effectively addressing both under-, and oversteering. We make the following contributions: 
+
+C1 We propose a principled steering framework to miti-gate errors, which calibrates intervention intensity to prevent both under-, and oversteeering, guaranteeing improved or non-degrading performance (see §3). 
+
+C2 We investigate which representation spaces, sparse au-toencoder (SAE) features or original activations, are most effective for identifying error-mitigation direc-tions in LMs using linear probes (see §4). 
+
+C3 We introduce mechanistic error reduction with ab-stention (MERA , see §5), a practical method that em-pirically achieves safe, effective, non-degrading error correction, and improve upon existing baselines across a range of models, and tasks (see §6). This work highlights a broader vision for post-training align-ment: lightweight interventions that are both effective, and probabilistically safe by design. While our current focus is error mitigation, by adapting the target signal with labeled inputs, MERA could steer LMs toward diverse specialised 
+
+objectives (e.g., harmlessness, honesty, and fairness etc). This positions MERA as a general-purpose framework for principled, and minimal post-hoc model control. 
+
+## 2. Preliminaries 
+
+Consider an autoregressive, decoder-only transformer language model f that maps n input tokens, x =(x1, . . . , x n) ∈ Rn, to an output probability distribution over all input, and generated tokens, a = ( a1, . . . , a m+n) ∈
+
+R(m+n)×|V| , where V is the vocabulary set. The model consists of L sequential blocks, each comprising attention, feed-forward, and residual stream layers. At layer ℓ ∈ [L],the activation for the token at position i is denoted h(ℓ) 
+
+> i
+
+(x).For each input x, and a given task, we assume an error func-tion E(a) ∈ [0 , 1] that measures the quality of the model’s generated output, where lower is better. This setup is general, and applies to various LM tasks. For instance, in multiple-choice question answering (MCQA), 
+
+E(a) can be 0 if the correct answer is within the gener-ated tokens, and 1 otherwise. In summarisation, E(a) can quantify the distance between the generated summary, and a reference. 
+
+2.1. LMs for Supervised Tasks 
+
+In this work, we focus on supervised problems, where each prompt x is associated with a ground truth label y ∈ V . Let 
+
+Y ⊂ V be the set of valid labels (see §A.5 for details), and idx (y) ∈ { 1, . . . , |V|} be the index of label y ∈ V in the vocabulary. Given the model’s output distribution a, we select a token position k, and parse a predicted label ˆy, and 2Mechanistic Error Reduction with Abstention for Language Models 
+
+its probability prob ˆy as follows 
+
+ˆy = arg max  
+
+> y∈Y
+
+ak, idx (y) and prob ˆy = ak, idx (ˆ y)
+
+P 
+
+> y∈Y
+
+ak, idx (y)
+
+.
+
+We choose a token position k using one of two strategies: (i) 
+
+last , which uses the final token an in the input sequence; or (ii) exact , a recently proposed method (Orgad et al., 2024) that uses the first token that matches any valid ground truth label. In supervised LM tasks, it is common to interpret the logits at the final token position as the model’s prediction, as this captures the model’s decision after processing the full prompt. However, the last position does not always correlate with how the model actually generates answers (Pres et al., 2024). To address this, the exact position complements the 
+
+last prediction mode, selecting the first token that matches any valid ground truth label, measuring how an LM model behaves in its free-form, open-ended generated response. Further experimental details are provided in §A.5. For a given prompt-label pair (x, y ), the error function is 
+
+E(a) = 1 − prob y , (1) where prob y is evaluated at the chosen token position k.Additionally, we assess the model’s end-task performance, which, in our supervised setting, corresponds to accuracy, which is defined as 
+
+A(a) = 1[ˆ y = y]. (2) 
+
+2.2. Steering 
+
+In this paper, we focus on the concept of additive steering 
+
+(or “activation addition”). Suppose E(a) ∈ { 0, 1}, where 
+
+E(a) = 1 indicates that the generated output exhibits a certain targeted concept ( e.g. refusing harmful instructions). Steering aims to add a vector v(ℓ) 
+
+> i
+
+(x) to the activations h at one or more token positions, and layers as follows 
+
+˜h(ℓ) 
+
+> i
+
+(x) = h(ℓ) 
+
+> i
+
+(x) + λ v (ℓ) 
+
+> i
+
+(x), (3) such that after this intervention, the new output ˜a satisfies 
+
+E(˜a) = 0 (e.g. refusing harmful content). A scalar pa-rameter λ ∈ R+ is introduced to control the strength of the steering. Throughout the paper, we use the tilde nota-tion ˜· to represent the steered version of any quantity, and let h := h(ℓ) 
+
+> i
+
+(x), and v := v(ℓ) 
+
+> i
+
+(x) for brevity. We de-note ˜f the steered model with output ˜a := ˜f (x). Several methods have been proposed to extract steering directions 
+
+v, including contrastive pairs, linear probes, and principal components (Wu et al., 2025). In this work, we focus on the first two, which can be interpreted as deriving v from a classifier of the targeted concept (Mallen et al., 2023). 
+
+Contrastive Steering A widely used technique (Zou et al., 2023; Arditi et al., 2024; Ball et al., 2024; Rimsky et al., 2024; Farquhar et al., 2023; Marks & Tegmark, 2024), in-volves intervening across a token position i, and layer ℓ by defining v(ℓ) 
+
+> i
+
+(x) as the difference-in-means between activa-tion values of positive examples ( E(a) = 1 ), and negative examples ( E(a) = 0 ). Given a dataset D = {(xj , y j )}Dj=1 ,we define the set of positive examples as D+ = {j ∈
+
+[D] : E(aj ) = 1 }, and the set of negative examples as 
+
+D− = {j ∈ [D] : E(aj ) = 0 }, where aj = f (xj ). The steering vector v(x) is then defined as 
+
+v(x) = μ+ − μ−, (4) where the mean activations μ+, and μ− are given by 
+
+μ+ = 1
+
+|D +|
+
+X
+
+> j∈D +
+
+h(xj ), μ − = 1
+
+|D −|
+
+X
+
+> j∈D −
+
+h(xj ),
+
+which is computed for each layer ℓ, and token position i as 
+
+h := h(ℓ) 
+
+> i
+
+(x), and v := v(ℓ) 
+
+> i
+
+(x).
+
+Probe-based Steering An emerging alternative technique is steering guided by probes (von Rütte et al., 2024; Cheng et al., 2024), which leverages learned linear classifiers (or “probes”) to guide intervention. A probe, ˆp(h) = w⊤h,is trained to classify targeted properties, and the classifier weights w are directly used as the steering vector v. Con-trastive steering can be viewed as a special case of this framework, where the steering vector is derived from the Linear Discriminant Analysis classifier , assuming isotropic covariance between μ+, and μ− (Mallen et al., 2023). 
+
+Goal This paper focuses on error mitigation through steer-ing by leveraging the interplay between probes, and activa-tion adjustments. In what follows, we propose a principled framework for utilising probe models in steering, address-ing key challenges such as determining optimal steering strength λ, and adaptively intervening across layers, and token positions with the ability to abstain. 
+
+## 3. Conditional Steering for Error Mitigation 
+
+We extend probe steering to minimise continuous errors, such as the model’s error E(a). Instead of training a classi-fier, we train an error estimator ˆp(h) to predict E(a) from activations h.In prior work (Mallen et al., 2023; Li et al., 2023; von Rütte et al., 2024), the probe’s weights were used directly as the steering vector. In contrast, we propose to use both the probe’s predictions , and its weights. Since the probe’s pre-dictions estimate the LM’s error, we construct the steering vector to explicitly reduce the predicted error. This approach provides a principled mechanism for determining the steer-ing strength, as demonstrated in the next section. 3Mechanistic Error Reduction with Abstention for Language Models 
+
+3.1. Optimising Steering with Abstention 
+
+We define steering as moving the activation h in a direction that reduces the predicted error while staying close to the original h. Formally, we solve the following constained optimisation problem 
+
+min  
+
+> v
+
+∥v∥22 subject to ˆp h + v ≤ α, (5) where α represents the target threshold of error reduction. 
+
+Linear Case If ˆp(h) is linear, i.e. ˆp(h) = w⊤h, this optimisation problem admits a closed-form solution as 
+
+v⋆ =
+
+
+
+0, if w⊤h ≤ α, 
+
+ α − w⊤h
+
+∥w∥22
+
+
+
+w, if w⊤h > α. 
+
+(6) Intuitively, if w⊤h is already at or below α, no intervention is required. Otherwise, we adjust h to ensure w⊤(h + v⋆)
+
+satisfies the threshold α.Equivalently, we can rewrite the resulting steering vector as 
+
+v⋆ = λ⋆w, where 
+
+λ⋆ = max 
+
+
+
+0, α − w⊤h
+
+∥w∥22
+
+
+
+. (7) This formulation offers intuitive interpretations: • Selective Steering: Intervention are applied selec-tively, only when ˆp(h) = w⊤h > α at a given token, and layer level. • Adaptive Strength: The steering strength scales with the residual α − w⊤h = α − ˆp(h), leading to stronger adjustments for larger estimated errors. The normalisation by ∥w∥22 aligns with prior work (von Rütte et al., 2024), where such scaling factors have been shown to improve steering efficacy. 
+
+Extension to Non-linear Models A similar closed-form solution arises when ˆp(h) is an affine function composed of an invertible transformation. For instance, if ˆp(h) = 
+
+sigmoid (w⊤h), the constraint ˆp(h + v) ≤ α translates to 
+
+w⊤(h + v) ≤ logit( α). The steering strength will be 
+
+λ⋆ = max 
+
+
+
+0, logit( α) − ˆp(h)
+
+∥w∥22
+
+
+
+(8) Although we focus on linear probes in this work, §A.1 dis-cusses how to extend these ideas to non-linear probe func-tions ( e.g. a one-layer MLP). 
+
+3.2. Calibrating for Safety 
+
+In this framework, the steering threshold α is the key param-eter that determines both when an intervention is triggered, and how strongly the activations are shifted. We select α us-ing a calibration set Dcal = {(xj , y j )}Nj=1 , which is distinct from the dataset used to train the error regressor. For a given 
+
+α, let ∆cal (α) denote the change in some measure of LM’s performance on Dcal , such as the accuracy A (Equation 2) or (negative) error −E (Equation 1), after applying steering with the corresponding steering strength λ⋆ (Equation 7). Specifically, we define the optimal threshold α∗ as 
+
+α∗ = arg sup 
+
+> α∈αvalid
+
+∆cal (α), where 
+
+αvalid = {α ∈ { α1, . . . , α K } : ∆ cal (α) > ϵ + b(δ, K, N )},and α1, . . . , α K ∈ (0 , 1) are candidates values for α.
+
+b(δ, K, N ) = plog(2 K/δ )/(2 N ) is a confidence bound derived by applying a union bound (Bonferroni correction, using a Hoeffding inequality) over the K candidate hypothe-ses αi (see §A.2 for derivation). This ensures that, with probability at least 1 − δ, the selected α∗ yields a genuine performance improvement that exceeds ϵ .
+
+Theoretical Guarantees This procedure guarantees either a provable improvement in performance or abstains from intervention if αvalid is empty. Assuming i.i.d. samples, it satisfies 
+
+P (∆ cal (α∗) > ϵ ) ≥ 1 − δ. (9) See proof in §A.2. More generally, this approach is flexible, and can incorporate any valid bound b satisfying the desired confidence guarantee in Equation 9. Instead of relying on a Bonferroni-style correction, which may be overly conservative, an alternative approach is to split the calibration data: use one part to select the optimal 
+
+α⋆, and the other to verify that its confidence interval lower bound exceeds ϵ.By adjusting δ, practitioners can control the trade-off be-tween conservativeness, and aggressiveness of the steering policy. In our experiments, we set δ = 0 .01 , ϵ = 0 , and use difference in accuracy as ∆cal (α), though the method is agnostic to the metric used, and can accommodate relevant alternatives such as F1 score in classification tasks. 
+
+3.3. A Principled Framework 
+
+Our framework establishes a principled foundation for con-ditional activation steering, grounded in three key ingredi-ents. First, we use linear probes to obtain effective directions for minimising the predicted error. Second, this direction is then scaled using the closed-form solution at both the token, and layer levels. Third, we calibrate the steering threshold 
+
+α against the true error on the calibration dataset, informed by the user’s tolerance for uncertainty ( i.e. set by δ). 4Mechanistic Error Reduction with Abstention for Language Models  
+
+> Figure 2. Layer-wise performance of linear error estimators for different LM families, separated by distinct token position, and input feature strategies. RMSE, and standard error is reported. Extended results are provided in A.6.1.
+
+A key advantage of this formulation lies in how it handles the steering strength λ: defining the appropriate range of values for this factor is nontrivial, and often requires careful weight normalisation or manual tuning. In our approach, this challenge is eliminated. The α value, and the estimated error inherently determine the steering strength, providing a natural, and intuitive interpretation of its role: • Global Abstention. If calibration indicates that no α
+
+offers improvement beyond a baseline ϵ, we refrain from intervening altogether. In this way, steering interventions remain both effective (re-ducing error where needed), and safe (avoiding unnecessary or detrimental modifications). In a similar spirit to Cheng et al. (2024); Liu et al. (2024), which underscores the value of theoretical guarantees for safe steering towards semantic, binary properties, our method, to the best of our knowledge, is the first error-mitigation approach whose objective is to 
+
+calibrate steering thresholds to lower true empirical error with provable guarantees, thereby advancing this emerging line of research. 
+
+## 4. Choosing Representations for Steering 
+
+In the previous section, we showed how to derive a condi-tional steering direction for error mitigation from an arbi-trary model activation h. A remaining question is: which representations should be used to find steering directions? 
+
+The candidate set of activations h is large, spanning (n +
+
+m) × L, where n + m denotes the total number of tokens from both the prompt, and the generated answer, and L is the number of layers. Existing studies on contrastive steering navigate this extensive space by conducting computationally expensive, and model-specific hyperparameter sweeps (Li et al., 2023; Liu et al., 2024; Turner et al., 2024). In addition, the strategies used for selecting layers, and token positions for constructing the steering vector versus applying the vec-tor in inference-time, often differ (see §A.4 for an extended discussion). Lastly, it remains an open research question whether such strategies extend to mitigating continuous er-rors (as opposed to strictly binary alignment targets, e.g. 
+
+reducing toxicity). To address these gaps, we investigate two central questions: 
+
+Q1 Token position. Does extracting activations from the 
+
+exact token position in the generated answer, as re-cently recommended by Orgad et al. (2024), improve probe performance? 
+
+Q2 Representation. Can sparse representations, such as those obtained through SAEs (Lieberum et al., 2024; Joseph Bloom & Chanin, 2024), enhance the learned er-ror direction, and thus improve steering performance? In line with prior work (Rimsky et al., 2024; Ball et al., 2024; Tan et al., 2024; Arditi et al., 2024; Jorgensen et al., 2023; Krasheninnikov & Krueger, 2024; Postmus & Abreu, 2024), we focus on steering the residual stream (Elhage et al., 2021), i.e. the aggregated “running sum” representation across MLP, and attention layers (Zhao et al., 2021), rather than selecting specific attention heads (Li et al., 2023; Wang et al., 2025). 
+
+4.1. Experimental Setup 
+
+We systematically analyse how choices of token position, and representation type affect probe quality across multiple models, and tasks. 
+
+Models We evaluate a diverse set of decoder-only models, including L LA MA (Team, 2024b), G EMMA (Team, 2024a), and Q WEN (Team, 2024c), spanning distinct sizes. Specif-ically, we examine both the base-, and instruction-tuned variants of LL AMA-3.2-1B, G EMMA -2-2B, and Q WEN -2.5-3B models. Details on these LMs, and their task per-formance are provided in §A.5. For the Gemma models, we 5Mechanistic Error Reduction with Abstention for Language Models         
+
+> Figure 3. Visualisation of MERA methodology to mechanistically steer LMs: 1. cache activations, and errors, 2. train error estimators,
+> 3. calibrate steering thresholds.
+
+retrieve pre-trained SAEs from G EMMA -S COPE (Lieberum et al., 2024). 
+
+Datasets We evaluate our methods on supervised tasks with varying label cardinalities (binary, ternary, and qua-ternary), and class distributions, ranging from balanced to highly imbalanced datasets. The datasets include S MS 
+
+SPAM (Almeida et al., 2011), Y ES /N O (AI, 2023), S ENTI - 
+
+> MENT
+
+(AI, 2023), and MMLU (Hendrycks et al., 2021a), with subset of high-school, and professional level questions, 
+
+i.e. MMLU-HS , and MMLU-PROF . The training datasets contain between 2600-300 training samples, with 30% used for validation. Additional dataset details are provided in Table 2 in §A.5. 
+
+Probes For each layer, we train a linear probe ˆp, and measure how well it predicts the model’s true error E(a)
+
+across distinct token positions. Regularisation ensures that the learned error estimators are sparse (see §A.6.3 for fur-ther details). We use root mean squared error (RMSE) to measure performance, where lower values indicate better performance (see §A.6.4 for details). 
+
+Sparse Representations For sparse representations, we specifically explore the encoding of a SAE, which maps the original activations h ∈ Rd to a high-dimensional activation space z(h) ∈ Rw as follows 
+
+z(h) = σ(Wenc (h − benc ) + benc ),
+
+where σ is an activation function (e.g. 
+
+JumpReLU (Lieberum et al., 2024)), benc is a bias vector, and Wenc is a learned weight matrix. Only a subset of activations in z will be non-zero, and w ≫ d.Empirically, we explore whether sparse activations enhance linear probe performance (Templeton et al., 2024) to potentially be used for steering (Zhao et al., 2024; Durmus et al., 2024; Mayne et al., 2024; Bricken et al., 2024; Kantamneni et al., 2025). 
+
+Results Figure 2 illustrates the RMSE, and standard error across the top 5 performing regression probes (see §A.5 provides additional details). Generally, we find that the exact position strategy performs at least as well as, if not better than, the last position across most model families (i.e. LLA MA, and G EMMA ). Thus, we will use the exact position to extract h to train ˆp. For sparse representations, we find no signal of improved probe performance. In §A.6.1, we break down the results per model, and observe a high variability across models. Since SAEs also impose high compute costs, we find no compelling reason to use sparse activations instead of original activations for the purpose of probe-based steering. 
+
+## 5. Introducing MERA 
+
+In the following, we introduce MERA —a general mechanis-tic steering methodology that practically operates in three main steps. We refer to Figure 3 for an overview of these steps.  
+
+> 1.
+
+Cache activations, and errors. Construct a training 
+
+Dtrain by pairing LM errors E(a) with activations h(ℓ)
+
+> k
+
+at exact token position k for each layer ℓ ∈ { 1, . . . , L }.Prepare a calibration dataset Dcal with input prompts 
+
+x, and their corresponding true labels y. 
+
+> 2.
+
+Train error estimators. Train L linear probes ˆp(h) = 
+
+w⊤h on Dtrain activations h to estimate the LM error 
+
+E(a), applying distinct sparsity constraints (see full training methodology in §A.5).  
+
+> 3.
+
+Calibrate steering threshold. Calibrate the optimal steering threshold α∗ on inputs x, and their correspond-ing true labels y in Dcal to maximise ∆cal (α) (see §3.2), given a user-specified confidence 1 − δ.A key advantage of MERA is its flexibility: while we train linear error estimators to find a steering direction v for each layer ℓ, both the optimisation of λ, and calibration of α
+
+6Mechanistic Error Reduction with Abstention for Language Models 
+
+remains generalisable to other definitions of v, such as con-trastive steering (Farquhar et al., 2023) or weights from a logistic regression probes (Cheng et al., 2024; von Rütte et al., 2024). This means we can use MERA as a methodology 
+
+to improve existing steering methods. In §6, we empirically quantify this improvement. 
+
+How we Calibrate We determine the optimal steering threshold α⋆ via a gradient-free grid search over α ∈ [0 , 1] 
+
+discretised into 10 equal intervals, selecting the value that maximises ∆cal (α) while satisfying a predefined safety con-straint as described in §3.2. The unsteered reference accu-racy is first established on Dcal , then accuracy is reported when steering at each candidate α. If no α yields a statisti-cally significant improvement, we abstain from intervention, ensuring λ⋆ = 0 . In §A.7, we show that accuracy, and error are closely related in our tasks. As discussed in §A.5, MERA 
+
+offers efficient inference, with the main computational bur-den arising from the one-time, offline calibration. 
+
+## 6. Benchmarking 
+
+Our experiments aim to answer the following question: 
+
+Q1 Does MERA make steering more effective, and safe? 
+
+6.1. Evaluating Steering 
+
+In alignment tasks, steering is typically evaluated along two complementary dimensions, i.e. its efficiency in producing responses aligned with the high-level concept, and its ability to preserve fluency, and naturalness of text (Pres et al., 2024). In the context of error mitigation, however, the goal is to steer LMs toward correct labels. Accordingly, we shift the evaluation target to improving task accuracy .Our main question is: how much does a steering method actually help (or hurt) model performance? Comparing raw performance deltas alone can be misleading, especially when baseline accuracy is already high, making small degra-dations disproportionately large. To address this, in the spirit of Burns et al. (2023), we define a Steering Performance Impact (SPI) score 
+
+SPI =
+
+ 
+
+> ˜ADtest −ADtest
+> 1−ADtest
+
+, if ˜ADtest > A Dtest  
+
+> ˜ADtest −ADtest
+> ADtest
+
+, otherwise (10) where ADtest is the test set accuracy Dtest defined as follows 
+
+ADtest = 1
+
+|D test |
+
+X
+
+> i∈D test
+
+A(ai), (11) and ˜ADtest denotes the accuracy computed analogously on steered outputs ˜ai. SPI provides a bounded, symmetric measure in [−1, 1] . If a steering method recovers the full performance, i.e. matches perfect accuracy, SPI equals 1. If steering degrades task accuracy fully to zero, SPI is −1. If there is no effect from steering, SPI will be 0. By measuring 
+
+relative effects in this way, benchmarks across tasks, and models with varying baselines become more meaningful. 
+
+6.2. Methods 
+
+We evaluate our steering proposal against several baselines. • No steering. Without intervention. • BASE -x (prompt-based steering). Appends suffix 
+
+“Think before you answer.” to the prompt (see §A.5), serving as a prompt-based baseline (Kojima et al., 2022). • BASE -μk (contrastive steering). Following (Rimsky et al., 2024; Tan et al., 2024), a steering vector is defined as the contrastive mean ( μ+ − μ−) at the last token position in the prompt ( k = n), using the layer identified as most effective by a probe ˆp
+
+for steering. Contrastive pairs are constructed with the top-k highest-, and lowest-error training samples (k ∈ { 50 , 100 , 200 }). • BASE -ˆp, BASE -ˆplog (probe-based steering). Uses weights of linear error estimator ˆp or logistic probe ˆplog 
+
+(i.e. trained with the LM’s predicted labels ˆy (Cheng et al., 2024; von Rütte et al., 2024)) as additive steering directions without optimisation. To assess if MERA improves existing baselines, we include the following methods. • MERA . Trains a regressor ˆp to predict the LM’s error, optimising both steering direction, and strength (see §3). • MERA -ˆplog . Replaces ˆp with weights of a logistic re-gression probe ˆplog (see BASE -ˆplog ). • MERA -μ100 . Substitutes probe weights w by con-trastive means, with k = 100 (see BASE -μ1). For comparability, all MERA steering methods intervene across all layers, and token positions (see §4). In §A.6.4, we included an ablation study for such choices. 
+
+6.3. Results 
+
+Figure 4 provides an aggregate overview of steering perfor-mance across models, and datasets, averaging both evalu-ation modes (see §2.1), and error percentiles. Higher SPI values indicate stronger error mitigation, while negative SPI 7Mechanistic Error Reduction with Abstention for Language Models    
+
+> Figure 4. Overview of steering results for various LMs, and datasets. The first, and second panels display model-, and dataset-specific views, respectively, with δ= 0 .05 . The third panel shows error percentiles, aggregated over the “last”n setting.
+
+suggests degradation. In contrast, Table 1 offers a more detailed view, reporting SPI values, with δ = 0 .01 for each model, and dataset individually.  
+
+> MERA
+
+Outperforms Baselines, and Enhances Existing Steering Methods The aggregate views in Figure 4, shows that MERA improves accuracy compared to both un-steered models, and existing steering approaches in all set-tings. The third panel in Figure 4 (right) shows that MERA 
+
+reduces errors across the percentiles. While these overall positive trends are encouraging, Table 1 shows that per-formance gains can vary with the model, and dataset, as detailed next. Certain LMs, and datasets benefit more than others. In Table 1, LL AMA-3.2-1B, and Q WEN -2.5-3B show the largest improvements, particularly on binary tasks such as SMS SPAM , and Y ES /N O, where SPI gains reach +0.87. Base models benefit more from MERA steering compared to instruction-tuned models. Corroborating Rimsky et al. (2024), we note that the MMLU-HS , and MMLU-PROF 
+
+subset is overall difficult to steer. • Contrastive steering without MERA is highly unreliable, sometimes reducing accuracy (see Table 1 for exam-ples). With MERA , it consistently improves accuracy, turning -0.05 SPI into +0.52 in Y ES /N O, and -0.09 into +0.21 in MMLU-HS , which is in line with the theoretical guarantees discussed in §3.2. • Logistic probe-based steering mostly fails (-0.85 SPI in S ENTIMENT ) but with exceptions (+0.83 SPI S EN -
+
+> TIMENT
+
+). MERA can help prevent task degradation (+0.00 SPI) where its base version fails. • Our primary proposal MERA proves highly effective. Without MERA , BASE -ˆp is too weak to be useful (+0.00 SPI in MMLU-HS , and S MS SPAM ) with negligible or negative gains. With MERA , it becomes the best-performing method, improving SPI by +0.64 in S EN -
+
+> TIMENT
+
+, and +0.53 in Y ES /N O, suggesting that error-based steering is better than using binary probe targets. As detailed in §A.6.2, to analyse how steering affects pre-diction quality, we define transitions based on ground truth labels, where 0 denotes an incorrect, and 1 a correct predic-tion. Oversteering corresponds to unnecessary degrading 
+
+outcomes ( 1 → 0), while understeering reflects missed op-portunities to correct ( 0 → 0). As shown in Figure 12, while imperfect, MERA generally yields more corrective 
+
+transitions with fewer degradations than baseline methods. 
+
+## 7. Discussion 
+
+Today, LMs can be frustratingly error-prone, failing even in simple supervised tasks. In this work, we establish a general-purpose methodology to steer LMs towards the correct an-swer. Unlike existing approaches that rely on expensive, uncalibrated, model-specific hyperparameter sweeps to find an appropriate strength for steering, our main contribution is a theoretically grounded framework that answers questions of when, and how much to steer. Experiments across diverse datasets, and LM families con-sistently show that MERA not only improves task accuracy over baselines, but also enhances existing contrastive, and probe-based steering methods. However, our current frame-work is inherently linear, and thus limited in its capacity to capture non-linear relationships between internal activa-tions, and model error. Our results on MMLU subsets un-derscore this limitation: certain datasets may be inherently harder to steer due to factors like semantic class overlap, task complexity, and label cardinality, warranting further investigation (Tan et al., 2024). One of MERA ’s strengths 8Mechanistic Error Reduction with Abstention for Language Models 
+
+Table 1. Complete view of steering results for various LMs and tasks. SPI (Equation 10) is reported, capturing the relative increase or decrease in accuracy for both the “last” (left) and “exact” (right) evaluation modes for δ = 0 .01 . Higher values are better. DATASET METHOD LL AMA-3.1-1B LL AMA-3.1-1B-IT GEMMA -2-2B GEMMA -2-2B-IT QWEN -2.5-3B QWEN -2.5-3B-IT YES /N O
+
+BASE -x (-0.05) | (+0.10) (+0.16) | (+0.18) (-0.21) | (-0.39) (-0.23) | (+0.00) (+0.00) | (-0.01) (+0.02) | (+0.03) 
+
+BASE -μ50 (+0.00) | (+0.03) (-0.03) | (+0.03) (+0.01) | (+0.00) (-0.01) | (-0.02) (+0.02) | (+0.00) (+0.01) | (+0.01) 
+
+BASE -μ100 (-0.05) | (-0.06) (+0.03) | (+0.18) (+0.01) | (+0.00) (-0.01) | (-0.02) (+0.01) | (-0.03) (-0.01) | (+0.00) 
+
+BASE -μ200 (-0.04) | (-0.06) (-0.01) | (+0.00) (+0.01) | (+0.01) (+0.00) | (+0.00) (-0.01) | (-0.01) (+0.01) | (+0.01) 
+
+BASE - ˆpLOG (+0.52) | (-1.00) (-0.28) | (-1.00) (-0.12) | (+0.01) (-0.02) | (-0.11) (+0.38) | (+0.10) (+0.49) | (-0.31) 
+
+BASE - ˆp (-0.01) | (+0.01) (-0.04) | (-0.06) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.01) | (+0.01) (+0.01) | (+0.01) 
+
+MERA -μ100 (+0.52) | (+0.00) (+0.19) | (+0.00) (+0.00) | (+0.00) (+0.16) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA (+0.52) | (+0.28) (+0.44) | (+0.00) (+0.42) | (+0.00) (+0.15) | (+0.00) (+0.47) | (+0.52) (+0.53) | (+0.00) SMS S PAM 
+
+BASE -x (+0.79) | (+0.03) (-0.79) | (-0.90) (+0.00) | (-1.00) (-0.52) | (+0.20) (-0.69) | (+0.44) (+0.00) | (+0.00) 
+
+BASE -μ50 (+0.84) | (-1.00) (-0.01) | (-0.15) (+0.00) | (-0.10) (+0.03) | (+0.00) (+0.15) | (+0.00) (+0.00) | (+0.00) 
+
+BASE -μ100 (+0.06) | (+0.10) (-0.03) | (-0.19) (+0.00) | (-0.19) (+0.03) | (+0.00) (+0.24) | (+0.00) (+0.00) | (+0.00) 
+
+BASE -μ200 (+0.00) | (-0.05) (+0.00) | (+0.04) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.20) | (+0.04) (+0.00) | (+0.00) 
+
+BASE - ˆpLOG (+0.88) | (-1.00) (-0.03) | (-1.00) (+0.00) | (+0.83) (+0.19) | (+0.00) (+0.09) | (-0.93) (+0.48) | (+0.02) 
+
+BASE - ˆp (+0.01) | (+0.02) (+0.00) | (+0.02) (+0.00) | (+0.00) (-0.02) | (+0.00) (+0.70) | (+0.00) (+0.00) | (+0.00) 
+
+MERA -μ100 (+0.44) | (+0.77) (+0.00) | (+0.50) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.08) (+0.00) | (+0.00) (+0.16) | (+0.00) (+0.00) | (+0.00) 
+
+MERA (+0.87) | (+0.71) (+0.00) | (+0.41) (+0.00) | (+0.12) (+0.00) | (+0.00) (+0.83) | (+0.70) (+0.87) | (+0.00) SENTIMENT 
+
+BASE -x (+0.00) | (-0.65) (-0.10) | (+0.01) (-0.32) | (+0.09) (+0.12) | (-0.10) (-0.45) | (-0.35) (-0.50) | (-0.50) 
+
+BASE -μ50 (+0.00) | (-0.33) (+0.50) | (+0.50) (-0.19) | (+0.00) (-0.11) | (-0.72) (+0.03) | (+0.01) (+0.06) | (+0.06) 
+
+BASE -μ100 (+0.00) | (-0.28) (+0.45) | (+0.45) (+0.00) | (+0.00) (-0.07) | (-0.53) (+0.02) | (+0.00) (+0.07) | (+0.06) 
+
+BASE -μ200 (-0.04) | (-0.06) (-0.01) | (+0.00) (+0.01) | (+0.01) (+0.00) | (+0.00) (-0.01) | (-0.01) (+0.01) | (+0.01) 
+
+BASE - ˆpLOG (-0.21) | (-1.00) (+0.87) | (-1.00) (-0.26) | (-0.09) (-0.05) | (-0.54) (-0.85) | (+0.19) (+0.38) | (+0.24) 
+
+BASE - ˆp (+0.00) | (+0.03) (-0.07) | (-0.07) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.06) | (+0.00) (+0.00) | (+0.00) 
+
+MERA -μ100 (+0.00) | (+0.00) (+0.35) | (+0.35) (+0.00) | (+0.00) (+0.16) | (+0.17) (+0.24) | (+0.11) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (+0.21) | (+0.21) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.49) | (+0.33) (+0.16) | (+0.21) (+0.00) | (+0.00) (+0.70) | (+0.41) MMLU-HS 
+
+BASE -x (+0.16) | (-0.59) (-0.12) | (-0.35) (+0.00) | (+0.00) (+0.00) | (+0.01) (+0.00) | (-0.26) (-0.30) | (-0.70) 
+
+BASE -μ50 (-0.02) | (-0.03) (-0.02) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (-0.05) | (-0.08) (-0.09) | (-0.09) 
+
+BASE -μ100 (-0.05) | (-0.05) (-0.05) | (-0.05) (+0.00) | (+0.00) (+0.00) | (-0.04) (-0.09) | (-0.12) (-0.07) | (-0.07) 
+
+BASE -μ200 (+0.01) | (-0.03) (+0.00) | (-0.05) (+0.00) | (+0.00) (+0.00) | (+0.01) (+0.05) | (-0.08) (-0.01) | (-0.01) 
+
+BASE - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+BASE - ˆp (+0.00) | (+0.00) (+0.01) | (-0.07) (+0.00) | (+0.05) (+0.00) | (+0.01) (+0.02) | (+0.00) (+0.02) | (+0.02) 
+
+MERA -μ100 (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.21) | (+0.13) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.21) | (+0.13) (+0.00) | (+0.00) 
+
+MERA (+0.00) | (+0.00) (+0.33) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (-0.01) | (-0.01) MMLU-PROF 
+
+BASE -x (+0.01) | (-0.63) (-0.16) | (-0.42) (+0.00) | (+0.01) (+0.03) | (+0.01) (+0.01) | (-0.15) (+0.01) | (-0.27) 
+
+BASE -μ50 (-0.06) | (-0.06) (-0.19) | (-0.07) (+0.00) | (+0.00) (+0.00) | (-0.12) (-0.03) | (-0.02) (+0.07) | (+0.07) 
+
+BASE -μ100 (+0.01) | (+0.01) (-0.11) | (-0.09) (+0.00) | (+0.00) (+0.00) | (-0.05) (-0.03) | (+0.01) (+0.04) | (+0.04) 
+
+BASE -μ200 (+0.02) | (+0.01) (-0.05) | (-0.13) (+0.00) | (+0.00) (+0.00) | (-0.05) (-0.04) | (-0.02) (+0.01) | (+0.01) 
+
+BASE - ˆpLOG (-0.06) | (-0.06) (+0.01) | (-0.80) (+0.00) | (+0.00) (+0.01) | (+0.02) (-0.24) | (-0.25) (+0.06) | (-0.35) 
+
+BASE - ˆp (-0.06) | (-0.06) (+0.01) | (-0.80) (+0.00) | (+0.00) (+0.01) | (+0.02) (-0.24) | (-0.25) (+0.06) | (-0.35) 
+
+MERA -μ100 (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.24) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.10) | (+0.10) 
+
+is to detect such unsteerable cases, and abstain from in-tervention, making it a more cautious steering approach compared to baseline methods. That said, while MERA im-proves targeted error correction, it may inadvertently impair general capabilities. For example, steering for specalised tasks could reduce performance on unrelated generation or reasoning tasks. Exploring these trade-offs, and develop-ing safeguards to preserve generality, and text fluency is an important direction for future work. In this work, we focus our evaluation on MCQA classi-fication tasks, as it allows for a controlled setup where ground-truth error can be unambiguously read off from token-level predictions (see §2). However, this choice of set-ting does not reflect a fundamental limitation of MERA . The framework is applicable to any task where labeled supervi-sion over model behavior is available. For example, MERA 
+
+could be extended to alignment objectives such as toxic-ity reduction, refusal behavior, and harmfulness mitigation; directions that we plan to explore next. There are also several promising directions for advancing 
+
+MERA as a general steering methodology. One promising avenue is to replace the linear error probes with non-linear estimators, such as neural networks, an extension we outline in §A.1. Another is investigating the impact of the evalu-ation metric used during calibration. For example, could using F1 score instead of accuracy promote more balanced steering in tasks with high class imbalance or cardinality? We aim to explore such questions in future work. 9Mechanistic Error Reduction with Abstention for Language Models 
+
+## Acknowledgements 
+
+We thank Ronald Namwanza for going above, and beyond to ensure we had access to computing resources during critical phases of this research. 
+
+## Disclaimer 
+
+This paper was prepared for informational purposes by the Artificial Intelligence Research group of JPMorgan Chase & Co., and its affiliates (“JP Morgan”) and is not a product of the Research Department of JP Morgan. JP Morgan makes no representation, and warranty whatsoever, and disclaims all liability, for the completeness, accuracy or reliability of the information contained herein. This document is not intended as investment research or investment advice, or a recommendation, offer or solicitation for the purchase or sale of any security, financial instrument, financial product or service, or to be used in any way for evaluating the merits of participating in any transaction, and shall not constitute a solicitation under any jurisdiction or to any person, if such solicitation under such jurisdiction or to such person would be unlawful. 
+
+## Impact Statement 
+
+This paper presents a method for steering language models to reduce their error on well-defined prediction tasks. Given the increasing appetite for applying such models on real-world problems, the responsible deployment of more mature versions of this technology could have a positive societal impact, enabling more aligned, and trustworthy AI products, and services. 
+
+## References 
+
+AI, S. Sujet-finance-instruct-177k. https: //huggingface.co/datasets/sujet-ai/ Sujet-Finance-Instruct-177k , 2023. Almeida, T. A., Gomez Hidalgo, J. M., and Yamakami, A. Contributions to the study of sms spam filtering: New collection and results. In Proceedings of the 2011 ACM Symposium on Document Engineering (DOCENG’11) ,2011. Arditi, A., Obeso, O., Syed, A., Paleka, D., Panickssery, N., Gurnee, W., and Nanda, N. Refusal in language mod-els is mediated by a single direction. In Globersons, A., Mackey, L., Belgrave, D., Fan, A., Paquet, U., Tomczak, J. M., and Zhang, C. (eds.), Advances in Neural Infor-mation Processing Systems 38: Annual Conference on Neural Information Processing Systems 2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024 ,2024. Ball, S., Kreuter, F., and Rimsky, N. Understanding jail-break success: A study of latent space dynamics in large language models. CoRR , abs/2406.09289, 2024. Belrose, N., Schneider-Joseph, D., Ravfogel, S., Cotterell, R., Raff, E., and Biderman, S. LEACE: Perfect linear con-cept erasure in closed form. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. Bhattacharjee, A., Ghosh, S., Rebedea, T., and Parisien, C. Towards inference-time category-wise safety steering for large language models, 2024. Bricken, T., Marcus, J., Mishra-Sharma, S., Tong, M., Perez, E., Sharma, M., Rivoire, K., and Henighan, T. Using dictionary learning features as classifiers. 2024. Burns, C., Izmailov, P., Kirchner, J. H., Baker, B., Gao, L., Aschenbrenner, L., Chen, Y., Ecoffet, A., Joglekar, M., Leike, J., Sutskever, I., and Wu, J. Weak-to-strong generalization: Eliciting strong capabilities with weak supervision, 2023. Cao, Y., Zhang, T., Cao, B., Yin, Z., Lin, L., Ma, F., and Chen, J. Personalized steering of large language models: Versatile steering vectors through bi-directional preference optimization. In The Thirty-eighth Annual Conference on Neural Information Processing Systems ,2024. URL https://openreview.net/forum? id=7qJFkuZdYo .Cheng, E., Baroni, M., and Alonso, C. A. Linearly con-trolled language generation with performative guarantees. In MINT: Foundation Model Interventions , 2024. Durmus, E., Tamkin, A., Clark, J., Wei, J., Marcus, J., Batson, J., Handa, K., Lovitt, L., Tong, M., McCain, M., Rausch, O., Huang, S., Bowman, S., Ritchie, S., Henighan, T., and Ganguli, D. Evaluat-ing feature steering: A case study in mitigating so-cial biases, 2024. URL https://anthropic.com/ research/evaluating-feature-steering .Elhage, N., Nanda, N., Olsson, C., Henighan, T., Joseph, N., Mann, B., Askell, A., Bai, Y., Chen, A., Conerly, T., DasSarma, N., Drain, D., Ganguli, D., Hatfield-Dodds, Z., Hernandez, D., Jones, A., Kernion, J., Lovitt, L., Ndousse, K., Amodei, D., Brown, T., Clark, J., Kaplan, J., McCandlish, S., and Olah, C. A math-ematical framework for transformer circuits. Trans-former Circuits Thread , 2021. https://transformer-circuits.pub/2021/framework/index.html. Elhage, N., Hume, T., Olsson, C., Schiefer, N., Henighan, T., Kravec, S., Hatfield-Dodds, Z., Lasenby, R., Drain, D., Chen, C., Grosse, R., McCandlish, S., Kaplan, J., Amodei, D., Wattenberg, M., and Olah, C. Toy models of superposition. Transformer Circuits Thread , 2022. 10 Mechanistic Error Reduction with Abstention for Language Models 
+
+Engels, J., Michaud, E. J., Liao, I., Gurnee, W., and Tegmark, M. Not all language model features are lin-ear, 2024. Farquhar, S., Varma, V., Kenton, Z., Gasteiger, J., Mikulik, V., and Shah, R. Challenges with unsupervised LLM knowledge discovery. CoRR , abs/2312.10029, 2023. Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M., Song, D., and Steinhardt, J. Measuring massive multitask language understanding. Proceedings of the International Conference on Learning Representations (ICLR) , 2021a. Hendrycks, D., Burns, C., Kadavath, S., Arora, A., Basart, S., Tang, E., Song, D., and Steinhardt, J. Measuring math-ematical problem solving with the MATH dataset. In Van-schoren, J. and Yeung, S. (eds.), Proceedings of the Neu-ral Information Processing Systems Track on Datasets and Benchmarks 1, NeurIPS Datasets and Benchmarks 2021, December 2021, virtual , 2021b. Hu, E. J., yelong shen, Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., and Chen, W. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations , 2022. Jorgensen, O., Cope, D., Schoots, N., and Shanahan, M. Improving activation steering in language models with mean-centring. CoRR , abs/2312.03813, 2023. Joseph Bloom, C. T. and Chanin, D. Saelens. https: //github.com/jbloomAus/SAELens , 2024. Kambhampati, S., Valmeekam, K., Guan, L., Verma, M., Stechly, K., Bhambri, S., Saldyt, L. P., and Murthy, A. B. Position: LLMs can’t plan, but can help planning in LLM-modulo frameworks. In Forty-first International Conference on Machine Learning , 2024. Kantamneni, S., Engels, J., Rajamanoharan, S., Tegmark, M., and Nanda, N. Are sparse autoencoders useful? a case study in sparse probing, 2025. URL https:// arxiv.org/abs/2502.16681 .Kojima, T., Gu, S. S., Reid, M., Matsuo, Y., and Iwasawa, Y. Large language models are zero-shot reasoners. In Koyejo, S., Mohamed, S., Agarwal, A., Belgrave, D., Cho, K., and Oh, A. (eds.), Advances in Neural Infor-mation Processing Systems 35: Annual Conference on Neural Information Processing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - December 9, 2022 , 2022. Krasheninnikov, D. and Krueger, D. Steering clear: A systematic study of activation steering in a toy setup. In 
+
+MINT: Foundation Model Interventions , 2024. Lee, B. W., Padhi, I., Ramamurthy, K. N., Miehling, E., Dognin, P. L., Nagireddy, M., and Dhurandhar, A. Pro-gramming refusal with conditional activation steering. In The Thirteenth International Conference on Learn-ing Representations, ICLR 2025, Singapore, April 24-28, 2025 . OpenReview.net, 2025. Li, K., Patel, O., Viégas, F., Pfister, H., and Wattenberg, M. Inference-time intervention: Eliciting truthful answers from a language model. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. Lieberum, T., Rajamanoharan, S., Conmy, A., Smith, L., Sonnerat, N., Varma, V., KramÃ ˛ ar, J., Dragan, A., Shah, R., and Nanda, N. Gemma scope: Open sparse autoen-coders everywhere all at once on gemma 2, 2024. Liu, A., Sap, M., Lu, X., Swayamdipta, S., Bhagavatula, C., Smith, N. A., and Choi, Y. Dexperts: Decoding-time controlled text generation with experts and anti-experts. In Zong, C., Xia, F., Li, W., and Navigli, R. (eds.), Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Pro-cessing, ACL/IJCNLP 2021, (Volume 1: Long Papers), Virtual Event, August 1-6, 2021 , pp. 6691–6706. Associa-tion for Computational Linguistics, 2021. Liu, S., Ye, H., Xing, L., and Zou, J. In-context vectors: Making in context learning more effective and control-lable through latent space steering, 2024. Luo, J., Ding, T., Chan, K. H. R., Thaker, D., Chattopad-hyay, A., Callison-Burch, C., and Vidal, R. PaCE: Par-simonious concept engineering for large language mod-els. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. URL https: //openreview.net/forum?id=lOMHt16T8R .Mallen, A., Brumley, M., Kharchenko, J., and Belrose, N. Eliciting latent knowledge from quirky language models. 
+
+arXiv preprint arXiv:2312.01037 , 2023. Marks, S. and Tegmark, M. The geometry of truth: Emer-gent linear structure in large language model represen-tations of true/false datasets. In First Conference on Language Modeling , 2024. Mayne, H., Yang, Y., and Mahdi, A. Can sparse autoen-coders be used to decompose and interpret steering vec-tors? In MINT: Foundation Model Interventions , 2024. Orgad, H., Toker, M., Gekhman, Z., Reichart, R., Szpek-tor, I., Kotek, H., and Belinkov, Y. Llms know more than they show: On the intrinsic representation of llm hallucinations, 2024. 11 Mechanistic Error Reduction with Abstention for Language Models 
+
+Park, K., Choe, Y. J., and Veitch, V. The linear represen-tation hypothesis and the geometry of large language models. In Forty-first International Conference on Ma-chine Learning, ICML 2024, Vienna, Austria, July 21-27, 2024 , 2024. Postmus, J. and Abreu, S. Steering large language models using conceptors: Improving addition-based activation engineering. In MINT: Foundation Model Interventions ,2024. Pres, I., Ruis, L., Lubana, E. S., and Krueger, D. Towards reliable evaluation of behavior steering interventions in LLMs. In MINT: Foundation Model Interventions , 2024. Qiu, Y., Zhao, Z., Ziser, Y., Korhonen, A., Ponti, E. M., and Cohen, S. B. Spectral editing of activations for large language model alignment. In Globersons, A., Mackey, L., Belgrave, D., Fan, A., Paquet, U., Tomczak, J. M., and Zhang, C. (eds.), Advances in Neural Information Processing Systems 38: Annual Conference on Neural Information Processing Systems 2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024 , 2024. Rimsky, N., Gabrieli, N., Schulz, J., Tong, M., Hubinger, E., and Turner, A. M. Steering llama 2 via contrastive acti-vation addition. In Ku, L., Martins, A., and Srikumar, V. (eds.), Proceedings of the 62nd Annual Meeting of the As-sociation for Computational Linguistics (Volume 1: Long Papers), ACL 2024, Bangkok, Thailand, August 11-16, 2024 , pp. 15504–15522. Association for Computational Linguistics, 2024. Scalena, D., Sarti, G., and Nissim, M. Multi-property steer-ing of large language models with dynamic activation composition. CoRR , abs/2406.17563, 2024. Tan, D., Chanin, D., Lynch, A., Paige, B., Kanoulas, D., Garriga-Alonso, A., and Kirk, R. Analysing the generali-sation and reliability of steering vectors. In Globersons, A., Mackey, L., Belgrave, D., Fan, A., Paquet, U., Tom-czak, J. M., and Zhang, C. (eds.), Advances in Neural In-formation Processing Systems 38: Annual Conference on Neural Information Processing Systems 2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024 ,2024. Team, G. Gemma 2: Improving open language models at a practical size. CoRR , abs/2408.00118, 2024a. Team, L. The llama 3 herd of models. CoRR ,abs/2407.21783, 2024b. Team, Q. Qwen2.5: A party of foundation models, Septem-ber 2024c. URL https://qwenlm.github.io/ blog/qwen2.5/ .Templeton, A., Conerly, T., Marcus, J., Lindsey, J., Bricken, T., Chen, B., Pearce, A., Citro, C., Ameisen, E., Jones, A., Cunningham, H., Turner, N. L., McDougall, C., Mac-Diarmid, M., Freeman, C. D., Sumers, T. R., Rees, E., Batson, J., Jermyn, A., Carter, S., Olah, C., and Henighan, T. Scaling monosemanticity: Extracting interpretable fea-tures from claude 3 sonnet. Transformer Circuits Thread ,2024. Todd, E., Li, M. L., Sharma, A. S., Mueller, A., Wallace, B. C., and Bau, D. Function vectors in large language models. In The Twelfth International Conference on Learning Representations, ICLR 2024, Vienna, Austria, May 7-11, 2024 , 2024. Turner, A. M., Thiergart, L., Leech, G., Udell, D., Vazquez, J. J., Mini, U., and MacDiarmid, M. Steering language models with activation engineering, 2024. von Rütte, D., Anagnostidis, S., Bachmann, G., and Hof-mann, T. A language model’s guide through latent space. 
+
+arXiv preprint arXiv:2402.14433 , 2024. Wang, T., Jiao, X., Zhu, Y., Chen, Z., He, Y., Chu, X., Gao, J., Wang, Y., and Ma, L. Adaptive activation steering: A tuning-free LLM truthfulness improvement method for di-verse hallucinations categories. In Long, G., Blumestein, M., Chang, Y., Lewin-Eytan, L., Huang, Z. H., and Yom-Tov, E. (eds.), Proceedings of the ACM on Web Confer-ence 2025, WWW 2025, Sydney, NSW, Australia, 28 April 2025- 2 May 2025 , pp. 2562–2578. ACM, 2025. Webson, A. and Pavlick, E. Do prompt-based models really understand the meaning of their prompts? In Carpuat, M., de Marneffe, M., and Ruíz, I. V. M. (eds.), Proceedings of the 2022 Conference of the North American Chapter of the Association for Computational Linguistics: Hu-man Language Technologies, NAACL 2022, Seattle, WA, United States, July 10-15, 2022 , pp. 2300–2344. Associa-tion for Computational Linguistics, 2022. Wu, Z., Arora, A., Wang, Z., Geiger, A., Jurafsky, D., Man-ning, C. D., and Potts, C. Reft: Representation finetuning for language models. Advances in Neural Information Processing Systems , 37:63908–63962, 2024. Wu, Z., Arora, A., Geiger, A., Wang, Z., Huang, J., Jurafsky, D., Manning, C. D., and Potts, C. Axbench: Steering llms? even simple baselines outperform sparse autoen-coders, 2025. Yang, K. and Klein, D. FUDGE: controlled text generation with future discriminators. In Toutanova, K., Rumshisky, A., Zettlemoyer, L., Hakkani-Tür, D., Beltagy, I., Bethard, S., Cotterell, R., Chakraborty, T., and Zhou, Y. (eds.), Pro-ceedings of the 2021 Conference of the North American 
+
+12 Mechanistic Error Reduction with Abstention for Language Models 
+
+Chapter of the Association for Computational Linguis-tics: Human Language Technologies, NAACL-HLT 2021, Online, June 6-11, 2021 , pp. 3511–3535. Association for Computational Linguistics, 2021. Yin, F., Ye, X., and Durrett, G. Lofit: Localized fine-tuning on LLM representations. In Globersons, A., Mackey, L., Belgrave, D., Fan, A., Paquet, U., Tomczak, J. M., and Zhang, C. (eds.), Advances in Neural Information Processing Systems 38: Annual Conference on Neural Information Processing Systems 2024, NeurIPS 2024, Vancouver, BC, Canada, December 10 - 15, 2024 , 2024. Zhao, S., Pascual, D., Brunner, G., and Wattenhofer, R. Of non-linearity and commutativity in BERT. In Inter-national Joint Conference on Neural Networks, IJCNN 2021, Shenzhen, China, July 18-22, 2021 , pp. 1–8. IEEE, 2021. Zhao, Y., Devoto, A., Hong, G., Du, X., Gema, A. P., Wang, H., He, X., Wong, K.-F., and Minervini, P. Steering knowledge selection behaviours in llms via sae-based representation engineering, 2024. Zhou, L., Schellaert, W., Martínez-Plumed, F., Moros-Daval, Y., Ferri, C., and Hernández-Orallo, J. Larger and more instructable language models become less reliable. Nat. ,634(8032):61–68, 2024. Zou, A., Phan, L., Chen, S., Campbell, J., Guo, P., Ren, R., Pan, A., Yin, X., Mazeika, M., Dombrowski, A., Goel, S., Li, N., Byun, M. J., Wang, Z., Mallen, A., Basart, S., Koyejo, S., Song, D., Fredrikson, M., Kolter, J. Z., and Hendrycks, D. Representation engineering: A top-down approach to AI transparency. CoRR , abs/2310.01405, 2023. 13 Mechanistic Error Reduction with Abstention for Language Models 
+
+## A. Appendix 
+
+A.1. Non-Linear Case 
+
+When ˆp is replaced by a non-linear function ( e.g. a MLP), the constraint ˆp(h + v) ≤ α cannot be expressed in a simple linear form. In such cases, a closed-form solution does not exist. One approach is to apply a first-order Taylor approximation of the non-linear function ˆp(h + v) around the current representation h. Specifically, we linearise ˆp as 
+
+ˆp(h + v) ≈ ˆp(h) + ∇h ˆp(h)⊤v, 
+
+where ∇h ˆp(h) ∈ Rd is the gradient of ˆp with respect to h. Substituting this into the constraint ˆp(h + v) ≤ α yields the approximate linear constraint: 
+
+ˆp(h) + ∇h ˆp(h)⊤v ≤ α. 
+
+This transforms the problem into the following quadratic program 
+
+min  
+
+> v
+
+∥v∥22 s.t. ∇h ˆp(h)⊤v ≤ α − ˆp(h).
+
+which corresponds exactly to the problem solved in the main body in Section 3.1 by letting w := ∇h ˆp(h).Alternatively, we can directly solve the non-linear constrained problem using numerical optimization techniques, such as projected gradient methods or interior-point solvers or adopting a penalty-based approach that converts the constraint into a differentiable penalty term, resulting in the following unconstrained objective 
+
+min 
+
+> v
+
+n
+
+∥v∥22 + ζ ·  max(0 , ˆp(h + v) − α)2o
+
+, (12) where ζ > 0 is a scalar hyperparameter controlling how strictly we enforce the constraint. Because this formulation is fully differentiable, any standard gradient-based optimiser ( e.g. Adam or SGD) can be used to iteratively update v until convergence. Similarly to the linear case, we choose α, and δ using a calibration set to effectively minimise the true loss. However, note that each candidate value requires solving the above problem 12 anew, which can be computationally demanding. 
+
+A.2. Calibration Step Detailed, and Theoretical Guarantees 
+
+The rationale behind our selection procedure is to ensure that we do not choose a value of α ∈ (0 , 1) unless it demonstrates a statistically significant improvement in performance. The strategy is as follows: we first identify the subset of α values that provably yield a positive performance improvement with high probability, and then select the one among them with the highest empirical performance. To formalise this, suppose f (α, X i) ∈ [0 , 1] is a performance function, and Xi is a random input variable. Then, the empirical performance on a calibration dataset Dn = {X1, . . . , X n} is given by 
+
+P (α, D n) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+f (α, X i).
+
+We denote P (α, D ) as the theoretical performance. Our approach proceeds in the following steps: 1. Discretise the interval [0 , 1] into K points: {α1, . . . , α K }.2. Construct confidence bands around each αj , using Hoeffding’s inequality, for example 
+
+Pr ( |P (αj , D n) − P (αj , D )| ≤ δn) ≥ 1 − αK ,
+
+where δn =
+
+q ln(2 K/α )2n .14 Mechanistic Error Reduction with Abstention for Language Models 
+
+3. Apply the union bound to ensure that, with probability at least 1 − α, all the above intervals simultaneously hold 
+
+|P (αj , D n) − P (αj , D )| ≤ δn for all j = {1, . . . , K },
+
+or equivalently 
+
+Pr sup 
+
+> α∈[0 ,1]
+
+|P (α, D n) − P (α, D )| ≤ εn
+
+!
+
+≥ 1 − α. 
+
+With this in place, we define the valid set 
+
+αvalid = {α : L(α) > 0},
+
+and select 
+
+α∗ = arg max 
+
+> α∈αvalid
+
+P (α, D n).
+
+Because the confidence bands hold uniformly over all α with high probability, we can guarantee that for every α ∈ αvalid , the true performance P (α, D ) is also positive. Thus, on this “good event”, α∗ indeed corresponds to a true positive performance improvement. This provides a formal guarantee, based on i.i.d. data, and bounded performance function, that our method yields a statistically sound improvement or abstains with high probability. 
+
+Alternative Perspective An alternative to Bonferroni-style correction, which may sometimes be conservative is to split the data into two parts: • Use one part to select the empirically optimal α⋆,• Then use the held-out part to estimate a confidence interval for the performance metric. We accept the selected α⋆ only if the lower bound of its confidence interval exceeds the desired threshold. This approach avoids the potentially conservative bounds introduced by Bonferroni correction, and can lead to tighter, and more adaptive inference. 
+
+A.3. Related Works on Steering Strength 
+
+Several prior works have explored different strategies for determining the appropriate strength of steering in LMs. We discuss these below. 
+
+Fixed Strengths, and Hyperparameter Sweeps Li et al. (2023); Liu et al. (2024); Turner et al. (2024); von Rütte et al. (2024); Postmus & Abreu (2024); Rimsky et al. (2024); Tan et al. (2024); Cao et al. (2024) rely on brute-force testing of different steering strengths across layers, and token positions, selecting the best-performing configuration. For example, Postmus & Abreu (2024); Turner et al. (2024); Liu et al. (2024); Cao et al. (2024) performs an exhaustive grid search over multiple layers, and multipliers, determining steering strength via empirical accuracy. Similarly, von Rütte et al. (2024) evaluates steering at fixed increments for LL AMA, and M ISTRAL , while adjusting layers. Durmus et al. (2024) uses a heuristic range of (-5,5) across tasks, admittedly an “arbitrary” decision. This approach is computationally expensive, and not generalisable across architectures or tasks. Arditi et al. (2024); Bhattacharjee et al. (2024); Ball et al. (2024) bypass search entirely, applying a pre-set steering strength across all instances, fixing λ at 1. While computationally efficient, unlike hyperparameter sweeps, no effort is made to select an optimal λ⋆.
+
+Conditional Methods Wang et al. (2025); Scalena et al. (2024) regulate steering strength dynamically. For example, Wang et al. (2025) clusters attention heads based on truthfulness, applying a variable steering strength that scales inversely with classifier confidence. Scalena et al. (2024) diminishes steering strength throughout model generation, reducing intervention as logit divergence stabilises. Cheng et al. (2024) is most similar to our work, and formulates steering as a constrained minimisation problem, selecting the minimal λ necessary to satisfy a safety threshold. A limitation of these methods is that they rely on indirect heuristics rather than directly calibrating for error minimisation on a given task. 15 Mechanistic Error Reduction with Abstention for Language Models 
+
+Lee et al. (2025) also explore conditional steering, but differ from our approach in that they trigger interventions based on cosine similarity with condition vectors, use PCA on contrastive examples to define steering directions, and select intervention strength via grid search rather than a closed-form solution. Also, Luo et al. (2024) propose an intervention method with some mathematical resemblance to ours, modulating steering strength via inner products, but differ in motivation, and design, as their approach targets suppression of harmful concepts in a predefined dictionary via supervised training, whereas MERA focuses on error mitigation with calibrated, layer-wise closed-form updates derived from held-out data. 
+
+A.4. Related Works on Steering Options 
+
+To extract activations, contrastive steering often relies on a specific model layer (Arditi et al., 2024; Rimsky et al., 2024; Turner et al., 2024), and the last token in the input prompt (Rimsky et al., 2024; Wang et al., 2025; Scalena et al., 2024), i.e. 
+
+k = n. The rationale behind using the last token position is that, with well-constructed prompts, and well-defined tasks such as MCQA, the functional behaviour of the model can be captured locally at a single token position (Arditi et al., 2024; Rimsky et al., 2024). Steering is then applied variously. That is, across all layers (Cheng et al., 2024; Liu et al., 2024), on specific layers (Arditi et al., 2024; Rimsky et al., 2024; Marks & Tegmark, 2024), targeting all token positions (Cheng et al., 2024) or selected ones, such as post-instruction or generated tokens (Arditi et al., 2024; Rimsky et al., 2024). The generalisability of these extraction, and application strategies across tasks, and models remains an open question. We contribute by addressing it in §4. 
+
+A.5. Experimental Details 
+
+Tables 2, and 3 summarise the datasets, and models used in our experiments. Table 2 provides an overview of the datasets, including the number of classes, class distributions, and sample counts across training, calibration, and test sets. Table 3 details the models, specifying the number of layers, type, and parameter size. 
+
+Table 2. Datasets overview. DATASET NR. C LASSES CLASS LABELS (D IST .) NR. T RAIN ./C AL ./T EST                           
+
+> YES /N O(AI, 2023) 2YES (32.5), N O(67.5) 3000 / 250 / 250 SMS S PAM (A LMEIDA ET AL ., 2011) 2SPAM (86.4), H AM (13.6) 3000 / 250 / 250 SENTIMENT (AI, 2023) 3POS (41.7), N EG (55.3), N EU (3.0) 3000 / 250 / 250 MMLU-HS (H ENDRYCKS ET AL ., 2021 A)4A (20.7), B (23.9), C (24.8), D (30.7) 3000 / 210 / 210 MMLU-PROF (H ENDRYCKS ET AL ., 2021 A)4A, B, C, D 2601 / 210 / 210
+
+Table 3. Models overview. MODEL NR. L AYERS TYPE PARAMETERS                   
+
+> LL AMA-3.1-1B (T EAM , 2024 B)16 IT 1B LL AMA-3.1-1B-IT (T EAM , 2024 B)16 BASE 1B GEMMA -2-2B (T EAM , 2024 A)26 BASE 2B GEMMA -2-2B-IT (T EAM , 2024 A)26 IT 2B QWEN -2.5-3B (T EAM , 2024 C)36 BASE 3B QWEN -2.5-3B-IT (T EAM , 2024 C)36 IT 3B
+
+Unsteered Task Accuracy Table 4 provides an overview of unsteered task accuracy across different models, presenting accuracy on the test set (left), and error (right) for various tasks in both evaluation modes. 
+
+Absolute Differences in Task Accuracy Table 5 provides an overview of the absolute difference between unsteered, and unsteered task accuracy across different models, presenting raw accuracy deltas in the “last” mode (left), and in the “exact” 
+
+mode (right) for various tasks, and each steering method. 
+
+Hardware All experiments were conducted on AWS instances, primarily using the G5.16 XLARGE instances with NVIDIA A10G GPUs. SAE caching experiments were exclusively run on G5.48 XLARGE instances, offering enhanced 8 GPUs capacity. 16 Mechanistic Error Reduction with Abstention for Language Models 
+
+Table 4. Unsteered task accuracy overview. Accuracy on the test dataset (left), and error (right) across datasets in both evaluation modes. MODEL MODE YES /N O SMS SPAM SENTIMENT MMLU-HS MMLU-PROF 
+
+LLAMA-3.2-1B (B ASE ) “last” (0.336 | 0.571) (0.128 | 0.622) (0.056 | 0.893) (0.190 | 0.776) (0.267 | 0.561) 
+
+“exact” (0.380 | 0.311) (0.172 | 0.590) (0.376 | 0.467) (0.176 | 0.717) (0.409 | 0.543) LLAMA-3.2-1B (IT) “last” (0.436 | 0.519) (0.892 | 0.179) (0.236 | 0.725) (0.195 | 0.779) (0.441 | 0.559) 
+
+“exact” (0.428 | 0.471) (0.784 | 0.201) (0.236 | 0.725) (0.205 | 0.721) (0.441 | 0.559) GEMMA-2B (B ASE ) “last” (0.452 | 0.519) (0.108 | 0.741) (0.124 | 0.784) (0.152 | 0.814) (0.262 | 0.203) 
+
+“exact” (0.384 | 0.510) (0.084 | 0.146) (0.828 | 0.320) (0.000 | 0.000) (0.262 | 0.203) GEMMA-2B (IT) “last” (0.644 | 0.394) (0.224 | 0.699) (0.900 | 0.135) (0.171 | 0.800) (0.437 | 0.552) 
+
+“exact” (0.428 | 0.456) (0.108 | 0.869) (0.884 | 0.335) (0.110 | 0.512) (0.339 | 0.555) QWEN -2.5-3B (B ASE ) “last” (0.356 | 0.575) (0.356 | 0.535) (0.364 | 0.714) (0.267 | 0.719) (0.332 | 0.660) 
+
+“exact” (0.360 | 0.571) (0.108 | 0.831) (0.092 | 0.303) (0.238 | 0.633) (0.220 | 0.589) QWEN -2.5-3B (IT) “last” (0.328 | 0.642) (0.108 | 0.892) (0.072 | 0.690) (0.319 | 0.709) (0.204 | 0.742) 
+
+“exact” (0.324 | 0.647) (0.108 | 0.892) (0.072 | 0.690) (0.319 | 0.709) (0.203 | 0.743) 
+
+Table 5. Complete view of absolute difference steering results for various LMs and tasks. Absolute difference is reported, capturing the increase or decrease in accuracy for both the “last” (left) and “exact” (right) evaluation modes for δ = 0 .01 . Higher values are better. DATASET METHOD LL AMA-3.1-1B LL AMA-3.1-1B-IT GEMMA -2-2B GEMMA -2-2B-IT QWEN -2.5-3B QWEN -2.5-3B-IT YES /N O
+
+BASE -x (-0.02) | (+0.06) (+0.09) | (+0.10) (-0.10) | (-0.15) (-0.15) | (+0.00) (+0.00) | (+0.00) (+0.02) | (+0.02) 
+
+BASE -μ50 (+0.00) | (+0.02) (-0.01) | (+0.02) (+0.00) | (+0.00) (-0.01) | (-0.01) (+0.02) | (+0.00) (+0.00) | (+0.00) 
+
+BASE -μ100 (-0.02) | (-0.02) (+0.02) | (+0.10) (+0.01) | (+0.00) (+0.00) | (-0.01) (+0.00) | (-0.01) (+0.00) | (+0.00) 
+
+BASE -μ200 (+0.12) | (-0.24) (-0.07) | (+0.03) (-0.04) | (-0.21) (-0.18) | (+0.06) (+0.00) | (+0.00) (+0.29) | (+0.30) 
+
+BASE - ˆpLOG (+0.35) | (-0.38) (-0.12) | (-0.43) (-0.05) | (+0.01) (-0.01) | (-0.05) (+0.24) | (+0.06) (+0.33) | (-0.10) 
+
+BASE - ˆp (+0.00) | (+0.00) (-0.02) | (-0.02) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.01) | (+0.00) (+0.01) | (+0.01) 
+
+MERA -μ100 (+0.35) | (+0.00) (+0.11) | (+0.00) (+0.00) | (-0.08) (+0.06) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (-0.01) | (-0.02) (+0.00) | (+0.02) (+0.00) | (+0.01) (+0.01) | (+0.01) (+0.00) | (+0.01) 
+
+MERA (+0.35) | (+0.18) (+0.25) | (+0.00) (+0.23) | (-0.04) (+0.05) | (+0.00) (+0.30) | (+0.34) (+0.36) | (-0.02) SMS S PAM 
+
+BASE -x (+0.69) | (+0.03) (-0.70) | (-0.71) (+0.00) | (-0.08) (-0.12) | (+0.18) (-0.24) | (+0.40) (+0.00) | (+0.00) 
+
+BASE -μ50 (+0.74) | (-0.17) (-0.01) | (-0.12) (+0.00) | (-0.01) (+0.02) | (+0.00) (+0.10) | (+0.00) (+0.00) | (+0.00) 
+
+BASE -μ100 (+0.05) | (+0.08) (-0.02) | (-0.15) (+0.00) | (-0.02) (+0.02) | (+0.00) (+0.16) | (+0.00) (+0.00) | (+0.00) 
+
+BASE -μ200 (+0.04) | (-1.00) (+0.02) | (+0.00) (-0.09) | (-0.14) (-0.02) | (+0.06) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+BASE - ˆpLOG (+0.76) | (-0.17) (-0.02) | (-0.78) (+0.00) | (+0.76) (+0.15) | (+0.00) (+0.06) | (-0.10) (+0.43) | (+0.02) 
+
+BASE - ˆp (+0.01) | (+0.02) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.45) | (+0.00) (+0.00) | (+0.00) 
+
+MERA -μ100 (+0.38) | (+0.64) (+0.00) | (+0.11) (+0.00) | (+0.00) (+0.03) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.02) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.07) (+0.00) | (+0.00) (+0.10) | (+0.02) (+0.00) | (+0.00) 
+
+MERA (+0.76) | (+0.59) (+0.00) | (+0.09) (+0.06) | (+0.11) (+0.00) | (+0.00) (+0.53) | (+0.62) (+0.78) | (+0.08) SENTIMENT 
+
+BASE -x (+0.00) | (-0.24) (-0.02) | (+0.01) (-0.04) | (+0.02) (+0.01) | (-0.09) (-0.16) | (-0.03) (-0.04) | (-0.04) 
+
+BASE -μ50 (+0.00) | (-0.12) (+0.38) | (+0.38) (-0.02) | (+0.00) (-0.10) | (-0.64) (+0.02) | (+0.01) (+0.06) | (+0.06) 
+
+BASE -μ100 (+0.00) | (-0.10) (+0.34) | (+0.34) (+0.00) | (+0.00) (-0.06) | (-0.47) (+0.01) | (+0.00) (+0.06) | (+0.06) 
+
+BASE -μ200 (-0.35) | (+0.35) (-0.44) | (-0.92) (+0.00) | (-0.61) (+0.23) | (+0.36) (-0.79) | (-0.96) (+0.39) | (+0.10) 
+
+BASE - ˆpLOG (-0.01) | (-0.38) (+0.67) | (-0.24) (-0.03) | (-0.08) (-0.05) | (-0.48) (-0.31) | (+0.17) (+0.36) | (+0.22) 
+
+BASE - ˆp (+0.00) | (+0.02) (-0.02) | (-0.02) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.04) | (+0.00) (+0.00) | (+0.00) 
+
+MERA -μ100 (+0.00) | (+0.03) (+0.26) | (+0.26) (+0.00) | (+0.00) (+0.02) | (+0.02) (+0.15) | (+0.10) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.01) (+0.16) | (+0.16) (+0.00) | (-0.01) (+0.00) | (+0.00) (+0.02) | (+0.01) (+0.00) | (+0.00) 
+
+MERA (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.43) | (+0.06) (+0.02) | (+0.02) (+0.00) | (+0.03) (+0.65) | (+0.38) MMLU-HS 
+
+BASE -x +0.13) | (-0.10) (-0.02) | (-0.07) (+0.00) | (+0.00) (+0.00) | (+0.01) (+0.00) | (-0.06) (-0.10) | (-0.22) 
+
+BASE -μ50 (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (-0.01) | (-0.02) (-0.03) | (-0.03) 
+
+BASE -μ100 (-0.01) | (-0.01) (-0.01) | (-0.01) (+0.00) | (+0.00) (+0.00) | (+0.00) (-0.02) | (-0.03) (-0.02) | (-0.02) 
+
+BASE -μ200 (+0.00) | (+0.00) (+0.04) | (+0.06) (-0.10) | (-0.49) (+0.03) | (+0.02) (+0.03) | (-0.32) (-0.21) | (-0.24) 
+
+BASE - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+BASE - ˆp (+0.00) | (+0.00) (+0.01) | (-0.01) (+0.00) | (+0.05) (+0.00) | (+0.00) (+0.01) | (+0.00) (+0.01) | (+0.01) 
+
+MERA -μ100 (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.03) (+0.15) | (+0.10) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.14) | (+0.10) (+0.00) | (+0.00) 
+
+MERA (+0.00) | (+0.00) (+0.26) | (+0.01) (+0.00) | (+0.00) (+0.03) | (+0.01) (-0.01) | (+0.00) (+0.00) | (+0.00) MMLU-PROF 
+
+BASE -x (+0.00) | (-0.15) (-0.05) | (-0.11) (+0.00) | (+0.01) (+0.02) | (+0.00) (+0.00) | (-0.05) (+0.00) | (-0.05) 
+
+BASE -μ50 (-0.01) | (-0.01) (-0.06) | (-0.02) (+0.00) | (+0.00) (+0.00) | (-0.02) (-0.01) | (+0.00) (+0.06) | (+0.06) 
+
+BASE -μ100 (+0.01) | (+0.01) (-0.03) | (-0.02) (+0.00) | (+0.00) (+0.00) | (-0.01) (-0.01) | (+0.00) (+0.03) | (+0.03) 
+
+BASE -μ200 (+0.01) | (+0.01) (-0.01) | (-0.03) (+0.00) | (+0.00) (+0.00) | (-0.01) (-0.01) | (+0.00) (+0.01) | (+0.01) 
+
+BASE - ˆpLOG (-0.01) | (-0.01) (+0.00) | (-0.21) (+0.00) | (+0.00) (+0.00) | (+0.01) (-0.08) | (-0.08) (+0.05) | (-0.07) 
+
+BASE - ˆp (-0.01) | (-0.01) (+0.00) | (-0.21) (+0.00) | (+0.00) (+0.00) | (+0.01) (-0.08) | (-0.08) (+0.05) | (-0.07) 
+
+MERA -μ100 (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.24) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA - ˆpLOG (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) 
+
+MERA (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.00) | (+0.00) (+0.08) | (+0.08) 
+
+17 Mechanistic Error Reduction with Abstention for Language Models 
+
+Runtime MERA introduces two kinds of overhead: one at deployment, and one during calibration. At deployment, MERA incurs negligible runtime cost, as the learned steering vector v can be applied via a standard forward hook . The cost is equivalent to a single vector addition per intervention layer, and token position. The main computational cost arises during calibration, after the probes have been trained, where a held-out calibration dataset is used to select the optimal confidence threshold α. This process involves evaluating a small number of candidate α
+
+values (e.g., 10-20) across a modest calibration set (e.g., 250 examples), computing the closed-form solution for each. Since this is a one-time cost per model, and dataset pair, it is amortised across deployment. In practice, calibration takes between 10 minutes and 1 hour on our hardware (see §A.5), though actual runtime depends on model size, input length, and hardware configuration. 
+
+Constructing Prompts Prompts are tailored to each dataset. Each dataset contains 3000 training samples, 250 calibration samples, and 250 test samples (except MMLU-HS , and MMLU-PROF , with 2061 training samples, and 210 calibration/test samples available). Below are the prompt templates for the datasets used in the experiments.                                                                                                                      
+
+> Question: [question text]{Options: A. [Option A] B. [Option B] C. [Option C] D. [Option D] Please select the correct answer. Only return one letter: A, B, C, or D. Answer:\n
+> Figure 5. Prompt template for MMLU subsets.
+> This SMS (text message): "[SMS text]" is classified as either spam or ham. Please evaluate the content of the SMS, and select the correct classification. Only return one word: "ham" or "spam". Answer:\n
+> Figure 6. Prompt template for SMS S PAM .
+> You are afinancial sentiment analysis expert. Your task is to analyze the sentiment expressed in the given financial text. Only reply with positive, neutral, or negative. Financial text: [financial text] Answer:\n
+> Figure 7. Prompt template for S ENTIMENT .
+> You are afinancial expert. Your task is to answer yes/no questions based on the given headline or news content. Context: Headline: "[headline text]" Now answer this question: [yes/no question] Answer:\n
+> Figure 8. Prompt template for Y ES /N O.
+
+Parsing Model Completions To compute the error E(a), and labels ˆy, we extract the exact answers directly from model completions, bypassing the need for external sources such as additional LMs to assess the ground truth (Orgad et al., 2024; Arditi et al., 2024). This approach focuses on tasks where the correct label can be reliably identified at a single token position, simplifying the evaluation process while ensuring a systematic, and linguistically informed parsing. For each task, class labels are transformed into multiple semantic variants, including lowercase, uppercase, and capitalised forms, with optional whitespace or newline prefixes. These string variants are tokenised, and their final token IDs are extracted for each ground truth label, and the LM’s vocabulary. 18 Mechanistic Error Reduction with Abstention for Language Models 
+
+During evaluation, we employ flexible matching within the token ID space, where any token ID corresponding to the semantic variants of a class is considered valid. The model’s output, a, is scanned starting from a specified position, and the first occurrence of a matching token ID is recorded. If no match is found, a fallback index of −1 is assigned, indicating no valid prediction. In the “exact” evaluation mode, a prediction is considered correct if, and only if the predicted token matches the class token IDs. 
+
+Training Linear Probes For each layer of a given LM, we train a distinct set of linear probes given the training samples, which are split into 70% for, and 30% for validation. The input features, X ∈ RN ×d, were extracted from residual stream activations at specific token positions (exact answer from open-ended model completion or the last prompt position) across all layers. The target variable is the error E(a) of the LM. To account for random variability, for each setting ( i.e. layer, and token position), we trained 5 linear regression models using Lasso regularisation strengths η ∈ { 0.005 , 0.01 , 0.05 , 0.1, 0.25 , 0.5}, alongside an unregularised linear regression with no sparsity. For simplicity, we omit the bias term in linear models, and focus on the weight vector. For each layer, we selected the model weights with the lowest RMSE on the validation set. For the logistic probes, we follow a similar methodology but the target variable is the accuracy A(a).
+
+A.6. Extended Results 
+
+A.6.1. P ROBE PERFORMANCE 
+
+Figures 9-10 show an extended version of Figure 2, separated by distinct datasets. RMSE, and standard error is reported (see §A.5 for details). We do not average over the MMLU-PROF dataset.  
+
+> Figure 9. Layer-wise performance of linear error estimators for different LM, separated by distinct token position, and representation strategies.
+
+Figure 11 shows the probe results for the logistic regression probes, used in §6. AUCROC, and standard error is reported (see §A.5 for details). Higher is better. A.6.2. T RANSITIONS 
+
+We report transitions in model predictions, before, and after steering using 2 × 2 matrices, with δ = 0 .00 , i.e. without safety constraints. Each cell corresponds to a transition between binary outcome classes, incorrect ( 0), and correct ( 1), and displays 19 Mechanistic Error Reduction with Abstention for Language Models   
+
+> Figure 10. Layer-wise performance of linear error estimators for different LM, separated by distinct token position, and representation strategies.
+> Figure 11. Layer-wise performance of linear error estimators for distinct LM families, separated by distinct token position, and input feature strategies. AUCROC, and standard error is reported.
+
+counts in both the “last” (left), and “exact” (right) evaluation modes, reflecting distinct prediction outcomes after steering. Higher values in top-right cell is prefered. As seen in Figure 12, MERA-based methods consistently induce a greater number of favourable transitions ( 0 → 1), while maintaining relatively low rates of degradation ( 1 → 0). Baseline methods, by contrast, exhibit more heterogeneous behaviour, often resulting in inconsistent effects across datasets. These results are averaged over the LMs. A.6.3. S PARSE STEERING 
+
+Figure 13 illustrates the sparsity of features employed during steering across different layers, and datasets. On average, only 3-5% of the latent features are activated for steering, with notable variations observed for specific tasks like MMLU-HS ,where certain layers (e.g., around 15-25) exhibit lower sparsity. A.6.4. A BLATION STUDY 
+
+The aggregated ablation study in Figure 14 demonstrates that steering on all token positions, a1:( m+n), and across all layers, 
+
+ℓ ∈ { 1, . . . , L }, consistently provides stronger empirical results compared to steering on selected tokens or the best layer, as identified by the highest performing probe. Specifically, the steering strategy on all tokens surpasses steering restrictions on “generation tokens”, i.e. ak>n in improving task accuracy. Similarly, applying interventions across all L layers yields higher overall performance compared to limiting interventions to the “best layer”. 20 Mechanistic Error Reduction with Abstention for Language Models                       
+
+> Figure 12. Transition matrices for each dataset, and method pair. Each cell quantifies the number of predictions transitioning from one correctness state to another after steering: 0→0,0→1,1→0, and 1→1, where 0denotes incorrect, and 1denotes correct. Values are shown for both the “last” (left), and “exact” (right) evaluation modes.
+> Figure 13. With probe steering, on average 3-5% of the latent features are employed for steering.
+
+Token Position-wise Probe Performance As shown in Figure 15, the probe trained for a single token position demonstrates consistently that the average RMSE is comparable across other token positions, including those not explicitly targeted during training. Naturally, some variability is expected. That said, these results suggest that the probe generalises sufficiently well to the remaining token positions retaining performance close to that of directly generated model tokens. For this analysis, we selected four random combinations of models, and datasets. 21 Mechanistic Error Reduction with Abstention for Language Models 
+
+Figure 14. Ablation study, aggregated over all datasets but the MMLU-PROF dataset, and models. 
+
+Figure 15. Comparison of probe performance across all token positions, and layers, including those not explicitly targeted during training. 
+
+A.7. Accuracy vs Error 
+
+The plot in Figure 16 illustrates the relationship between Delta Test Accuracy ( ↑), and Delta Test Error ( ↓) across various models. Each point represents a different steering method or baseline, highlighting the relationship between improving accuracy, and reducing errors. The clustering along a diagonal trend suggests a strong negative correlation. 
+
+Figure 16. Delta Test Accuracy ( ↑) versus Delta Test Error ( ↓) across the different models, over the steering methods, and baselines. 
+
+22
