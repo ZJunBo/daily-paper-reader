@@ -6,27 +6,30 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-29
-- 运行时间：2026-05-29 21:44:05 UTC
+- 最新运行日期：2026-05-30
+- 运行时间：2026-05-30 20:20:51 UTC
 - 运行状态：成功
-- 本次总论文数：2
+- 本次总论文数：3
 - 精读区：0
-- 速读区：2
+- 速读区：3
 
 ### 今日简报（AI）
-今日速读两篇论文，聚焦大模型安全对齐灵活放松与数据选择方法。Palette框架实现模块化可控的安全对齐放松，互补子模信息度量提升数据选择鲁棒性。可关注如何平衡模型安全性与灵活性，以及更智能的数据采样策略。
-- 详情：[/202605/29/README](/202605/29/README)
+今日聚焦AI安全防御与训练数据风险，速读三篇论文。最值得关注的是白名单防御方法Ellipsoid Control和高效多任务分类器Opir。建议深入对比这些防御策略的实用性与数据驱动生成风险的平衡。
+- 详情：[/202605/30/README](/202605/30/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Palette: A Modular, Controllable, and Efficient Framework for On-demand Authorized Safety Alignment Relaxation in LLMs](/202605/29/2605.24154v1-palette-a-modular-controllable-and-efficient-framework-for-on-demand-authorized-safety-alignment-relaxation-in-llms)  
+1. [Ellipsoid Control: A White-list Jailbreak Defense via Benign Latent Modeling](/202605/30/2605.24552v1-ellipsoid-control-a-white-list-jailbreak-defense-via-benign-latent-modeling)  
    标签：评分：7.0/10、query:smd
-   evidence：提出模块化框架实现选择性安全放松，与策划安全数据以保持对齐同时允许授权使用相关
-2. [Complement Submodular Information Measures for Balanced and Robust Data Selection](/202605/29/2605.24779v1-complement-submodular-information-measures-for-balanced-and-robust-data-selection)  
+   evidence：通过良性潜在建模的白名单越狱防御，直接通过保护良性区域来防御有害微调
+2. [Opir: Efficient Multi-Task Safety Classification for Toxicity, Jailbreaks, Hate Speech, and Harmful Content](/202605/30/2605.29659v1-opir-efficient-multi-task-safety-classification-for-toxicity-jailbreaks-hate-speech-and-harmful-content)  
+   标签：评分：7.0/10、query:smd
+   evidence：多任务安全分类器，用于检测毒性和越狱内容
+3. [No Safe Dose: How Training Data Drives Unsafe Image Generation](/202605/30/2605.28137v1-no-safe-dose-how-training-data-drives-unsafe-image-generation)  
    标签：评分：6.0/10、query:smd
-   evidence：提供了适用于安全数据筛选的鲁棒数据选择方法
+   evidence：研究训练数据中不安全图像比例如何驱动输出不安全，直接关联安全数据混合
 
 
 <div class="dpr-home-promo-card">
