@@ -6,30 +6,26 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-30
-- 运行时间：2026-05-30 20:20:51 UTC
+- 最新运行日期：2026-05-31
+- 运行时间：2026-05-31 20:57:19 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：0
-- 速读区：3
+- 本次总论文数：2
+- 精读区：1
+- 速读区：1
 
 ### 今日简报（AI）
-今日聚焦AI安全防御与训练数据风险，速读三篇论文。最值得关注的是白名单防御方法Ellipsoid Control和高效多任务分类器Opir。建议深入对比这些防御策略的实用性与数据驱动生成风险的平衡。
-- 详情：[/202605/30/README](/202605/30/README)
+今日精读1篇、速读1篇，聚焦语言模型可控性与安全性。重点推荐《UniSteer》，它用文本引导激活空间流匹配实现LLM高效可控，评价极高（9.0/10）。建议优先关注如何通过文本信号精准控制模型输出方向，这对日常使用生成式AI很有启发。
+- 详情：[/202605/31/README](/202605/31/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [UniSteer: Text-Guided Flow Matching in Activation Space for Versatile LLM Steering](/202605/31/2605.30076v1-unisteer-text-guided-flow-matching-in-activation-space-for-versatile-llm-steering)  
+   标签：评分：9.0/10、query:dg
+   evidence：文本引导的激活流匹配用于推理时引导LLM
 
 ### 速读区论文标签
-1. [Ellipsoid Control: A White-list Jailbreak Defense via Benign Latent Modeling](/202605/30/2605.24552v1-ellipsoid-control-a-white-list-jailbreak-defense-via-benign-latent-modeling)  
-   标签：评分：7.0/10、query:smd
-   evidence：通过良性潜在建模的白名单越狱防御，直接通过保护良性区域来防御有害微调
-2. [Opir: Efficient Multi-Task Safety Classification for Toxicity, Jailbreaks, Hate Speech, and Harmful Content](/202605/30/2605.29659v1-opir-efficient-multi-task-safety-classification-for-toxicity-jailbreaks-hate-speech-and-harmful-content)  
-   标签：评分：7.0/10、query:smd
-   evidence：多任务安全分类器，用于检测毒性和越狱内容
-3. [No Safe Dose: How Training Data Drives Unsafe Image Generation](/202605/30/2605.28137v1-no-safe-dose-how-training-data-drives-unsafe-image-generation)  
+1. [When Context Flips, Safety Breaks: Diagnosing Brittle Safety in Aligned Language Models](/202605/31/2605.27851v1-when-context-flips-safety-breaks-diagnosing-brittle-safety-in-aligned-language-models)  
    标签：评分：6.0/10、query:smd
-   evidence：研究训练数据中不安全图像比例如何驱动输出不安全，直接关联安全数据混合
+   evidence：诊断对齐大语言模型的安全脆弱性，直接关联安全退化问题
 
 
 <div class="dpr-home-promo-card">
