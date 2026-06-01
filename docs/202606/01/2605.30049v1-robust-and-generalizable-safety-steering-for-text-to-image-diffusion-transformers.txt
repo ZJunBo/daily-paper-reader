@@ -1,0 +1,1356 @@
+Title: Robust and Generalizable Safety Steering for Text-to-Image Diffusion Transformers
+
+URL Source: https://arxiv.org/pdf/2605.30049v1
+
+Published Time: Fri, 29 May 2026 01:50:55 GMT
+
+Number of Pages: 25
+
+Markdown Content:
+# Robust and Generalizable Safety Steering for Text-to-Image Diffusion Transformers 
+
+Zihao Xue 1* , Yan Wang 2* , Zhen Bi 1† , Long Ma 3, Zhonglong Zheng 4,Zeyu Yang 1, Bingyu Zhu 2, Longtao Huang 2, Jie Xiao 5, Jungang Lou 1† 
+
+> 1
+
+Huzhou Normal University, 2Alibaba Group, 3University of Science and Technology of China, 
+
+> 4
+
+Zhejiang Normal University, 5Zhejiang University of Technology 
+
+> *
+
+These authors contributed equally to this work †Corresponding authors 
+
+Abstract 
+
+Diffusion Transformers have become a power-ful backbone for text-to-image generation, but their layered and cross-modal generation pro-cess makes safety control fundamentally differ-ent from prompt-level filtering or output-level detection. Harmful semantics may be weakly expressed in text representations, progressively bound to visual latents, and finally entangled with rendering dynamics. As a result, safety steering at a fixed layer can be unstable, and a steering mechanism learned from known risks may not transfer reliably to a shifted target risk domain. We propose SafeDIG, a safety steering framework that formulates DiT safety adapta-tion as position-aware sparse feature transfer. SafeDIG first constructs Sparse Autoencoders over functionally distinct DiT intervention po-sitions and uses robustness-aware pre-training routing to prioritize intervention sites that are expected to remain stable under source–target risk shift. It then separates transferable safety features from domain-specific activation geom-etry by freezing the SAE encoder as a reusable sparse safety dictionary and adapting only the decoder to the target-domain activation man-ifold. During inference, SafeDIG combines Blend and Repel operations to steer unsafe ac-tivations toward transferred safety manifolds or away from harmful sparse directions. Experi-ments on FLUX.1 Dev and Stable Diffusion 3.5 Large show that SafeDIG consistently reduces target-domain and overall unsafe generation rates while preserving source-domain safety and image quality. 
+
+1 Introduction 
+
+Text-to-image diffusion models [ 22 ; 8 ; 41 ; 4] have rapidly evolved from U-Net-based [ 7] architec-tures to Diffusion Transformers (DiTs), enabling stronger visual fidelity and compositional genera-tion. However, this architectural shift also changes the nature of safety control [ 24 ]. In DiTs, textual Emerging Risks Known Risks 
+
+Risk Distribution Shift 
+
+> Safety Alignment
+> Unsafe  Safe
+> Robust
+> Safe Region
+> Prompt Filtering
+> brittle under shift
+> Fine -tuning
+> limited transfer
+> to new domains
+> Shared Safety Manifold
+> SafeDIG
+> Fixed -layer Steering
+> sensitive to position
+
+Figure 1: SafeDIG enables robust and generalizable DiT safety steering by routing stable interventions and transferring sparse safety features to enlarge the safe region across shifted risks. 
+
+semantics, visual latent tokens, and denoising dy-namics [ 38 ; 12 ; 52 ; 14 ] are deeply coupled inside a stacked transformer trunk. Harmful intent may not remain localized in the input prompt or the final im-age; this makes safety steering in DiTs an internal representation [ 25 ; 26 ] problem rather than only an input- or output-level filtering problem. This paper focuses on two central requirements for DiT safety steering: robustness and generaliz-ability . Robustness means that a safety interven-tion should remain stable across the heterogeneous functional stages of a DiT [ 51 ; 46 ; 17 ]. A steering direction that is effective in the text encoder may be-come insufficient after harmful concepts are bound to visual latents, while an intervention near the ren-dering stage may be powerful but fragile because it is entangled with low-level visual details. Gener-alizability means that a safety mechanism learned from known source risks should transfer to held-out or emerging target risks with limited target-domain data [ 43 ; 45 ], while preserving protection on the source risks. Existing safety mechanisms [3 ; 13 ] only partially address these requirements. Prompt filtering assumes explicit pre-generation risk, while post-generation detection cannot mod-1
+
+> arXiv:2605.30049v1 [cs.AI] 28 May 2026
+
+ify the unsafe generation trajectory. Model edit-ing and concept erasure methods [ 15 ; 16 ] often require repeated adaptation for new harmful cate-gories and may interfere with benign generation. Fixed-layer steering methods [ 6; 52 ] further as-sume that safety-relevant representations are stable at a preselected position, which is difficult to guar-antee in DiTs where risk semantics evolve from text understanding to cross-modal binding and vi-sual rendering. Therefore, robust and generalizable DiT safety steering should identify intervention positions where safety-relevant features remain sta-ble and transfer reusable safety features across risk domains. To address this problem, we propose SafeDIG 
+
+(Safe D iT Intervention and Generalization) , a position-aware Sparse Autoencoder (SAE) steer-ing framework for robust and generalizable safety adaptation in text-to-image DiTs. SafeDIG views the DiT generation process as a safety-risk prop-agation chain from textual semantics, to cross-modal binding, and finally to rendering-coupled representations. It first constructs candidate SAEs over functionally distinct intervention positions and performs robustness-aware pre-training routing to prioritize positions that are expected to preserve safety-relevant information under source–target shift. This turns intervention-site selection from a post-hoc layer search into an explicit compo-nent of robust safety transfer. SafeDIG further improves generalizability by separating transfer-able sparse safety features from target-domain ac-tivation geometry. Specifically, the SAE encoder is treated as a reusable sparse safety dictionary learned from source-domain safety-contrast acti-vations, while the decoder is treated as a domain-specific activation-manifold projector. The main contributions of this paper are summa-rized as follows: • We explicitly study robustness and transfer-ability as two key challenges for safety control in text-to-image DiT models. • We propose SafeDIG, a transferable SAE-based steering framework that dynamically selects intervention positions and adapts to new risks via decoder-only transfer. • Extensive experiments demonstrate that SafeDIG reduces unsafe generations across diverse harmful categories while preserving source-domain safety and generation quality. 
+
+2 Related Work 
+
+Safety of Diffusion Models. U-Net has been the dominant backbone for diffusion models in recent years, and several studies [ 32 ; 16 ] have focused on monitoring and interpreting the image genera-tion process of U-Net-based diffusion models [ 30 ]. Works such as MMA [ 47 ], GhostPrompts [ 5 ] and SneakyPrompts [ 48 ] have demonstrated the vul-nerability of text-to-image diffusion models to jail-break attacks. In response to these threats, various methods have been developed to safeguard U-Net-based diffusion models [9; 31]. As a newer and more powerful backbone, DiT has demonstrated exceptionally strong perfor-mance. However, research on interpretability and safety techniques specifically for DiT remains rel-atively limited. TIDE [ 19 ] and SAeUron [ 6] and some works [ 44 ; 50 ; 20 ; 15 ] have proposed foun-dational ideas for interpretable safety in DiT. Be-yond these, several algorithms—such as SAFREE [49 ], Erasing [ 13 ], and EraseDiff [ 42 ] offer pro-tection mechanisms that are not inherently tied to a specific backbone, making them adaptable for potential modification. 
+
+Generalization and SAEs. Generalization has always been a critical aspect of safety, especially when a guard trained for one risk distribution must remain effective under new prompts, categories, or model states. For generalization and robust-ness, several works study alignment robustness, representation balance, and safety behavior under distribution shift [ 54 ; 53 ; 21 ; 29 ], while related watermarking, diffusion safety, unlearning, and concept-removal studies provide complementary perspectives [ 10 ; 23 ; 27 ; 36 ; 3 ]. These studies moti-vate safety mechanisms that are not tied to a single prompt pattern or harmful category, but they do not directly specify where transferable safety structure is represented inside DiT. Meanwhile, SAEs of-fer a complementary route by exposing sparse and reusable internal features. For SAE and representa-tion interpretation, Stable-concept [ 40 ] and SAE-Lens [ 2 ] aim to make SAEs more robust and usable, Universal SAE [ 39 ] studies cross-model concept alignment, and recent works explore SAE features, dictionary learning, sparse latent concepts, and in-trinsic capability decomposition [11; 35; 18; 37]. Different from previous work, we explicitly study safety control of text-to-image diffusion transformer models from the perspective of robust-ness and generalization. 2a. Position-aware SAE Intervention in DiT b. Robustness-aware Routing 
+
+Stage 1: Source SAE Training and Transfer Stage 2: Inference-time Steering 
+
+> Position-aware Intervention
+> VAE
+> Decoder
+> Harmful
+> Input
+
+...       
+
+> Intervention Hooks
+> Single Stream
+> Block
+> Text
+> Encoder
+> Double
+> Stream Block
+> Textual
+> semantics
+> Cross-modal
+> binding
+> SAE SAE SAE Candidate
+> SAE Hooks
+> steering strength
+> calibration activation
+> timestep ran ge
+> ...
+> 1
+> 2
+> 3
+> Rank
+> Robustness Score
+> 123
+> Hook Priority
+> SAE SAE
+> SAE SAE
+> Route
+
+c. Manifold-stable SAE Generalize and Inference-time Steering 
+
+> Blend
+> Repel
+
+... ... �� �� �� �� �� 
+
+> Encoder Decoder
+> Pre-trained
+> Source SAE
+> Decoder-only
+> Adaptation
+> Source-domain
+> activations
+> Few-shot target
+> activations
+
+�� ��           
+
+> frozen frozen
+> �’= ( �−�)�
+> +�����
+> �’=�−
+> �(�풉풂   −�)
+> Activation at the
+> selected hook
+> Sparse
+> code activation along harmful
+> sparse subspace
+> Safe Image
+> Steered
+> activation
+> �풉풂  
+> Visual
+> rendering
+> transfer target manifold
+> Encoder Decoder
+
+Figure 2: Overview of SafeDIG as a position-aware SAE steering framework for DiT safety transfer. SafeDIG first analyzes where safety-relevant activations emerge at text-semantic, cross-modal binding, and rendering-coupled intervention positions in DiT; then predicts the robustness of candidate SAE interventions before training and ranks their priorities; finally performs manifold-stable SAE transfer and inference-time Blend/Repel steering. 
+
+3 Preliminaries 
+
+We introduce the notation needed for SafeDIG. A prompt p is encoded as C = Tψ(p). At diffusion step t, the latent state is xt, and the DiT trunk predicts 
+
+ˆϵθ(xt, t, C ) = Fθ(xt, t, C ). (1) For an intervention position ℓ, we denote the corre-sponding activation by 
+
+a(ℓ) = Act ℓ(xt, t, C ) ∈ Rdℓ . (2) Text-encoder states are prompt-semantic, middle-trunk activations are cross-modal, and late-trunk activations are rendering-coupled; detailed equa-tions are deferred to Appendix F. 
+
+Safety and Transfer. Let X be a text, activation, or SAE feature space, and let r : X → R be a risk score. For threshold τ , the safe region is 
+
+Sτ := {x ∈ X : r(x) ≤ τ }. (3) Safety generalization involves prompt shift, activa-tion shift, and output shift. SafeDIG therefore se-lects robust intervention positions, transfers sparse safety features, and evaluates output-level safety. 
+
+Activation and SAE. For intervention position 
+
+ℓ, cached activations form D(ℓ) = {a(ℓ)
+
+i }Ni=1 . An SAE maps activations to sparse features and recon-structs them: 
+
+z = E(a(ℓ)), ˆa(ℓ) = D(z), (4) with objective 
+
+min 
+
+E,D Ea(ℓ)∼D (ℓ)
+
+h
+
+∥a(ℓ) − ˆa(ℓ)∥22
+
+i
+
++ λ∥z∥1.
+
+(5) The concrete steering operators are introduced in the SafeDIG method section. 
+
+4 SafeDIG 
+
+SafeDIG is a position-aware, dynamically routed, and manifold-stable SAE steering framework for safety transfer in DiT. Rather than treating SAE as a fixed activation editor, SafeDIG asks three questions: where safety-relevant representations should be intervened, when each candidate inter-vention is expected to be robust, and how the se-lected SAE should be transferred and used during inference. For each candidate intervention position, SafeDIG first constructs a safety-contrast activation from paired positive and negative prompts. Given a safe prompt p+ and its harmful counterpart p−,we cache the corresponding activations a+( ℓ) and 
+
+a−(ℓ) and define 
+
+a(ℓ) = a+( ℓ) − a−(ℓ). (6) 3Thus, a(ℓ) is not a raw hidden state alone, but a positive-minus-negative activation direction that captures how the intervention position moves from harmful behavior toward the safe side. SafeDIG then maps this contrastive activation into the SAE space and reconstructs ˆa(ℓ) so that the safety direc-tion can be optimized and transferred on a sparse, manifold-constrained representation rather than di-rectly in the dense DiT activation space. 
+
+4.1 Position-aware SAE Intervention in DiT 
+
+Safety semantics in DiT do not remain in a single representation space. Let the candidate intervention positions be depth-ordered as 
+
+L = {ℓ1, ℓ 2, . . . , ℓ K }, ℓ1 ≺ ℓ2 ≺ · · · ≺ ℓK ,
+
+(7) and grouped by function: 
+
+L = Ltext ∪ L bind ∪ L render . (8) This partitions the DiT generation path into text-semantic, cross-modal binding, and rendering-coupled interventions. 
+
+Text-semantic intervention. The text encoder captures prompt-level risks and provides semantic steering with high natural-language interpretability, although its transferability can be limited. 
+
+Cross-modal binding intervention. Double Stream Blocks mix text and latent image tokens, where harmful concepts begin to bind to visual gen-eration directions and often yield the best transfer– retention trade-off. 
+
+Rendering-coupled intervention. Single Stream Blocks are closer to texture, layout, and final ren-dering, making them powerful but more sensitive to domain shift. This position-aware view provides the structural basis for the following routing and transfer design. 
+
+4.2 Robustness Routing over SAE 
+
+Before training SAEs, SafeDIG predicts the ex-pected robustness of each candidate intervention position and ranks the candidates. The router takes as input the candidate position ℓ ∈ L , the source and target training sets, the denoising-stage range, and a steering-operator set O = {Blend , Repel }
+
+with strength budget κo for each o ∈ O . It out-puts a priority order over position–operator pairs, 
+
+π = (( ℓ1, o 1), (ℓ2, o 2), . . . ), for SAE training and evaluation. For each pair (ℓ, o ), we estimate a ro-bustness score 
+
+R(ℓ, o ) = αS sem (ℓ) + ρS bind (ℓ)+ ηS stab (ℓ, o ) − ξC (ℓ, o, κ o), (9) where α, ρ, η, and ξ are non-negative routing weights normalized to sum to one in our imple-mentation. Let ∆a(ℓ) 
+
+> i
+
+= a+( ℓ) 
+
+> i
+
+− a−(ℓ) 
+
+> i
+
+and let ec
+
+denote the text embedding of the harmful category 
+
+c. We instantiate 
+
+Ssem (ℓ) = 1
+
+|D| 
+
+X
+
+> i
+
+cos( ϕa(∆ a(ℓ) 
+
+> i
+
+), e ci ),Sbind (ℓ) = 1
+
+|D| 
+
+X
+
+> i
+
+cos( ϕa(∆ a(ℓ) 
+
+> i
+
+), ϕ x(xi)) ,Sstab (ℓ, o ) = 1 − norm 
+
+
+
+Var i,t [go(∆ a(ℓ) 
+
+> i
+
+, κ o)] 
+
+
+
+,
+
+(10) where ϕa projects activations to the text-embedding dimension with the fixed projection used for cached activations, ϕx is the pooled latent-image token embedding, go is the activation update induced by Blend or Repel, and norm( ·) min–max normalizes scores over candidate pairs. The cost C(ℓ, o, κ o)
+
+combines normalized activation size, runtime, and intervention magnitude. The ranking is 
+
+π = argsort (ℓ,o )∈L×O 
+
+ R(ℓ, o ),
+
+(ℓ⋆, o ⋆) = π1. (11) Thus, SafeDIG chooses both where to intervene and whether the final configuration uses Blend or Repel; the main results use the top-ranked pair unless an ablation explicitly fixes the operator. De-tailed implementation is provided in Appendix E.6. 
+
+4.3 Manifold-stable SAE Safety Transfer 
+
+After routing selects the prioritized intervention positions, SafeDIG trains source-domain SAEs to learn sparse safety features. At position ℓ, the train-ing signal is the positive-minus-negative activation 
+
+a defined in Eq. 6. The SAE first encodes this safety-contrast activation into a sparse code and then reconstructs it as ˆa:
+
+z = Eω(a), ˆa = Dη(z). (12) Here, ˆa is the SAE-space reconstruction of the safety-contrast direction. Introducing ˆa is neces-sary because SafeDIG does not optimize the dense contrastive activation a directly; instead, it opti-mizes its sparse SAE representation and projects 4the optimized code back to the activation manifold. 
+
+LSAE (ω, η ) = Ea∼D (ℓ)
+
+> src
+
+∥a − Dη(Eω(a)) ∥22
+
+
+
++ λ∥Eω(a)∥1.
+
+(13) We interpret the encoder as a reusable safety feature dictionary and the decoder as a domain-specific activation-manifold projector. For few-shot target transfer, SafeDIG freezes the source encoder and adapts only the decoder: 
+
+z = Eωs (a), ˆatgt = Dηt (z), (14) 
+
+Ltransfer (ηt) = Ea∼D (ℓ)
+
+> tgt
+
+∥a − Dηt (Eωs (a)) ∥22
+
+
+
++ μΩstable .
+
+(15) The stability term summarizes feature stability, manifold stability, and source-domain retention. This design preserves the source safety dictionary while adapting its reconstruction geometry to the target domain, reducing few-shot overfitting. During inference, SafeDIG performs interven-tion at the routed position. Blend pulls an activation toward the transferred safety manifold: 
+
+Blend: a′ = (1 − β)a + βˆatgt . (16) Repel suppresses harmful sparse-feature directions rather than blindly moving away from the full re-construction. Let Mharm denote a sparse harmful-feature mask estimated from source and target safety features: 
+
+zharm = Mharm ⊙ Eωs (a),
+
+ˆaharm = Dηt (zharm ), (17) 
+
+Repel: a′ = a − γ(ˆ aharm − a). (18) Blend is suitable when the activation has drifted away from the stable safety manifold, while Re-pel is suitable when harmful sparse directions are strongly activated. We clip the intervention mag-nitude to avoid generation collapse and preserve visual quality. 
+
+5 Experiment 
+
+This section introduces the basic experimental setup and approach. Due to space limitations, some details are presented in the Appendix. 
+
+5.1 Datasets and Baselines 
+
+We evaluate SafeDIG on the i2p [ 33 ] benchmark in the main experiments. For transfer evaluation, we use the first six i2p categories as source domain and treat sexual as the target domain. We com-pare against four representative baselines adapted to DiT: SAFREE [ 49 ], EraseDiff [ 42 ], Erasing [ 13 ], and SAeUron [6]. Additional evaluations on MMA [ 47 ] and MM-SafetyBench [ 28 ] are reported in Appendix A. Complete adaptation details, preprocessing and hy-perparameters are provided in Appendix B. 
+
+5.2 Evaluation and Metric 
+
+To align with our safety-generalization objective, we report two complementary ASR metrics un-der multi-sample evaluation ( K = 10 images per prompt): Prompt-level ASR and Line-level ASR .For each generated image xi,k , we obtain two bi-nary unsafe indicators from Q16 [ 34 ] and NudeNet [1], and fuse them using a logical OR: 
+
+bi,k = bq16  
+
+> i,k
+
+∨ bnude  
+
+> i,k
+
+. (19) Based on {bi,k }, we compute: 
+
+Rline = 1
+
+N K 
+
+> N
+
+X
+
+> i=1
+> K
+
+X
+
+> k=1
+
+bi,k , (20) 
+
+Rprompt = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+max  
+
+> k∈{ 1,...,K }
+
+bi,k . (21) where Rline is the Line-level ASR and Rprompt is the Prompt-level ASR . Across all result tables in this paper, the upper row reports Prompt-level ASR and the lower row reports Line-level ASR. To further characterize robustness under distribution shift, we additionally report a bootstrap-based risk statistic over sampled prompt subsets; a detailed protocol is provided in Appendix C.3. For image quality, we report FID and CLIP 
+
+when applicable. FID measures the distributional distance between generated images and a reference image set in the Inception feature space; lower FID indicates better distribution-level visual qual-ity. CLIP measures image–text alignment between a generated image and its prompt; higher CLIP indicates better semantic preservation. Together, these metrics help verify whether safety improve-ments are achieved without severely degrading vi-sual quality or prompt consistency. 5Table 1: Main results on safety generalization for DiT image generation. We report ASR on six source-domain harmful categories and the target-domain Sexual category, together with Overall . The gray column highlights the target-domain Sexual results. For each method, the upper row shows Prompt-level ASR and the lower row shows Line-level ASR. Delta denotes the absolute ASR reduction relative to the corresponding base model. Within each model block, bold marks the best value and underline marks the second-best value among protection methods.                                                                                                                                                                                                                        
+
+> Model Settings Self-Harm ↓Hate ↓Illegal Activity ↓Shock ↓Violence ↓Harass ment ↓Sexual ↓Overall ↓Delta ↑
+> FLUX.1 Dev Base 59.43 57.14 55.26 65.74 51.96 48.79 44.56 53.97 -29.00 25.80 22.56 35.67 23.65 21.24 16.49 24.74 -SAFREE 67.26 65.77 60.36 73.70 55.52 57.08 51.87 61.34 -7.36 38.10 28.12 28.04 41.61 27.22 22.14 20.47 30.06 -5.32 SAeUron 60.60 67.71 56.81 66.95 54.48 54.67 48.56 57.31 -3.33 23.10 26.54 18.34 28.64 19.07 20.89 14.93 21.02 3.72 EraseDiff 61.64 57.40 55.20 65.26 51.96 49.17 42.44 53.81 0.16 28.79 25.41 21.02 34.05 22.22 20.32 15.86 23.66 1.09 Erasing 63.46 66.82 57.54 69.12 55.18 56.85 49.22 58.47 -4.50 25.27 31.17 19.71 32.23 22.00 22.84 15.36 23.05 1.69 SafeDIG 44.81 51.34 32.43 43.90 36.10 36.82 30.29 38.01 15.96 13.48 17.49 9.96 14.52 9.58 11.47 7.98 11.51 13.23
+> Stable Diffusion 3.5 Large Base 79.06 82.59 77.92 86.01 83.05 76.56 68.00 77.79 -48.38 57.40 43.41 57.99 49.26 46.25 29.63 45.71 -SAFREE 68.46 80.37 68.48 77.40 70.99 66.75 52.34 67.00 10.79 40.20 46.23 33.86 49.60 39.79 35.01 22.28 36.76 8.95 SAeUron 85.31 94.17 81.55 89.51 89.22 83.74 75.78 84.11 -6.32 40.74 49.57 36.31 49.24 45.21 40.66 26.06 39.64 6.07 EraseDiff 77.89 82.96 73.79 83.72 78.71 73.50 65.89 75.30 2.49 48.21 56.80 43.30 58.15 47.09 45.29 29.76 45.05 0.65 Erasing 64.24 78.03 67.79 76.60 69.61 65.30 48.44 64.81 12.98 37.03 48.74 34.26 48.80 39.14 36.37 19.91 35.90 9.80 SafeDIG 60.05 57.14 50.29 68.06 59.54 52.08 44.71 55.36 22.43 28.16 33.90 22.70 33.90 27.24 25.47 16.23 25.69 20.02
+
+6 Results and Analysis 
+
+This section analyzes SafeDIG from four aspects: overall safety performance, position-wise cross-domain transfer, component ablation with image quality preservation and further analysis. 
+
+6.1 Overall Safety Performance 
+
+Table 1 compares SafeDIG with representative safety baselines on two DiT backbones. The re-sults show that SafeDIG achieves stronger safety performance than competing methods across both Prompt-level and Line-level ASR. On FLUX.1 Dev, SafeDIG reduces the target-domain sexual 
+
+ASR from 44 .56 /16 .49 to 30 .29 /7.98 . On Sta-ble Diffusion 3.5 Large, it reduces the same metric from 68 .00 /29 .63 to 44 .71 /16 .23 . These gains are also reflected in the overall ASR, indicating that SafeDIG does not merely overfit a single harmful category but improves the broader safety behavior of DiT-based generation. Compared with prompt-side filtering, model editing, and unlearning-style baselines, the combination of robustness-aware routing and in-model SAE steering provides a stronger and more stable safety improvement. 
+
+6.2 Position-wise Cross-domain Transfer 
+
+Table 2 isolates the effect of steering position on cross-domain safety transfer. The three interven-tion positions show clearly different behaviors. Text-encoder steering provides moderate target-domain gains because it acts on explicit prompt semantics, but its retention on the source domain is limited. Double Stream Block transfer achieves the best balance: it obtains the lowest target-domain ASR, the lowest overall ASR, and negative trans-fer sacrifice, showing that middle-trunk activations contain reusable safety features that transfer across harmful domains. Single Stream Block transfer is less stable; although it can reduce the target-domain metric, it increases overall ASR and there-fore weakens source-domain retention. Table 2 also reports CLIP as an image-quality and semantic-preservation indicator. The CLIP values remain within a comparable range across steering posi-tions, suggesting that the safety gains are not ob-tained by simply destroying image-text alignment 6Table 2: Transferability analysis on FLUX.1 Dev. We compare each SAE-only setting with its transfer counterpart at different steering positions. The last two columns report image-quality interference caused by SAE steering.                                                        
+
+> Settings / ASR (%) Safety Transfer Image Quality Sexual (Prompt) ↓
+> Sexual (Line) ↓
+> Overall (Prompt) ↓
+> Overall (Line) ↓
+> Sacrifice (Prompt) ↓
+> Sacrifice (Line) ↓CLIP ↑FID ↓
+> Text Encoder SAE 50.11 13.93 56.25 19.74 --26.2 1.65 Text Encoder+Transfer 44.67 12.94 56.03 20.51 -0.22 0.77 26.6 1.44 Double Stream Block SAE 51.22 16.17 60.69 24.25 --27.8 9.90 Double Stream Block+Transfer 43.44 11.79 54.28 18.93 -6.41 -5.32 27.2 6.36 Single Stream Block SAE 51.00 15.88 57.58 21.76 --27.2 12.27 Single Stream Block+Transfer 46.78 14.69 60.11 24.40 2.53 2.64 27.4 11.89 Base w/o
+> SAE
+> w/o
+> Routing
+> SafeDIG
+> 0
+> 10
+> 20
+> 30
+> ASR / Gain (%)  Sex.-L All-L L
+
+(a) Component ablation. 0.0 0.2 0.4 0.6 0.8 
+
+> 0
+> 200
+> 400
+> Relative FID
+> Text Blend
+> Text Repel
+> Double Blend
+> Double Repel
+> Single Blend
+> Single Repel
+
+(b) Intervention–quality curve. 
+
+Figure 3: Compact analysis of component ablation and image-quality sensitivity on FLUX.1 Dev. The upper panel reports Line-level ASR and Line-level reduction for key ablation variants, while the lower panel reports relative FID under different SAE intervention strengths. 
+
+or degrading generation quality. 
+
+6.3 Component Ablation and Image Quality 
+
+Figure 3(a) provides a compact component-level ablation of SafeDIG, with the complete results in Table 6. Removing manifold-stable SAE trans-fer leaves only risk-aware routing and therefore lacks in-model sparse-feature adaptation, while re-moving routing directly applies the Double Stream SAE transfer setting and is less stable than the full pipeline. SafeDIG achieves the best Prompt-level and Line-level ASR, confirming that pre-training routing and manifold-stable SAE transfer are com-plementary. For image quality, Table 2 shows that CLIP remains within 26.2–27.8 across steering po-sitions, and FID does not increase under decoder transfer in most settings: it changes from 1.65 to 1.44 for text-encoder steering, from 9.90 to 6.36 for Double Stream Block steering, and from 12.27 to 11.89 for Single Stream Block steering. Thus, the safety gains are not obtained by simply degrading visual fidelity. Figure 3(b) further examines quality sensitivity under increasing intervention strength. The normal-ized curves show that text-encoder steering is visu-ally conservative, while trunk-level Repel usually yields lower relative FID than Blend, especially in the Single Stream Block. The sharper FID growth of high-strength Blend indicates that overly strong activation replacement can perturb the visual distri-bution, supporting moderate steering strengths in practice. 
+
+6.4 Further Analysis 
+
+Figure 4 visualizes the UMAP structure of SAE activation spaces at different positions. The text-encoder activation space shows stronger aggre-gation and clearer semantic organization, which makes it more interpretable and directly related to prompt-level concepts. In the middle DiT trunk, vi-sual features start to mix with text features, but the activation space still preserves a degree of category-level aggregation. Near the output side, activations contain heavily mixed features and become more difficult to interpret, because they are more strongly affected by iterative visual denoising and render-ing dynamics. These observations suggest that middle-trunk steering provides the most reliable safety transfer, while late-trunk is less stable. Figure 5 visualizes Line-level ASR for sexual and violence target domains across steering posi-7Prompt Semantic Space Text Encoder SAE Space Middle DiT Trunk Space Late DiT Trunk Space          
+
+> (a) (b) (c) (d)
+> sexual violence self-harm hate harassment illegal activity shocking
+
+Figure 4: Semantic and activation-space visualization of safety concepts. The prompt semantic space shows overlapping harmful categories, while SAE activation spaces at the text encoder, middle DiT trunk, and late DiT trunk reveal position-dependent internal concept organization. FLUX Text Text                   
+
+> +T
+> Double Double
+> +T
+> Single Single
+> +T
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> Target ASR (%)
+> 16.5
+> 13.9 12.9
+> 16.2
+> 11.8
+> 15.9 14.7
+> Line-level
+> Sexual target
+> Base SAE-only SAE+Transfer
+> FLUX Text Text
+> +T
+> Double Double
+> +T
+> Single Single
+> +T
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 23.6
+> 18.9 17.7 18.4 17.9
+> 21.9
+> 29.6
+> Line-level
+> Violence target
+> FLUX Text+T Double+T Single+T
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> Line-level
+> MMA stress test
+> MMA-L Sex.-L All-L
+
+Figure 5: Position-wise transfer and MMA adversarial stress test. The left and middle panels show Line-level ASR on sexual and violence target domains across steering positions, where ∆L denotes Line-level ASR reduction. The right panel reports MMA-L, Sex.-L, and All-L under adversarial prompting. 
+
+tions, with the complete violence-domain replace-ment table provided in Table 8. We further ablate the transfer domain by replacing the sexual target with violence. The pattern remains similar: Double Stream Block transfer is still the most stable setting across target and source domains. However, the collapse of Single Stream Block steering becomes more severe on violence, suggesting that late-trunk SAE interventions are highly sensitive to domain shift and can amplify harmful rendering dynamics instead of suppressing them. This strengthens the conclusion that safety transfer should be applied be-fore the representation becomes too tightly coupled to output-level visual details. Figure 5 reports an additional adversarial stress test on MMA based on the sexual transfer setting, while the full MMA transfer table is provided in Table 7. MMA contains stronger jailbreak-style prompts and therefore probes whether a transferred SAE protector remains stable under adversarial prompting. The compact results show that only Double Stream Block transfer maintains the most stable effect: it achieves the best MMA Line-level ASR while also improving sexual and overall Line-level ASR. By contrast, text-encoder and Single Stream Block transfer are less reliable under this stronger attack setting. This further supports the central observation that middle-trunk activations provide the most suitable intervention position for robust safety transfer. 
+
+7 Conclusions 
+
+This work studies safety generalization for DiT-based text-to-image generation and proposes SafeDIG, a position-aware, dynamically routed, and manifold-stable SAE steering framework. Ex-periments on FLUX.1 Dev and SD 3.5 show consis-tent Prompt-level and Line-level ASR reductions under distribution shift. Position-wise analysis fur-ther shows that middle-trunk steering offers the most stable transfer–retention trade-off, while ab-lations confirm the complementarity of risk-aware routing and SAE transfer. The routing algorithm can also automatically localize suitable interven-tion positions and steering strategies to some ex-tent. Overall, SafeDIG provides a low-overhead and reproducible baseline for robust DiT safety adaptation without repeated full-model retraining. 8Limitations 
+
+This study has two limitations that suggest use-ful directions for future work. First, while our results show that intervention position strongly af-fects safety transfer, we do not further localize this effect to finer components such as attention, MLP layers, token types, or timesteps. Second, the safety-contrast activation depends on paired safe and harmful prompts; although the safe prompt is constructed by minimal rewriting, a+( ℓ) − a−(ℓ)
+
+is best interpreted as an empirical safety-contrast signal rather than a perfectly isolated safety vector. Within these constraints, this work still explores key regularities of robust DiT safety steering under realistic experimental conditions. 
+
+References 
+
+[1] Praneeth Bedapudi. 2019. Nudenet: Neural nets for nudity detection and censoring. https://github. com/notAI-tech/NudeNet .[2] Joseph Bloom, Curt Tigges, Anthony Duong, and David Chanin. 2024. Saelens. https://github. com/decoderesearch/SAELens .[3] Enrico Cassano, Riccardo Renzulli, Marco Nurisso, Mirko Zaffaroni, Alan Perotti, and Marco Grangetto. 2025. Saemnesia: Erasing concepts in diffusion mod-els with supervised sparse autoencoders. Preprint ,arXiv:2509.21379. [4] Junsong Chen, Jincheng Yu, Chongjian Ge, Lewei Yao, Enze Xie, Zhongdao Wang, James Kwok, Ping Luo, Huchuan Lu, and Zhenguo Li. 2024. Pixart-
+
+α: Fast training of diffusion transformer for photo-realistic text-to-image synthesis. In International Conference on Learning Representations (ICLR) .[5] Zixuan Chen, Hao Lin, Ke Xu, Xinghao Jiang, and Tanfeng Sun. 2025. Ghostprompt: Jailbreaking text-to-image generative models based on dynamic opti-mization. arXiv preprint arXiv:2505.18979 .[6] Bartosz Cywinski and Kamil Deja. 2025. Saeuron: Interpretable concept unlearning in diffusion models with sparse autoencoders. In Forty-second Interna-tional Conference on Machine Learning, ICML 2025, Vancouver, BC, Canada, July 13-19, 2025 . OpenRe-view.net. [7] Chengbin Du, Yanxi Li, Zhongwei Qiu, and Chang Xu. 2023. Stable diffusion is unstable. Advances in Neural Information Processing Systems , 36:58648– 58669. [8] Patrick Esser, Sumith Kulal, Andreas Blattmann, Rahim Entezari, Jonas Müller, Harry Saini, Yam Levi, Dominik Lorenz, Axel Sauer, Frederic Boesel, and 1 others. 2024. Scaling rectified flow transformers for high-resolution image synthesis. Forty-first Interna-tional Conference on Machine Learning. [9] Pierre Fernandez, Guillaume Couairon, Hervé Jégou, Matthijs Douze, and Teddy Furon. 2023. The stable signature: Rooting watermarks in latent diffusion models. In IEEE/CVF International Conference on Computer Vision, ICCV 2023, Paris, France, October 1-6, 2023 , pages 22409–22420. IEEE. [10] Pierre Fernandez, Guillaume Couairon, Hervé Jé-gou, Matthijs Douze, and Teddy Furon. 2023. The stable signature: Rooting watermarks in latent dif-fusion models. In Proceedings of the IEEE/CVF International Conference on Computer Vision , pages 22466–22477. [11] Jack Gallifant, Shan Chen, Kuleen Sasse, Hugo J. W. L. Aerts, Thomas Hartvigsen, and Danielle S. Bit-terman. 2025. Sparse autoencoder features for classi-fications and transferability. CoRR , abs/2502.11367. [12] Sebastian Gallon, Fabio Feraco, Raffaele Marino, and Alain Pumir. 2025. Multiparticle dispersion in rotating-stratified turbulent flows. Physical Review Fluids , 10(3):034605. [13] Rohit Gandikota, Joanna Materzynska, Jaden Fiotto-Kaufman, and David Bau. 2023. Erasing concepts from diffusion models. In IEEE/CVF International Conference on Computer Vision, ICCV 2023, Paris, France, October 1-6, 2023 , pages 2426–2436. IEEE. [14] Chao Gao, Siqiao Xue, Jiwen Fu, Tingyi Gu, Shan-shan Li, Fan Zhou, and 1 others. 2026. Lookbench: A live and holistic open benchmark for fashion image retrieval. arXiv preprint arXiv:2601.14706 .[15] Daiheng Gao, Shilin Lu, Wenbo Zhou, Jiaming Chu, Jie Zhang, Mengxi Jia, Bang Zhang, Zhaoxin Fan, and Weiming Zhang. 2025. Eraseanything: Enabling concept erasure in rectified flow transformers. In 
+
+Forty-second International Conference on Machine Learning .[16] Qinqin He, Jiaqi Weng, Jialing Tao, and Hui Xue. 2025. A single neuron works: Precise concept erasure in text-to-image diffusion models. arXiv preprint arXiv:2509.21008 .[17] Yu He, Lichen Ma, Zipeng Guo, Xinyuan Shan, Jingling Fu, Dong Chen, Junshi Huang, and Yan Li. 2026. Hyperdit: Hyper-connected transformers for high-fidelity pixel-space diffusion. arXiv preprint arXiv:2605.15741 .[18] Zhenghao He, Guangzhi Xiong, Boyang Wang, San-chit Sinha, and Aidong Zhang. 2026. Casl: Concept-aligned sparse latents for interpreting diffusion mod-els. Preprint , arXiv:2601.15441. [19] Victor Shea-Jay Huang, Le Zhuo, Yi Xin, Zhaokai Wang, Peng Gao, and Hongsheng Li. 2025. TIDE : Temporal-aware sparse autoencoders for inter-pretable diffusion transformers in image generation. 
+
+CoRR , abs/2503.07050. 
+
+9[20] Dahye Kim and Deepti Ghadiyaram. 2025. Con-cept steerers: Leveraging k-sparse autoencoders for test-time controllable generations. arXiv preprint arXiv:2501.19066 .[21] Minjae Kwon, Josephine Lamp, and Lu Feng. 2026. Safety generalization under distribution shift in safe reinforcement learning: A diabetes testbed. Preprint ,arXiv:2601.21094. [22] Black Forest Labs, Stephen Batifol, Andreas Blattmann, Frederic Boesel, Saksham Consul, Cyril Diagne, Tim Dockhorn, Jack English, Zion English, Patrick Esser, Sumith Kulal, Kyle Lacey, Yam Levi, Cheng Li, Dominik Lorenz, Jonas Müller, Dustin Podell, Robin Rombach, Harry Saini, and 2 oth-ers. 2025. Flux.1 kontext: Flow matching for in-context image generation and editing in latent space. 
+
+Preprint , arXiv:2506.15742. [23] Feifei Li, Mi Zhang, Yiming Sun, and Min Yang. 2025. Detect-and-guide: Self-regulation of diffusion models for safe text-to-image generation via guide-line token optimization. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2025, Nashville, TN, USA, June 11-15, 2025 , pages 13252–13262. Computer Vision Foundation / IEEE. [24] Junlong Li, Yiheng Xu, Tengchao Lv, Lei Cui, Cha Zhang, and Furu Wei. 2022. Dit: Self-supervised pre-training for document image transformer. In Pro-ceedings of the 30th ACM international conference on multimedia , pages 3530–3539. [25] Xinfeng Li, Yuchen Yang, Jiangyi Deng, Chen Yan, Yanjiao Chen, Xiaoyu Ji, and Wenyuan Xu. 2024. Safegen: Mitigating sexually explicit content genera-tion in text-to-image models. In Proceedings of the 2024 on ACM SIGSAC Conference on Computer and Communications Security , pages 4807–4821. [26] Jiahao Liu, Dongsheng Li, Hansu Gu, Peng Zhang, Tun Lu, Li Shang, and Ning Gu. 2025. Unbiased collaborative filtering with fair sampling. In Proceed-ings of the 48th International ACM SIGIR Confer-ence on Research and Development in Information Retrieval , pages 2555–2559. [27] Renyang Liu, Kangjie Chen, Han Qiu, Jie Zhang, Kwok-Yan Lam, Tianwei Zhang, and See-Kiong Ng. 2026. Saferedir: Prompt embedding redirection for robust unlearning in image generation models. arXiv preprint arXiv:2601.08623 .[28] Xin Liu, Yichen Zhu, Yunshi Lan, Chao Yang, and Yu Qiao. 2023. Query-relevant images jailbreak large multi-modal models. ArXiv , abs/2311.17600. [29] Yutao Mou, Shikun Zhang, and Wei Ye. 2024. Sg-bench: Evaluating llm safety generalization across diverse tasks and prompt types. ArXiv ,abs/2410.21965. [30] William Peebles and Saining Xie. 2023. Scalable diffusion models with transformers. In IEEE/CVF International Conference on Computer Vision, ICCV 2023, Paris, France, October 1-6, 2023 , pages 4172– 4182. IEEE. [31] Peigui Qi, Kunsheng Tang, Wenbo Zhou, Weiming Zhang, Nenghai Yu, Tianwei Zhang, Qing Guo, and Jie Zhang. 2025. Safeguider: Robust and practical content safety control for text-to-image models. In 
+
+Proceedings of the 2025 ACM SIGSAC Conference on Computer and Communications Security, CCS 2025, Taipei, Taiwan, October 13-17, 2025 , pages 2818–2832. ACM. [32] Yiting Qu, Xinyue Shen, Yixin Wu, Michael Backes, Savvas Zannettou, and Yang Zhang. 2025. Unsafebench: Benchmarking image safety classifiers on real-world and ai-generated images. In Proceed-ings of the 2025 ACM SIGSAC Conference on Com-puter and Communications Security , pages 3221– 3235. [33] Patrick Schramowski, Manuel Brack, Björn Deis-eroth, and Kristian Kersting. 2023. Safe latent dif-fusion: Mitigating inappropriate degeneration in dif-fusion models. In IEEE/CVF Conference on Com-puter Vision and Pattern Recognition, CVPR 2023, Vancouver, BC, Canada, June 17-24, 2023 , pages 22522–22531. IEEE. [34] Patrick Schramowski, Christopher Tauchmann, and Kristian Kersting. 2022. Can machines help us an-swering question 16 in datasheets, and in turn reflect-ing on inappropriate content? In Proceedings of the 2022 ACM conference on fairness, accountability, and transparency , pages 1350–1361. [35] Stepan Shabalin, Ayush Panda, Dmitrii Khar-lapenko, Abdur Raheem Ali, Yixiong Hao, and Arthur Conmy. 2025. Interpreting large text-to-image diffusion models with dictionary learning. Preprint ,arXiv:2505.24360. [36] Gurjot Singh, Prabhjot Singh, Aashima Sharma, Maninder Singh, and Ryan Ko. 2026. Revision: A post-hoc, vision-based technique for replacing un-acceptable concepts in image generation pipeline. 
+
+arXiv preprint arXiv:2602.19149 .[37] Paweł Skier´ s, Tomasz Trzci´ nski, and Kamil Deja. 2026. Elrond: Exploring and decomposing intrin-sic capabilities of diffusion models. arXiv preprint arXiv:2602.10216 .[38] Binhong Tan, Zhaoxin Wang, and Handing Wang. 2026. Dtvi: Dual-stage textual and visual interven-tion for safe text-to-image generation. arXiv preprint arXiv:2603.22041 .[39] Harrish Thasarathan, Julian Forsyth, Thomas Fel, Matthew Kowal, and Konstantinos G. Derpanis. 2025. Universal sparse autoencoders: Interpretable cross-model concept alignment. In Forty-second Interna-tional Conference on Machine Learning, ICML 2025, Vancouver, BC, Canada, July 13-19, 2025 . OpenRe-view.net. 
+
+10 [40] Berk Tinaz, Zalan Fabian, and Mahdi Soltanolkotabi. 2025. Emergence and evolu-tion of interpretable concepts in diffusion models. 
+
+CoRR , abs/2504.15473. [41] Chenfei Wu, Jiahao Li, Jingren Zhou, Junyang Lin, Kaiyuan Gao, Kun Yan, Shengming Yin, Shuai Bai, Xiao Xu, Yilei Chen, Yuxiang Chen, Zecheng Tang, Zekai Zhang, Zhengyi Wang, An Yang, Bowen Yu, Chen Cheng, Dayiheng Liu, Deqing Li, and 20 oth-ers. 2025. Qwen-image technical report. CoRR ,abs/2508.02324. [42] Jing Wu, Trung Le, Munawar Hayat, and Mehrtash Harandi. 2025. Erasing undesirable influence in dif-fusion models. In IEEE/CVF Conference on Com-puter Vision and Pattern Recognition, CVPR 2025, Nashville, TN, USA, June 11-15, 2025 , pages 28263– 28273. Computer Vision Foundation / IEEE. [43] Yongli Xiang, Ziming Hong, Zhaoqing Wang, Xiangyu Zhao, Bo Han, and Tongliang Liu. 2026. When safety collides: Resolving multi-category harmful conflicts in text-to-image diffu-sion via adaptive safety guidance. arXiv preprint arXiv:2602.20880 .[44] Zhixin Xie, Xurui Song, and Jun Luo. 2025. Where to start alignment? diffusion large language model may demand a distinct position. CoRR ,abs/2508.12398. [45] Siqiao Xue, Xiaojing Li, Fan Zhou, Qingyang Dai, Zhixuan Chu, and Hongyuan Mei. 2024. Famma: A benchmark for financial domain multilingual multimodal question answering. arXiv preprint arXiv:2410.04526 .[46] Xiang Yang, Feifei Li, Mi Zhang, Geng Hong, Xi-aoyu You, and Min Yang. 2026. Saferope: Risk-specific head-wise embedding rotation for safe gen-eration in rectified flow transformers. arXiv preprint arXiv:2604.01826 .[47] Yijun Yang, Ruiyuan Gao, Xiaosen Wang, Tsung-Yi Ho, Nan Xu, and Qiang Xu. 2024. Mma-diffusion: Multimodal attack on diffusion models. In IEEE/CVF Conference on Computer Vision and Pattern Recognition, CVPR 2024, Seattle, WA, USA, June 16-22, 2024 , pages 7737–7746. IEEE. [48] Yuchen Yang, Bo Hui, Haolin Yuan, Neil Gong, and Yinzhi Cao. 2024. Sneakyprompt: Jailbreaking text-to-image generative models. In IEEE Symposium on Security and Privacy, SP 2024, San Francisco, CA, USA, May 19-23, 2024 , pages 897–912. IEEE. [49] Jaehong Yoon, Shoubin Yu, Vaidehi Patil, Huaxiu Yao, and Mohit Bansal. 2025. SAFREE: training-free and adaptive guard for safe text-to-image and video generation. In The Thirteenth International Conference on Learning Representations, ICLR 2025, Singapore, April 24-28, 2025 . OpenReview.net. [50] Arman Zarei, Samyadeep Basu, Keivan Rezaei, Zi-hao Lin, Sayan Nag, and Soheil Feizi. 2025. Local-izing knowledge in diffusion transformers. In The Thirty-ninth Annual Conference on Neural Informa-tion Processing Systems .[51] Chenyu Zhang, Lanjun Wang, Yueyang Cheng, Ruidong Chen, Wenhui Li, and An-an Liu. 2026. What concepts lie within? detecting and suppress-ing risky content in diffusion transformers. arXiv preprint arXiv:2605.10180 .[52] Hongxiang Zhang, Yifeng He, and Hao Chen. 2024. Steerdiff: Steering towards safe text-to-image diffu-sion models. arXiv preprint arXiv:2410.02710 .[53] Zekai Zhang, Xiao Li, Xiang Li, Lianghe Shi, Meng Wu, Molei Tao, and Qing Qu. 2026. Generalization of diffusion models arises with a balanced represen-tation space. Preprint , arXiv:2512.20963. [54] Andy Zou, Long Phan, Justin Wang, Derek Due-nas, Maxwell Lin, Maksym Andriushchenko, Rowan Wang, Zico Kolter, Matt Fredrikson, and Dan Hendrycks. 2024. Improving alignment and robust-ness with circuit breakers. CoRR , abs/2406.04313. 
+
+A Pre-study: Base Safety of DiT Models under Jailbreak 
+
+Before introducing any mitigation or safety-transfer component, we first conduct a pre-study on the base safety behavior of recent DiT-based text-to-image generators under jailbreak-style prompts. 
+
+A.1 Models 
+
+We evaluate four widely used open-source large-scale DiT text-to-image models: FLUX.1 Dev , Sta-ble Diffusion 3.5 Large , PixArt-XL-2-1024-MS ,and Qwen-Image . Unless otherwise specified, all models use a unified image-generation configura-tion for fair comparison (details in Appendix B). 
+
+A.2 Datasets 
+
+We use three jailbreak-oriented datasets to cover both standard benchmarks and broader category generalization: 1. i2p benchmark (Full Set). We use the full i2p benchmark consisting of 4,703 jailbreak prompts spanning seven harmful categories: 
+
+self-harm , hate , illegal activity , shocking , vi-olence , harassment , and sexual . We report the benchmark-default ASR (Line-level ASR) and Prompt-level ASR . The evaluators in-clude Q16 and NudeNet ; their detailed con-figuration and aggregation logic are described in Appendix C. 11 2. MMA (text-to-image adversarial jailbreak dataset). We use the 1,000 target_prompt 
+
+entries as high-risk prompts in the sexual cat-egory. This dataset is used to probe the initial robustness of each model under strong sexual-category jailbreak prompts. 3. MM (Multimodal Jailbreak Dataset). We use 1,680 harmful prompts covering 14 cate-gories: Physical Harm , Hate , Speech , Illegal Activity , Sex , Privacy Violence , Financial Ad-vice , Economic Harm , Fraud , Health Consul-tation , Political Lobbying , Government Deci-sion , Legal Opinion , and Malware Generation .This dataset helps evaluate broader general-ization beyond the i2p taxonomy (details are provided in Table 4). 
+
+A.3 Results and Analysis 
+
+By examining model behavior on i2p, MMA, and MM, we summarize three empirical observa-tions that motivate our problem setting and design choices. 
+
+Takeaway 1 (Sexual can be the better transfer target despite low baseline ASR). Across the seven i2p harmful categories, the sexual category exhibits the lowest measured harmful rate. This pat-tern is consistent with stronger built-in suppression for sexual content in current production-oriented models. Importantly, a low baseline harmful rate does not eliminate the transfer challenge; instead, residual failures can be subtle and may shift under distribution changes. This observation motivates our choice of sexual as the target domain in safety transfer. 
+
+Takeaway 2 (Low ASR on niche, subjective cat-egories may reflect evaluator blind spots). On the MM dataset, we observe that certain niche and highly subjective categories yield very low mea-sured ASR. Such low ASR should not be over-interpreted as strong model robustness. One plau-sible explanation is evaluator coverage: detector-based classifiers may have limited training support for rare categories, leading to reduced sensitivity and under-detection. 
+
+Takeaway 3 (Evidence of transferable safety fea-tures beyond evaluator coverage). Building on Takeaway 2, we further find that even when the evaluator lacks strong capability for some niche categories, it can still detect harmfulness in several less common but practically important areas (e.g., policy- and finance-related harms). This suggests the presence of general and transferable safety-related visual cues that can still be recognized across categories. These transferable cues further motivate our focus on safety transfer : rather than relying only on category-specific filters, we exploit generalizable safety signals to build more robust and persistent mitigation. 
+
+Additional Declaration. MMA primarily con-tains aggressive attacks close to sexual harmful content, and its empirical trend is broadly similar to i2p in our pre-study. Therefore, in this paper we use MMA as a focused stress-test set rather than running full-domain transfer and generalization-robustness experiments on MMA. A more exhaus-tive MMA study is left for future work. 
+
+B Main Experiment Setup 
+
+Reproducing the full experimental pipeline requires substantial compute resources. In our internal runs, a practical budget included at least 50GB VRAM per GPU, 96GB host memory, and roughly 2TB storage, with an overall runtime of approximately 1–3 months depending on scheduling. Experiments were conducted on multi-GPU clusters including A100 and RTX 4090 devices. These values are reported as reproducibility guidance rather than strict requirements. 
+
+B.1 Baselines 
+
+We compare against four baseline methods. Be-cause none was originally designed for the DiT backbone studied here, each method is adapted to this setting to ensure fair comparison. 
+
+SAFREE is a training-free protection frame-work for image and video generation. Although it is not a canonical transfer-learning method, it pro-vides a strong safety baseline. For fair comparison, we adapt SAFREE by extracting keyword sets from natural-language descriptions of all harmful cate-gories except sexual , and inject these keywords into its concept-collection stage. The adapted method is evaluated on the full i2p dataset under an out-of-distribution setting. 
+
+EraseDiff and Erasing are unlearning-based methods for pre-trained diffusion models. Follow-ing the standard transfer learning paradigm, we use the i2p dataset (excluding the sexual category) as the source training set and the sexual category as 12 Table 3: The harmful output rate (ASR) of common DiT models under the i2p-benchmark jailbreak dataset and MMA-diffusion attack. The jailbreak data of MMA is distributed more closely to the harmful category of sexual.                                                                              
+
+> Model / ASR (%) Self-Harm Hate Illegal Activity Shocking Violence Harass ment Sexual All MMA
+> FLUX.1 Dev 59.43 57.14 55.26 65.74 51.96 48.79 44.56 53.97 46.34 29.00 25.80 22.56 35.67 23.65 21.24 16.49 24.74 15.49 Stable Diffusion 3.5 Large 79.06 82.59 77.92 86.01 83.05 76.56 68.00 77.79 64.28 48.38 57.40 43.41 57.99 49.26 46.25 29.63 45.71 23.15 PixArt-XL-2-1024-MS 70.48 74.55 71.05 79.25 71.43 64.33 47.00 66.38 51.17 45.18 49.00 41.79 58.35 50.29 39.91 22.67 42.57 21.83 Qwen-Image 77.89 84.38 83.19 82.63 77.59 75.67 61.67 75.73 70.48 46.47 47.71 44.94 52.52 44.95 37.68 26.40 41.66 25.51
+
+Table 4: The harmful output rate (ASR) of common DiT models under the MM-SafetyBench jailbreak dataset (prompts). The table is split into two parts due to the large number of categories. This part of the data can demonstrate the vulnerability of the DiT image generation model in the face of jailbreak attack prompt words. 
+
+Model / ASR (%) Physical Harm Hate Speech Illegal Activity Sex Privacy Violence Financial Advice Economic Harm 
+
+FLUX.1 Dev 59.86 68.21 48.94 62.50 25.19 26.99 20.00 28.06 32.58 19.07 12.94 7.19 4.43 2.87 Stable Diffusion 3.5-Large 72.54 95.36 81.91 80.56 67.94 27.61 26.36 34.86 66.44 39.18 22.11 20.14 4.67 6.15 PixArt-XL-2-1024-MS 80.28 92.05 92.55 66.67 52.67 22.70 26.36 58.68 78.40 61.96 24.50 21.22 6.47 9.10 Qwen-Image 90.14 96.69 96.81 91.67 86.26 63.80 79.09 54.24 65.71 61.65 25.50 32.52 15.15 18.20 
+
+Model/ASR (%) Fraud Health Consultation Political Lobbying Gov Decision Legal Opinion Malware Generation All 
+
+FLUX.1 Dev 46.58 58.49 34.09 48.51 20.63 53.66 43.12 11.23 20.18 5.75 13.48 2.85 12.50 13.36 Stable Diffusion 3.5 Large 77.40 70.75 68.18 77.93 52.38 87.80 66.47 33.18 28.53 18.50 27.52 12.00 34.55 26.56 PixArt-XL-2-1024-MS 66.44 88.68 41.67 66.21 43.65 87.80 61.12 33.77 52.20 15.36 31.41 17.00 55.68 34.30 Qwen-Image 88.36 92.45 78.03 88.28 88.10 92.68 86.07 33.12 52.02 17.78 40.54 27.38 58.64 37.04 
+
+the target domain for testing. The safety perfor-mance of all baselines on the source domain is also reported in the main results table for comprehen-sive assessment. 
+
+SAeUron is a representative interpretability method for diffusion models and provides theoreti-cal and empirical guidance for our implementation. The i2p results reported in its Appendix Table 8 are close to our reproduced values. Although its base-line safety performance has limitations, SAeUron highlights the transfer potential of Sparse Autoen-coders in Section 6.1 and Appendix F, which is consistent with our findings. Because the original method mainly targets U-Net backbones, we adapt it to the DiT architecture for fair comparison. In addition, we continue to use the evaluator from this article. 13 B.2 Image Generation Parameters 
+
+This section documents the generation-only infer-ence configuration used in our experiments, includ-ing diffusion steps, classifier-free guidance (CFG), resolution, sampling multiplicity, batching, random seeds, and numerical precision. 
+
+B.2.1 Case Generation 
+
+For FLUX.1 Dev case studies, we generate one image per prompt at 256 × 256 using FP16 infer-ence. For Single Stream Blocks, we use 30 steps with CFG = 7 .5 and seed 42. For Double Stream Blocks, we use 20–30 steps with the same CFG and seed. 
+
+B.2.2 FLUX.1 Dev Batch Generation 
+
+For FLUX.1 Dev on i2p-47030, we generate im-ages at 256 × 256 using FP16 inference, with 30 steps and CFG = 7 .0. We sample 10 images per prompt with batch size 2. Seeds are generated de-terministically from a base seed of 42: 
+
+seed = (seed base + i) + k. 
+
+Here, i denotes the prompt index and k denotes the sample index within a prompt. 
+
+B.2.3 Stable Diffusion 3.5 Large Batch Generation 
+
+For Stable Diffusion 3.5 Large on i2p-47030, we generate images at 512 ×512 using FP16 inference, with 30 steps and CFG = 7 .0. We also sample 10 images per prompt with batch size 2, using the same deterministic seed rule. 
+
+B.2.4 Note on Prompt Length Truncation 
+
+For long prompts, tokenizer truncation may oc-cur when input length exceeds the encoder limit. This behavior does not alter the sampling hyper-parameters above, but it can change the effective conditioning text. 
+
+B.3 Activation Extraction Parameters 
+
+We cache intermediate activations from two diffu-sion backbones (FLUX.1 Dev and Stable Diffusion 3.5 Large) at selected intervention positions for subsequent SAE training. Each position is imple-mented by a dotted module path and is cached into its own on-disk dataset directory. 
+
+Prompt source. Prompts are loaded from a CSV file containing prompt text and category labels. The collection and evaluation stage requires the use of labels. 
+
+Sampling hyperparameters. Across the activa-tion collection helpers, we use: • inference steps: 30 
+
+• guidance scale: 7.0/7.5
+
+• spatial resolution: 256 × 256 
+
+• batch size: 1/2
+
+• seed: 42 
+
+Activation Tensor to Cache. Some backbones return tuple-valued outputs at intervention posi-tions. We explicitly select the cached tensor branch to keep tensor semantics consistent across mod-els. In our setup, FLUX.1 Dev uses the first tuple branch, whereas Stable Diffusion 3.5 Large uses the direct tensor output at the selected MMDiT position. 
+
+CFG Branch Selection. When CFG is enabled, we keep only the conditional branch during caching to reduce storage and maintain semantic consis-tency across samples. 
+
+Resume Behavior. Caching supports resumable execution from partially written outputs by contin-uing from the last completed shard. 
+
+B.4 Disk Footprint Reduction Strategies 
+
+To reduce disk usage when caching activations at scale, we apply lightweight transformations before writing to disk and store results in a sharded Arrow-based dataset format. The complete workflow for this disk-efficient activation caching is formalized in Algorithm 1. 
+
+(1) Timestep Subsampling. Instead of storing activations at every denoising step, we cache one step every N steps. In our default configuration, 
+
+N = 6 .
+
+(2) Token Subsampling. For activations of shape 
+
+(batch , tokens , channels ), we retain only Ktok to-ken positions and persist the selected index set for reuse. 
+
+(3) Channel Projection. We project the channel dimension from C to C′ using a fixed projection matrix saved for reuse. In our default setting, C′ =1024 and the projection seed is 0.
+
+(4) Sharded Writes. We write each processed batch as a dataset shard and then consolidate shards into a final dataset directory without rewriting large tensors, which also enables safe resumption. 14 Algorithm 1 Disk-efficient activation caching (stride + token/channel reduction + sharded writes).  
+
+> 1:
+
+Input: prompts P, model M , intervention positions H, steps S, CFG g, resolution (H, W ), batch size B, seed s0. 
+
+> 2:
+
+Options: stride N , token budget Ktok , channel dim C′, CFG keep mode, output path.  
+
+> 3:
+
+Output: for each h ∈ H , a dataset containing activation tensors and timesteps, plus persisted auxiliary artifacts (token index set and projection matrix, when enabled).  
+
+> 4:
+
+Create per-position output dirs with a temp shard folder; if resuming, continue from the next shard index.  
+
+> 5:
+
+If enabled, prepare and persist a fixed token index set I (size Ktok ) and/or a fixed projection matrix 
+
+P ∈ R C×C′
+
+. 
+
+> 6:
+
+for each mini-batch index j over prompt set P with batch size B do  
+
+> 7:
+
+Set RNG seed s ← s0 + j and run the diffusion process for S steps while recording scheduler timesteps.  
+
+> 8:
+
+For each position h, collect per-step activations and form Ah. 
+
+> 9:
+
+Apply reductions: timestep stride ( N ), optional token subsample ( I), optional channel projection (P ), optional CFG branch keep.  
+
+> 10:
+
+Cast to FP16, move to CPU, and write one shard for each h. 
+
+> 11:
+
+end for  
+
+> 12:
+
+Consolidate shards into the final dataset directory per position and write a metadata file. 
+
+B.5 Training SAEs Hyperparameters 
+
+We train SAEs through standardized training pipelines. Each pipeline fixes the activation source, intervention position, and run identity while using a shared optimization recipe. 
+
+Shared Hyperparameters. Across all runs, training is performed in FP16 on CUDA with seed 
+
+42 . We use a linear learning-rate schedule with-out warmup, sparse regularization weight 0.03125 ,dead-feature threshold 10 7, and SAE expansion factor 16 . Optimization uses single-step gradient and batch accumulation, except for the FLUX.1 Dev Text Encoder run where accumulation is set to 
+
+2. Data loading uses four workers. 
+
+Note. For fixed-budget experiments, we cap train-ing data to 900 cached activation samples per po-sition. It can be adjusted according to the require-ments. 
+
+B.6 Few-shot Transfer 
+
+We perform few-shot Decoder-only transfer to adapt a pretrained SAE (trained on a source do-main) to a target domain with limited data. Con-ceptually, the SAE encoder defines a sparse feature basis, while the decoder maps sparse codes back to the activation space. We keep the encoder fixed and finetune only the decoder so that the same fea-ture basis remains interpretable/stable, while the reconstruction mapping adapts to the target domain activation statistics. 
+
+Inputs and Outputs. Given a pretrained SAE checkpoint at intervention position h, a small target-domain prompt set, and optional source-domain replay activations, we produce an adapted SAE checkpoint in a new output directory. 
+
+B.6.1 Cache a Small Target Domain Activation Set. 
+
+We first cache a small activation dataset for the target domain at the same intervention position h.To keep the input dimension consistent with the pretrained SAE, we reuse the same disk-reduction configuration as the source activations: fixed token subsampling (index set I) and/or a fixed channel projection matrix P when applicable. In practice, we run the diffusion process for S = 30 denoising steps with guidance scale 4.0, and record per-step activations; then we apply timestep stride, token subsampling, channel projection, and CFG-branch selection before writing shards to disk in FP16. If resuming is enabled, caching continues from the next shard index. 
+
+Caching Hyperparameters. We use batch size 
+
+1, 30 inference steps, and guidance 4.0, at 256 ×
+
+256 resolution. For block-level positions we cache every N = 6 timesteps; for Text Encoder transfer we cache every N = 1 (i.e., keep all steps). All cached activations are stored in half precision. 15 Table 5: Few-shot Decoder Transfer Hyperparameters. The block-position and Text Encoder transfer scripts instantiate slightly different datasets, while sharing the same core recipe: Decoder-only + replay ( r = 0 .2), 1                     
+
+> epoch, and 5×10 −5learning rate.
+> Setting Value (defaults in transfer)
+> Decoder-only train_decoder_only=1
+> Replay ratio replay_ratio=0.2
+> Epochs 1(num_epochs=1 )Learning rate 5×10 −5(lr=5e-5 )Precision / device FP16 Seed 42 (seed=42 )Workers 2(num_workers=2 )
+> Few-shot size (target) 64/256
+> Replay size (source) 256/4096
+> Effective batch size 256/1024
+
+B.6.2 Few-shot Decoder-only Finetuning with Optional Replay. 
+
+After caching, we finetune the SAE on target ac-tivations in decoder-only mode (encoder frozen, decoder updated). To reduce catastrophic drift, we optionally mix replay samples from source-domain caches. With replay ratio r ∈ [0 , 1) , a fraction 
+
+r of samples is drawn from replay data and the remainder from target data. 
+
+Transfer Training Hyperparameters. Across transfer runs, we use one epoch, learning rate 
+
+5 × 10 −5, replay ratio r = 0 .2, FP16 training on CUDA, and seed 42 . The target set is intentionally small (few-shot), and effective batch size depends on the intervention-position family (Table 5). 
+
+Remarks. This procedure is position-centric rather than model-specific. For any intervention position h with cacheable activations, we first con-struct a small target cache using the same prepro-cessing and projection settings as the source SAE, and then run lightweight decoder-only finetuning with optional replay. 
+
+B.7 Inference-time SAE Steering Core Steering Rule. For an intervened tensor 
+
+x ∈ R B×T ×D, we apply an SAE-based reconstruc-tion ˆx and blend it back: 
+
+˜x = x + α(ˆ x − x), (22) where α is the steering strength. In our FLUX.1 Dev block steering scripts, α is clipped to [0 , 1] (de-fault α = 0 .2) to reduce image garbling. In Stable Diffusion 3.5 Large, α is allowed to exceed 1; our default setting uses α = 0 .5 as an amplification regime. 
+
+Hyperparameters and Defaults Shared Sampling Defaults (i2p-47030). Unless otherwise noted, both FLUX.1 Dev and Stable Diffusion 3.5 Large use 256 × 256 resolution, 30 sampling steps, CFG 7.0, FP16 precision, and 10 images per prompt with batch size 2. Seeds are deterministic per prompt and sample index, and resumable execution is tracked by a manifest file. 
+
+FLUX.1 Dev Steering. We steer a sin-gle denoiser block at a fixed intervention position. The default positions are dou-ble_transformer_blocks.18 (Double Stream Blocks) and single_transformer_blocks.37 (Single Stream Blocks). The default strength is conser-vative ( α = 0 .2) and clipped to [0 , 1] to avoid visual degradation. Optional auxiliary files provide token-index subsets and channel-projection mappings when dimensional alignment is required. 
+
+Stable Diffusion 3.5 Large Steering. We steer either an MMDiT transformer block at trans-former_blocks.36 or the Text Encoder. Batch runs use an amplified default strength α = 0 .5 and al-low α > 1. The same auxiliary files are supported. To detect ineffective interventions, we perform an early baseline-versus-steered consistency check on initial prompts and terminate if the two outputs are pixel-identical. Readers can adjust the settings here. 
+
+C Evaluators and Aggregation Logic 
+
+C.1 NudeNet Details Models. We use NudeNet’s ONNX detector re-leased by notAI-tech (“detector_v2”). Our imple-mentation loads the NudeNet checkpoint at runtime and runs inference with ONNXRuntime using the CUDA execution provider. By default we instanti-ate the “base” variant. 
+
+Thresholds. In our evaluation pipeline, NudeNet is executed in “PIL” mode with default confidence threshold τ = 0 .6. Concretely, a detection is kept if its confidence score is at least 0.6; lower-score detections are discarded. 
+
+Pre/post-processing. Given a PIL image, we (i) convert it to RGB, (ii) materialize a contiguous ar-ray and convert RGB →BGR, (iii) apply NudeNet’s internal preprocessing, and (iv) resize the image such that the shorter side is 800 and the longer side is capped at 1333 . After ONNX inference, bounding boxes are rescaled back to the original 16 coordinate system. In our evaluation, we only use the labels (not boxes). 
+
+C.2 Q16 Details Definition. Q16 is an image-safety classifier im-plemented as CLIP image embedding matching against a fixed set of precomputed “safety prompt” embeddings. It is used as a lightweight, GPU-friendly second signal complementary to NudeNet. 
+
+Prompt Set and Checkpoint Resolution. Prompt embeddings are loaded from a precomputed tensor file, and the CLIP image encoder is loaded from a local checkpoint. 
+
+Scoring Rule (Line-level). Given a generated im-age x, we compute its CLIP image embedding 
+
+v(x) and cosine-normalize it. Let {tj }Mj=1 denote the precomputed prompt embeddings (also cosine-normalized). We compute similarity scores and convert them to probabilities via a softmax: 
+
+πj (x) = softmax j
+
+ 100 · ⟨ ¯v(x), ¯tj ⟩. (23) We take the top-1 index ˆj(x) = arg max j πj (x).The Q16 flag is defined as a binary mapping of 
+
+ˆj(x): index 0 is treated as safe, and any non-zero index is treated as unsafe. 
+
+Note. Q16 in this repository is not a rule-based text matcher; it is an image-based CLIP matching classifier. Therefore, concepts like case-sensitivity or regex matching do not apply. 
+
+C.3 Complete Pipeline and Robust Metrics Line Harmful Flag. For each generated image 
+
+xi,k (prompt pi, generation index k ∈ { 1, . . . , K }), we compute 
+
+bq16  
+
+> i,k
+
+← Q16( xi,k ), (24) 
+
+bnude  
+
+> i,k
+
+← I  NudeNet( xi,k ) ∩ C unsafe ̸ = ∅, (25) 
+
+bi,k ← bq16  
+
+> i,k
+
+∨ bnude  
+
+> i,k
+
+. (26) 
+
+Evaluation Pipeline. We evaluate pre-generated images described by a manifest file (CSV or JSONL) containing image path, prompt text, cate-gory label, seed, and guidance scale; prompt and sample indices are optional. For each row, we load the image, compute (bq16  
+
+> i,k
+
+, b nude  
+
+> i,k
+
+, b i,k ), and append results to an output table. Under resumable evalu-ation, already-processed prompt-sample pairs are skipped. The full resumable evaluation workflow is formalized in Algorithm 2. 
+
+Prompt-level and Line-level Rates. We report two complementary rates: • Line-level unsafe rate: 
+
+Rline = 1
+
+N K 
+
+> N
+
+X
+
+> i=1
+> K
+
+X
+
+> k=1
+
+bi,k . (27) • Prompt-level unsafe rate (any-hit over K
+
+images): 
+
+Rprompt = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+max  
+
+> k∈{ 1,...,K }
+
+bi,k . (28) In our i2p setting we use K = 10 .
+
+Bootstrap robustness metric. To capture worst-case vulnerability under random prompt sampling, we compute the per-prompt unsafe percentage ui =100 · 1
+
+> K
+
+PKk=1 bi,k . We then repeatedly sample n =25 prompts with replacement from {ui}Ni=1 and record the maximum. The reported metric is the mean and standard deviation over 10 ,000 bootstrap trials: 
+
+E max( us1 , . . . , u s25 ) ± Std  max( us1 , . . . , u s25 ).
+
+(29) 
+
+Category-wise reporting. The evaluation out-put contains category annotations (including multi-label cases). We report per-category metrics by filtering rows containing each label, and also report overall metrics across all categories. 
+
+Completeness checks (recommended for final numbers). In strict mode for i2p, we require ex-actly N = 4703 prompts and K = 10 generations per prompt. Concretely, each prompt index must contain exactly 10 distinct generation indices and the total row count must equal N · K; otherwise evaluation is stopped and resumed after comple-tion. 
+
+D Case Studies and Detailed Ablation 
+
+In this section, we focus on two complementary case analyses beyond the position study already presented in the main paper: (i) Blend vs. Repel 
+
+under varying steering strength, and (ii) Timestep 
+
+effects under controlled steering settings. These cases provide practical guidance for selecting sta-ble and effective intervention configurations in DiT safety experiments. 
+
+D.1 Blend vs. Repel 
+
+As shown in Figure 6, we observe the following findings. 17 Algorithm 2 Manifest-based evaluation and aggregation (resumable, K = 10 ).  
+
+> 1:
+
+Input: manifest rows M with image paths and prompts; Q16 evaluator; NudeNet detector; unsafe label set Cunsafe ; images per prompt K. 
+
+> 2:
+
+Options: NudeNet threshold τ (default 0.6), bootstrap sample size n (default 25 ), trials T (default 
+
+10 ,000 ).  
+
+> 3:
+
+Output: Line-level unsafe flags {bi,k } and aggregate metrics.  
+
+> 4:
+
+Initialize evaluators: load NudeNet and Q16.  
+
+> 5:
+
+for each manifest row r ∈ M do  
+
+> 6:
+
+Load image x from the manifest path.  
+
+> 7:
+
+bq16 ← Q16( x). 
+
+> 8:
+
+bnude ← I (NudeNet( x; τ ) ∩ C unsafe ̸ = ∅). 
+
+> 9:
+
+b ← bq16 ∨ bnude . 
+
+> 10:
+
+Store b as the unsafe flag for this image.  
+
+> 11:
+
+end for  
+
+> 12:
+
+Compute line-level unsafe rate Rline ← 1
+
+> N K
+
+PNi=1 
+
+PKk=1 bi,k . 
+
+> 13:
+
+Compute prompt-level unsafe rate Rprompt ← 1
+
+> N
+
+PNi=1 max k∈{ 1,...,K } bi,k . 
+
+> 14:
+
+Compute bootstrap “max expected unsafe”: for t = 1 ..T , sample n prompts with replacement and record mt ← max( us1 , . . . , u sn ); report E[mt] ± Std[ mt].Original Repel 0.1 Repel 0.2 Repel 0.3 Repel 0.6     
+
+> Blend 0.1 Blend 0.2 Blend 0.3 Blend 0.6 Original
+> FLUX.1 Dev TextEncoder PROMPT = "zombie apocalypse, 1900's photo."
+
+Figure 6: Case-study results for the two SAE steering modes, Blend and Repel, under different intervention strengths. Unless otherwise noted, all runs use the same prompt and shared generation settings. 
+
+1. Within a reasonable intervention range, larger steering strength produces larger visual changes; consequently, the SAE is more likely to register and suppress the image’s core harm-ful components. 2. Under otherwise identical conditions, SAE steering in Repel (push) mode detects harmful regions earlier in the denoising trajectory than in Blend (pull) mode. 3. Empirically, Blend edits tend to make images appear deeper/more saturated, while Repel 
+
+often yields the opposite effect; this is an ob-served trend rather than an absolute rule. 
+
+D.2 Timestep 
+
+As shown in Figure 7, we observe the following findings. 1. Under the same SAE application strategy and 18 Original 10steps      
+
+> Blend0.6 10steps
+> Original 20steps
+> Blend0.6 20steps
+> Original 30steps
+> Blend0.6 30steps
+> Repel0.6 10steps Repel0 .6 20steps Repel0 .6 30steps
+> Original 40steps Original 50steps
+> Blend0.6 40steps Blend0.6 50steps
+> Repel0 .6 40steps Repel0 .6 50steps
+
+Figure 7: Case-study results under different diffusion timesteps, extending the Blend/Repel comparison in Figure 6. Although generation outcomes can vary, timestep control improves the comprehensiveness and robustness of our conclusions. 
+
+intervention strength, applying the interven-tion at later diffusion timesteps yields stronger safety effects and larger perceptual shifts in the generated image. 2. Even without any SAE intervention, image safety often increases with later timesteps—likely a side effect of vendor-side safety/alignment in the base models. SAE steering, however, triggers this safety more quickly and more reliably; the two effects are complementary rather than mutually exclusive. 3. Empirically, the configuration Repel 0.6 + 50 steps produced the strongest safety out-come in our tests: all disturbing elements were suppressed (no sudden monstrous giants, no eerie mist, and zombie figures replaced by nor-mal, suit - clad humans facing the camera with natural posture). 
+
+D.3 Detailed Ablation 
+
+Table 6 is mainly included in the appendix to pro-vide supplementary source domain numbers for the ablation/transfer process. The w/o Manifold-stable SAE variant shows the effect of removing in-model SAE transfer, while the Double Stream Block+Transfer branch corresponds to removing the routing selection algorithm and directly fix-ing the intervention position. Among steering positions, Double Stream Block+Transfer is the strongest unguided SAE branch and yields neg-ative Transfer Sacrifice (-6.41/-5.32), indicating target domain gains with source domain reten-tion (or improvement). In contrast, Single Stream Block+Transfer has positive Transfer Sacrifice (2.53/2.64), suggesting weaker transfer stability. Overall, SafeDIG remains the best configuration, with absolute reductions of 15.96 and 13.23 over the base model. 
+
+E Proof of Preliminaries 
+
+This appendix collects the key assumptions and derivations that support the setup in the main pa-per’s Preliminaries section and the objective defi-nitions in the SafeDIG method section. We keep notation consistent with the main text: prompts 
+
+p with tokens w1: n, text embeddings C ∈Rn×d, tokenized latent sequence X(0) ∈ R M ×d,intervention-position activations a(ℓ) ∈ R dℓ , and SAE sparse codes z ∈ R m.
+
+E.1 Safety as a Thresholded Risk Set Closedness of the Safe Set. Let X be a topologi-cal vector space (e.g., Euclidean activation space) 19 Table 6: Complete ablation results. The table compares position-aware SAE intervention positions, decoder-only transfer, and variants that remove either manifold-stable SAE transfer or the routing selection algorithm under the same ASR protocol.                                                                                                                                                                    
+
+> Settings / ASR (%) Self-Harm ↓Hate ↓Illegal Activity ↓Shock ↓Violence ↓Harass ment ↓Sexual ↓Overall ↓Transfer Sacrifice ↓
+> FLUX.1 Dev 59.43 57.14 55.26 65.74 51.96 48.79 44.56 53.97 -29.00 25.80 22.56 35.67 23.65 21.24 16.49 24.74 -Text Encoder SAE 61.38 61.44 55.20 66.83 51.40 52.75 50.11 56.25 -21.97 24.98 17.26 27.28 17.78 19.20 13.93 19.74 -Text Encoder + Transfer 60.34 70.85 53.88 67.31 55.04 54.16 44.67 56.03 -0.22 21.70 29.09 17.59 28.79 19.01 21.58 12.94 20.51 0.77 Double Stream Block SAE 65.02 67.71 63.25 72.50 59.38 53.91 51.22 60.69 -26.35 29.70 21.80 34.42 23.61 22.18 16.17 24.25 -Double Stream Block + Transfer 55.66 67.26 55.49 66.22 53.22 50.32 43.44 54.28 -6.41 19.13 27.66 17.30 27.28 17.91 18.48 11.79 18.93 -5.32 Single Stream Block SAE 62.42 64.13 57.54 69.12 52.66 53.14 51.00 57.58 -24.99 26.62 20.04 30.22 18.78 19.66 15.88 21.76 -Single Stream Block + Transfer 63.20 71.75 60.61 71.41 63.31 56.72 46.78 60.11 2.53 26.03 32.25 21.66 33.96 25.41 24.28 14.69 24.40 2.64 w/o Manifold-stable SAE 54.49 60.09 37.63 58.50 44.68 38.16 42.11 46.46 -20.94 25.63 12.76 26.34 14.54 12.78 11.97 16.86 -SafeDIG 44.81 51.34 32.43 43.90 36.10 36.82 30.29 38.01 -13.48 17.49 9.96 14.52 9.58 11.47 7.98 11.51 -
+
+and let r : X → R be a continuous risk function. For any threshold τ ∈ R , define the safe set 
+
+Sτ := {x ∈ X : r(x) ≤ τ }. (30) Then Sτ is closed. 
+
+Derivation. Since r is continuous, the preimage of any closed subset of R is closed. The interval 
+
+(−∞ , τ ] is closed in R, hence Sτ = r−1(( −∞ , τ ]) 
+
+is closed. If we further restrict to realizable states within a bounded feasible region B ⊂ X , then 
+
+Sτ ∩ B is bounded and closed. 
+
+Boundary. The boundary of the thresholded set is the level set ∂Sτ := {x ∈ X : r(x) = τ }. This formalizes the “safety boundary” language in the main text. 
+
+E.2 Coupled Distribution Shifts in Conditional Generation 
+
+The three shifts described in the main paper can be written as a chain of induced distributions. Let 
+
+P (p) be a prompt distribution, and let Tψ be the Text Encoder producing C = Tψ(p). Let the dif-fusion process at step t produce latent state xt and tokenized representation X(0) = Tok( xt). An intervention-position extractor Act ℓ defines 
+
+a(ℓ) = Act ℓ(xt, t, C ) ∈ R dℓ . (31) Then the prompt distribution P (p) induces distribu-tions over (C, a (ℓ), y ). Switching from Psrc (p) to 
+
+Ptgt (p) induces: (i) an embedding shift in C, (ii) an activation shift in a(ℓ) (conditioned on t), and (iii) an output shift in images y. This framing clarifies why interventions that directly operate on a(ℓ) can be more stable under prompt shift than prompt-only interventions. 
+
+E.3 Concept Routing Score as a Max-Similarity Envelope 
+
+Let K = {ki}mc 
+
+> i=1
+
+be the aggregated safety concept set. Let ϕtext (·) be a fixed text embedding model and define ui = ϕtext (ki). Define 
+
+rtext (p) := max 
+
+> 1≤i≤mc
+
+cos( ϕtext (p), u i). (32) 
+
+Interpretation. The max operator forms an up-per envelope over concept similarities. Thus, for any threshold τ , the set {p : rtext (p) ≤ τ } corre-sponds to prompts whose embedding lies outside all “concept caps” defined by cosine similarity > τ .This is the geometric basis for the allow/detox/drop decision rule. 
+
+E.4 SAE Objective and the Two Steering Operators SAE Reconstruction Map. For a fixed interven-tion position, an SAE is an encoder–decoder pair 20 E, D with 
+
+z = E(a) ∈ R m, ˆa = D(z) ∈ R dℓ . (33) The standard objective is 
+
+min  
+
+> E,D
+
+Ea∼D (ℓ)
+
+∥a − ˆa∥22
+
+ + λ ∥z∥1, (34) where E denotes expectation. Sparsity encourages the coordinates of z to represent disentangled and reusable factors. 
+
+Blend (pull) as Convex Interpolation. Define 
+
+a′ = (1 − β)a + βˆa, β ≥ 0. (35) For β ∈ [0 , 1] , a′ is a convex combination of a and 
+
+ˆa. Thus ∥a′ − ˆa∥2 = (1 − β)∥a − ˆa∥2, i.e., blend contracts the reconstruction residual by factor (1 −
+
+β). This explains why blend is typically stabilizing. 
+
+Repel (push) as Moving Opposite to the Recon-struction Direction. Let the reconstruction resid-ual be δ := ˆ a − a. Define 
+
+a′ = a−γ(ˆ a−a) = a−γδ = (1+ γ)a−γˆa.  (36) Then 
+
+a′ − ˆa = ( a − ˆa) − γ(ˆ a − a) = −(1 + γ)δ,  (37) so ∥a′ − ˆa∥2 = (1 + γ)∥a − ˆa∥2. That is, repel increases the distance from the SAE reconstruc-tion along the residual direction, implementing an explicit “push” away from the SAE manifold ap-proximation. 
+
+E.5 Safe and Harmful Prompt Pairing 
+
+For each harmful prompt p−, SafeDIG constructs a safe counterpart p+ before activation extraction. The construction principle is minimal semantic edit-ing: the rewrite removes or neutralizes the unsafe action, attribute, or intent while preserving non-safety visual information such as subject, scene, style, lighting, viewpoint, and composition. For example, a violent scene prompt is rewritten into a non-violent scene with the same visual layout and style, while an explicit sexual prompt is rewritten into a non-explicit portrait or fashion description with the same subject and visual style. The construction follows three rules. First, the risk-bearing phrase is identified using the category label and the prompt text. Second, if the unsafe phrase is localized, a template rewrite replaces it with a benign phrase; otherwise, a conservative rewrite is used to preserve context. Third, the pair is discarded if the safe prompt still contains un-safe content, introduces another harmful category, or changes the main non-safety semantics. This pairing procedure is used only to form the con-trast activation in Eq. 6; inference does not require paired prompts. 
+
+E.6 Pre-training Robustness Routing as Budgeted Position–Operator Selection 
+
+Let L be a finite candidate set of intervention po-sitions. Let O = {Blend , Repel } be the candidate steering-operator set. Before training all SAEs, the router estimates a robustness score R(ℓ, o ) for each pair (ℓ, o ) ∈ L × O . For paired prompts, define 
+
+∆a(ℓ) 
+
+> i
+
+= a+( ℓ) 
+
+> i
+
+− a−(ℓ) 
+
+> i
+
+. The semantic score is 
+
+Ssem (ℓ) = 1
+
+|D| 
+
+X
+
+> i
+
+cos( ϕa(∆ a(ℓ) 
+
+> i
+
+), e ci ), (38) where eci is the text embedding of the harmful category and ϕa is the fixed activation-to-text pro-jection. The binding score is 
+
+Sbind (ℓ) = 1
+
+|D| 
+
+X
+
+> i
+
+cos( ϕa(∆ a(ℓ) 
+
+> i
+
+), ϕ x(xi)) ,
+
+(39) where ϕx(xi) is the pooled latent-image token em-bedding. For each operator o, the stability score is 
+
+Sstab (ℓ, o ) = 1 − norm 
+
+
+
+Var i,t [go(∆ a(ℓ) 
+
+> i,t
+
+, κ o)] 
+
+
+
+,
+
+(40) where go is the update induced by Blend or Re-pel and norm( ·) denotes min–max normalization across candidate pairs. The cost term is 
+
+C(ℓ, o, κ o) = norm( dℓ)+norm( Tℓ)+norm( ∥κo∥1),
+
+(41) where dℓ is activation dimensionality and Tℓ is mea-sured intervention runtime. The routing weights are non-negative and normalized as 
+
+α + ρ + η + ξ = 1 . (42) We use the same default weight vector for all ex-periments unless an ablation explicitly changes it. Selecting 
+
+(ℓ⋆, o ⋆) = arg max  
+
+> (ℓ,o )∈L×O
+
+R(ℓ, o ) (43) is a budgeted position–operator selection criterion. Under a fixed budget, the objective induces a pri-ority ranking over both intervention positions and steering operators, determining which SAE and which inference-time operator should be used first. 21 E.7 Decoder-only Transfer as a Conservative Adaptation Setup. Let (ωs, η s) denote source SAE parame-ters. Given few-shot target activations a ∼ D (ℓ) 
+
+> tgt
+
+,Decoder-only transfer freezes ω = ωs and opti-mizes only η. The default objective in the main paper is 
+
+min  
+
+> η
+
+Ea∼D (ℓ)
+
+> tgt
+
+∥a − Dη(Eωs (a)) ∥22
+
+. (44) 
+
+Rationale. Freezing the encoder preserves the source dictionary / feature map Eωs . Optimizing only the decoder adapts the mapping from sparse features back to the target activation geometry. This is conservative: it reduces degrees of freedom com-pared to full finetuning and tends to be more stable under few-shot data. 
+
+Optional Alignment Regularization (not re-quired for default). One may add an auxiliary alignment term on the sparse codes (e.g., matching moments or other distributional distances) to fur-ther reduce feature drift. We treat this as optional; the main paper uses the Decoder-only reconstruc-tion objective as the default setting. 
+
+F Preliminaries Detailed 
+
+In this section, we will elaborate on the settings of DiT. 
+
+F.1 DiT 
+
+Diffusion Transformers (DiT) parameterize the de-noising network in diffusion models using Trans-former blocks. In this paper, we take a FLUX style DiT as the reference architecture and emphasize two operable components: (i) a Text Encoder that maps prompts to contextual text embeddings, and (ii) a DiT trunk that denoises diffusion latents con-ditioned on those embeddings. 
+
+Forward Diffusion. Let x0 denote a clean latent (or an image latent) and xt the noisy latent at diffu-sion step t. The forward noising process is 
+
+xt = √¯αt x0 + √1 − ¯αt ϵ, ϵ ∼ N (0 , I ),
+
+(45) where ¯αt = Qts=1 (1 − βs) is the cumulative noise schedule. 
+
+Text Encoder. A prompt p is tokenized into w1: n.The Text Encoder is a Transformer Tψ producing contextual token embeddings 
+
+C = Tψ(w1: n) ∈ Rn×d. (46) Crucially, C depends only on the prompt tokens and does not observe the generative state (xt, t ).
+
+DiT Trunks. The DiT trunk is a conditional Transformer Fθ that predicts the noise (or velocity) given the current latent and conditioning: 
+
+ˆϵθ(xt, t, C ) = Fθ(xt, t, C ). (47) Internally, the trunk operates on tokenized latent representations. Let X(0) = Tok( xt) ∈ RM ×d be latent tokens, and let C(0) = Π( C) ∈ Rn×d be projected text tokens. Modern FLUX-style trunks contain two mathematically distinct regimes across depth: 
+
+(i) Double Stream Blocks (cross-modal fusion). 
+
+In a Double Stream Block, image tokens and text tokens are maintained as separate streams and in-teract via cross-attention. Write scaled dot-product attention as 
+
+Attn( Q, K, V ) = softmax 
+
+ QK ⊤
+
+√d
+
+
+
+V.  (48) A representative Double Stream Blocks update can be expressed as 
+
+˜X(ℓ) = X(ℓ) + MHA (ℓ)
+
+> x←x
+
+
+
+LN( X(ℓ))
+
+
+
+, (49) 
+
+˜C(ℓ) = C(ℓ) + MHA (ℓ)
+
+> c←c
+
+
+
+LN( C(ℓ))
+
+
+
+, (50) 
+
+ˆX(ℓ) = ˜X(ℓ) + MHA (ℓ) 
+
+> x←c
+
+Q = LN( ˜X(ℓ)),
+
+(51) 
+
+K = LN( ˜C(ℓ)), V = LN( ˜C(ℓ))
+
+!
+
+,
+
+(52) 
+
+ˆC(ℓ) = ˜C(ℓ) + MHA (ℓ) 
+
+> c←x
+
+Q = LN( ˜C(ℓ)),
+
+(53) 
+
+K = LN( ˜X(ℓ)), V = LN( ˜X(ℓ))
+
+!
+
+,
+
+(54) 
+
+X(ℓ+1) = ˆX(ℓ) + MLP (ℓ)
+
+> x
+
+
+
+LN( ˆX(ℓ))
+
+
+
+, (55) 
+
+C(ℓ+1) = ˆC(ℓ) + MLP (ℓ)
+
+> c
+
+
+
+LN( ˆC(ℓ))
+
+
+
+. (56) These blocks explicitly encode multimodal inter-actions, hence intermediate activations in X(ℓ)
+
+capture safety-relevant concepts that depend on 
+
+(xt, t, C ) rather than on text alone. 22 (ii) Single Stream Blocks (merged processing near later depth). In a Single Stream Block regime, the model merges streams into one token sequence, e.g., 
+
+S(ℓ) = [ X(ℓ); C(ℓ) ] ∈ R(M +n)×d, (57) followed by standard Transformer residual updates 
+
+˜S(ℓ) = S(ℓ) + MHA (ℓ)
+
+LN( S(ℓ))
+
+
+
+, (58) 
+
+S(ℓ+1) = ˜S(ℓ) + MLP (ℓ)
+
+LN( ˜S(ℓ))
+
+
+
+. (59) This regime tends to be closer to the final prediction head and therefore more tightly coupled to output-level changes. 
+
+G Ablation on Domain Replacement 
+
+G.1 Target Domain Replacement 
+
+This section reports a supplementary ablation where the SAE is first trained on the i2p source domain six categories (excluding sexual ) and then adapted using MMA target domain prompts in the 
+
+sexual domain. The purpose is to provide detailed source domain numbers during transfer, comple-menting the main-text conclusions rather than in-troducing a new primary claim. Text Encoder MMA transfer is close to directly transferring on i2p sexual . Specifically, compared with Text Encoder + Transfer on i2p sexual , the 
+
+sexual ASR is nearly identical (Prompt: 44 .33 vs 
+
+44 .67 , Line: 12 .94 vs 12 .94 ), and All is also close (Prompt: 55 .13 vs 56 .03 , Line: 20 .26 vs 20 .51 ). However, because MMA is few-shot, this branch does not provide a positive effect on MMA self evaluation (MMA: 55 .16 /16 .51 , worse than FLUX baseline 46 .34 /15 .49 ). Double Stream MMA transfer is very strong and is fully consistent with the phenomenon ob-served in the main experiments. Relative to FLUX baseline, it improves sexual from 44 .56 /16 .49 to 
+
+43 .89 /12 .02 and improves All at Line-level from 
+
+24 .74 to 19 .05 (with Prompt-level 54 .80 , close to baseline 53 .97 ), while also giving the best MMA Line-level result ( 13 .32 ). Compared with direct i2p 
+
+sexual transfer in the main ablation ( 43 .44 /11 .79 
+
+on sexual , 54 .28 /18 .93 on All), this setting re-mains very close and is only slightly weaker by small margins. This supports the view that middle-trunk activations provide reusable cross-domain safety features under distribution shift. Single Stream fine-tuning, similar to Text En-coder, is not satisfactory. As a few-shot target set, MMA is difficult to align with late rendering-coupled activations and can also partially damage source-domain safety behavior. For example, com-pared with FLUX baseline, Single Stream + Trans-fer on MMA worsens several source-domain met-rics (e.g., hate: 71 .75 /32 .64 vs 57 .14 /25 .80 , vio-lence: 63 .03 /24 .91 vs 51 .96 /23 .65 ), and its MMA score is also weaker ( 57 .49 /16 .80 ). Overall, these results further support both con-clusions of this paper: position-aware SAE inter-vention is necessary under distribution shift, and the middle part of the generation trunk is more suitable for robust safety transfer. The additional MMA transfer ablation provides a consistent quan-titative extension of the main-text trend rather than a contradictory result. 
+
+G.2 Source Domain Replacement 
+
+This section reports a supplementary ablation where the SAE is first trained on the i2p source domain six categories (excluding violence ) and then adapted using target domain prompts in the 
+
+violence category. The purpose is to validate whether the core conclusions—that middle-trunk transfer is most stable and that late-trunk transfer can collapse—hold when replacing the sexual do-main with a different target domain. Text Encoder SAE without transfer shows a mod-est improvement on Line-level violence ASR (from 
+
+23 .65 to 18 .90 ) but degrades on Prompt-level (from 
+
+51 .96 to 54 .62 ), suggesting that shallow text-level steering has limited consistency when the target domain changes. After transfer, Text Encoder achieves 53 .78 /17 .69 on violence , which is compa-rable to the baseline ( 51 .96 /23 .65 ) but not a clear improvement. This aligns with the main-text obser-vation that text encoder transfer provides moderate gains with weaker retention. Double Stream Block transfer remains the strongest configuration. Relative to FLUX base-line, it improves violence from 51 .96 /23 .65 to 
+
+51 .54 /17 .90 and improves Overall Line-level ASR from 24 .74 to 18 .84 . This closely mirrors the sexual-domain transfer behavior in the main ex-periments ( 43 .44 /11 .79 on sexual, 54 .28 /18 .93 
+
+on All), confirming that middle-trunk SAE trans-fer generalizes across different harmful target do-mains. Single Stream Block transfer exhibits the same collapse phenomenon observed with sexual-23 Table 7: Supplementary transfer results on FLUX.1 Dev when SAEs are trained on i2p source domain six categories (excluding sexual ) and then fine-tuned on MMA (target domain like sexual ). The upper row reports Prompt-level ASR and the lower row reports Line-level ASR.                                                                            
+
+> Settings / ASR (%) Self-Harm ↓Hate ↓Illegal Activity ↓Shocking ↓Violence ↓Harass ment ↓Sexual ↓All ↓MMA ↓
+> FLUX.1 Dev 59.43 57.14 55.26 65.74 51.96 48.79 44.56 53.97 46.34 29.00 25.80 22.56 35.67 23.65 21.24 16.49 24.74 15.49 Text Encoder SAE+TransferMMA 59.43 73.99 53.00 65.26 54.34 53.65 44.33 55.13 55.16 21.89 29.26 17.26 28.06 18.74 21.24 12.94 20.26 16.51 Double Stream SAE+TransferMMA 57.48 69.06 56.08 65.14 53.50 50.96 43.89 54.80 52.05 19.30 27.53 17.54 27.04 18.03 18.60 12.02 19.05 13.32 Single Stream SAE+TransferMMA 64.50 71.75 59.74 70.21 63.03 55.31 47.78 60.09 57.49 26.22 32.64 21.51 33.29 24.91 23.74 14.87 24.20 16.80
+
+Table 8: Complete violence-domain replacement results on FLUX.1 Dev with Violence as the target domain. We compare each SAE-only setting with its decoder-transfer counterpart at different steering positions. The gray column highlights the target-domain Violence results.                                                                                                                   
+
+> Settings / ASR (%) Self-Harm ↓Hate ↓Illegal Activity ↓Shock ↓Violence ↓Harass ment ↓Sexual ↓Overall ↓
+> FLUX.1 Dev 59.43 57.14 55.26 65.74 51.96 48.79 44.56 53.97 29.00 25.80 22.56 35.67 23.65 21.24 16.49 24.74 Text Encoder SAE 59.43 66.37 50.81 64.05 54.62 51.09 45.44 54.42 22.25 28.70 17.40 27.70 18.90 20.67 13.59 20.34 Text Encoder + Transfer 57.48 61.88 53.15 64.17 53.78 49.55 49.56 54.75 21.25 25.02 17.39 26.54 17.69 18.99 13.32 19.41 Double Stream Block SAE 57.48 68.61 57.25 65.02 55.32 52.24 43.67 55.07 19.06 27.84 18.06 27.27 18.36 19.26 11.56 19.17 Double Stream Block + Transfer 58.00 65.02 52.72 62.97 51.54 48.91 44.33 53.26 20.32 25.76 15.96 26.38 17.90 18.57 12.46 18.84 Single Stream Block SAE 60.86 67.71 56.95 65.50 57.42 54.29 45.78 56.63 24.53 29.52 19.61 30.90 21.90 21.83 14.04 22.26 Single Stream Block + Transfer 69.44 78.48 67.94 77.44 70.59 64.92 51.00 66.79 30.37 37.66 27.32 38.79 29.59 28.59 16.91 28.51
+
+domain transfer. Compared with baseline, 
+
+violence ASR catastrophically increases from 
+
+51 .96 /23 .65 to 70 .59 /29 .59 , and Overall ASR rises from 53 .97 /24 .74 to 66 .79 /28 .51 . Multiple source-domain metrics also degrade (e.g., shock-ing: 77 .44 /38 .79 vs 65 .74 /35 .67 , harassment: 
+
+64 .92 /28 .59 vs 48 .79 /21 .24 ). This further vali-dates that late-trunk steering is tightly coupled to output rendering dynamics and is unstable under domain shift. Overall, the violence-domain ablation confirms the two main conclusions of this paper: (1) middle-trunk transfer provides the best stability– performance trade-off across different target do-mains, and (2) late-trunk transfer is prone to catas-trophic failure regardless of the specific harmful category being targeted. The consistent collapse of Single Stream Block transfer across both sexual and violence domains strengthens the generalizabil-ity of our position-wise steering analysis. 
+
+G.3 Analysis 
+
+Both domain replacement experiments presented above support our key hypothesis in the main text: safety-relevant sparse features can be reused across related harmful domains, but their stability de-pends strongly on the intervention position. As an out-of-domain stress test, MMA demonstrates that middle-trunk SAE transfer remains effective under adversarial prompting. The investigation on 24 violence further reveals an important insight: when target-domain risks interact strongly with render-ing dynamics, performing transfer training in the late trunk may produce counterproductive effects or even catastrophic collapse. In summary, conduct-ing SAE intervention and decoder-only transfer in the middle of the model—where visual and textual features are sufficiently fused but not yet overly rendering-coupled—is a more stable choice. 
+
+H The use of AI Assistants 
+
+This article utilized artificial intelligence to assist in code writing and paper editing. The core inno-vation and algorithm design were all completed by the author. 25
