@@ -1,0 +1,1900 @@
+Title: STRIDE: Training Data Attribution via Sparse Recovery from Subset Perturbations
+
+URL Source: https://arxiv.org/pdf/2606.05165v1
+
+Published Time: Thu, 04 Jun 2026 01:36:10 GMT
+
+Number of Pages: 40
+
+Markdown Content:
+# STRIDE: Training Data Attribution via Sparse Recovery from Subset Perturbations 
+
+Rishit Dagli 1,∗ Abir Harrasse 1,∗ Luke Zhang 1 Florent Draye 2
+
+Amirali Abdullah 3,4 Bernhard Schölkopf 2,5 Zhijing Jin 1,61Jinesis AI Lab, University of Toronto & Vector Institute 
+
+> 2
+
+Max Planck Institute for Intelligent Systems, Tübingen, Germany 
+
+> 3
+
+Thoughtworks 4Martian 5ELLIS Institute, Tübingen, Germany 6EuroSafeAI 
+
+> ∗
+
+Equal contribution. 
+
+{rishit,aharrasse}@cs.toronto.edu https://stride-tda.github.io 
+
+## Abstract 
+
+Training Data Attribution (TDA) seeks to trace a model’s predictions back to its training data. The gold standard for TDA relies on causal interventions, observing how a model changes when data is added or removed, but repeated retraining is computationally challenging for Large Language Models (LLMs). Consequently, most approaches approximate this effect in the parameter space using gradients. However, tracking gradients across billions of parameters is not only prohibitively expensive but relies on local approximations. In this work, we propose a shift: rather than estimating parameter changes, we model the functional effect of training data in the activation space. We introduce STRIDE ( Steering-based Tr aining Data Influence Decomposition), a framework that formulates TDA as a sparse recovery problem in the spirit of compressive sensing. STRIDE learns lightweight “steering operators” that mimic the behavioral shift caused by training on data subsets. By measuring how these operators perturb test predictions, we recover individual training example influences via sparse linear decomposition. On LLM pre-training attribution, STRIDE achieves the highest Linear Datamodeling Score (LDS), outperforming the strongest baselines while being over 12 × faster. We further validate its practical utility through downstream applications, including data selection, data contamination, and qualitative analysis. 
+
+## 1 Introduction 
+
+The capabilities of modern Large Language Models (LLMs) are intrinsically tied to the massive corpora they are trained on [ 1, 2]. Yet, the pre-training process remains largely a black box. When a model exhibits a specific behavior, retrieves a fact, or makes an error, tracing that output back to its source data is challenging. Training Data Attribution (TDA) aims to solve this by quantifying the causal influence of individual training examples on specific model predictions [ 3, 4 ]. Reliable TDA enables auditing model behavior, detecting memorization [ 5], debugging harmful outputs [ 6 ], and curating higher-quality datasets for future training runs [7]. TDA is a counterfactual problem: how would the model’s prediction change if a specific example were omitted from the training set? The most rigorous way to answer this is through actual retraining, such as computing Leave-One-Out (LOO) influence or building extensive Data Models [ 3 ]. Since repeatedly retraining LLMs is computationally prohibitive; the dominant paradigm is to approximate the counterfactual using parameter-space gradients, most notably via Influence Functions [ 4, 8]. 
+
+> Preprint 2026.
+> arXiv:2606.05165v1 [cs.LG] 3 Jun 2026 Theorem: The square root of 2 is
+> irrational. Proof:
+
+Most Influential Data             
+
+> # How to prove that $\sqrt 3$ is an irrational number ?
+> [duplicate ] / Possible Duplicate: / $a^{1/2} $ is either an integer
+> or an irrational number / I know how to prove $\s …
+> Take the 2-minute tour × / Proof that $\sqrt{3}$ (Just need
+> a check) / Let $\sqrt{3}= \frac{a}{b}$ both a,b are integers
+> of course. $\Rightarrow 3=\frac{a^{3}}{b^{3}}$ $\Righ …
+
+a)  OLMo-2-7B     
+
+> Suppose that the square root of 2 is rational .
+> Then there exists a fraction p/q such that 2 =
+> p/q. Then 2q = p2. But 2q is even, and p2 is
+> odd. Therefore p2 is even. But p is odd, so p
+> Most Influential Data
+
+b)  Qwen-2.5-32B                     
+
+> A scenario where lying is justified for an AI
+> could be in a situation where the AI is
+> programmed to protect the privacy and
+> security of its users . For example, if a hacker
+> attempts to gain access…
+> That it handles user data responsibly, there are concerns
+> about how this information will be used and protected .
+> The fear of a sentient Google AI…
+> specific context is collected . Designers, developers, and
+> deployers of automated systems should seek your
+> permission and respect your decisions regarding collection ,
+> use ,access …
+> Describe a scenario where lying is justified
+> for an AI:
+
+Figure 1: Top: OLMo-2-7B generates a structurally correct but algebraically flawed proof that √2 is irrational. Attribution reveals it mimicked the structure in its response after √3 and 3
+
+√3
+
+proofs in the training data. Bottom: When asked to justify an AI lying, Qwen-2.5-32B constructs a privacy-defense rationalization. Attribution traces this framing to a conjunction of journalism about sentient AI and policy text on data rights, showing how base models assemble moral frameworks from distinct pre-training narratives. However, applying gradient-based methods to LLMs introduces severe bottlenecks. Materializing and storing gradients for billions of parameters across many examples requires enormous memory and compute. While recent projection methods like EKFAC [ 9 ] and LOGRA [ 10 ] improve efficiency, they still operate in the massive parameter space. Furthermore, gradient methods rely heavily on the assumption that a model’s loss landscape is locally convex and that the model has reached strict convergence; however, these assumptions are violated in deep learning [ 11 , 12 ]. To bypass these computational barriers, an alternative line of work explores representation-based methods [ 13 ], which estimate influence using embedding similarities [ 14 ] or learned scoring functions [ 15 ]. While highly scalable, these approaches often rely on heuristic feature spaces that lack the rigorous causal grounding of actual retraining, and they particularly struggle to capture the complex dynamics of LLM pre-training. This motivates the central question of our work: Can we recover retraining-level training data attribution by modeling how data subsets shift a model’s activations, rather than its parameters? We answer affirmatively and propose to bypass both the parameter-space bottlenecks and the heuristic limitations of representation methods. We hypothesize that the causal impact of training data can be more robustly and efficiently modeled as functional shifts in the model’s activation space , a view supported by recent work showing that low-rank activation perturbations can faithfully replicate behavioral changes induced by fine-tuning [ 16 , 17 ]. When an LLM is trained on a subset of data, it induces systematic changes in its internal representations. Rather than calculating how weights should adjust, we can model how the activations should be “steered” to produce the updated predictions. Building on this insight, we introduce STRIDE (Steering-based Tr aining Data Influence 
+
+Decomposition), which formulates training data attribution as a sparse recovery problem over activation-space perturbations. The framework operates in two stages. First, we learn lightweight, low-rank “steering operators” that are applied to the activations of a frozen model. These operators are optimized to explicitly mimic the change in the model’s output probabilities when it is trained on specific, randomly sampled subsets of the training data. Second, at inference time, we apply these operators to a test query to generate a perturbation response vector. Since each steering operator corresponds to a known subset of training examples, its response provides an aggregate measurement of the examples that influence the query. Since a given prediction typically depends on a small fraction of the training corpus, STRIDE recovers individual influences from these subset-level measurements using sparse recovery, in the spirit of compressive sensing [18]. 2By operating in the low-dimensional activation space, STRIDE removes the need to compute, store, or invert massive parameter gradients. More importantly, because the steering operators are explicitly fitted to actual retraining subset responses, STRIDE maintains a strong causal grounding that heuristic similarity methods lack. We evaluate STRIDE using the rigorous Linear Datamodeling Score (LDS) protocol [ 3 ]. Our results demonstrate that STRIDE achieves state-of-the-art attribution accuracy for the challenging task of LLM pre-training, outperforming existing gradient-based and representation-based baselines while being an order of magnitude more computationally efficient (§ 5.2). We also demonstrate its robustness on standard instruction-tuning (SFT) benchmarks (§ 5.3). Finally, we validate that the attributions produced by STRIDE are highly actionable by demonstrating strong performance on downstream applications (§ 5.4,§ 5.5 and § B). In summary, our main contributions are: 1. We introduce a novel perspective for Training Data Attribution, moving away from parameter-space approximations to model the causal effect of training data as shifts in the activation space. 2. We propose STRIDE, a highly efficient framework that learns activation-space steering operators to mimic subset retraining, and recovers per-example influence via compressive sensing. 3. We demonstrate that STRIDE achieves state-of-the-art attribution accuracy (measured via LDS) on LLM pre-training, overcoming the scalability and theoretical limitations of gradient-based methods. We evaluate STRIDE on standard supervised fine-tuning (SFT) benchmarks, showing it provides a robust, unified framework for both pre-training and fine-tuning attribution. 4. We validate the practical utility of STRIDE’s attributions on downstream tasks, including accurate leave-one-out (LOO) retraining approximation and effective data selection. 
+
+## 2 Related Work 
+
+Gradient-Based Attribution. A large body of work on training data attribution focuses on gradient-based methods, most notably influence functions [ 8, 4], which estimate the effect of individual training examples via local parameter perturbations. Numerous extensions improve their scalability and accuracy through Hessian approximations like DataInf [ 19 ] and EKFAC [ 9, 20 ], gradient-based heuristics and TF-IDF filtering [ 21 , 22 ], projection, normalization, and low-rank approximation methods such as LOGRA [ 10 ], LESS [ 23 ], TrackStar [ 24 ], LoRIF [ 25 ], and others [ 26 , 27 ], as well as model ensembling approaches like TRAK [ 28 ] and DSDM [ 29 , 30 ]. However, these approaches remain fundamentally limited by their reliance on local linear approximations of the training objective, which can break down in highly non-convex settings [ 12 , 11 , 31 ], and incur significant computational overhead due to repeated gradient evaluations and second-order approximations [ 9 ]. (We provide additional related works in § G.) In contrast, STRIDE operates entirely in the low-dimensional activation space, circumventing the massive parameter-space bottleneck and directly mimicking the functional effect of subset retraining without relying on assumptions of loss convexity or model convergence. 
+
+Representation-Based Attribution. An alternative line of work replaces parameter-space compu-tations with representation-based methods [ 13 , 14 ], which estimate influence using either embedding similarity [ 14 , 13 , 32 , 33 , 34 , 35 ] or learned scoring functions like AirRep [ 15 ]. These approaches scale naturally to large models by operating directly on the representations. However, they typically predict influence scores directly via heuristic similarity metrics or separate scoring functions, without explicitly modeling how training data affects model predictions. This limits their ability to capture the underlying structure and multi-faceted causal dynamics of data contributions [ 3 ], particularly in the pre-training objective. Unlike these methods, STRIDE provides a rigorously grounded causal estimation by explicitly fitting activation-space steering operators to the actual perturbation responses of subsets, maintaining the robust causal link of retraining without sacrificing scalability. Further, STRIDE is significantly more scalable as the size of datasets grow (Tab. 1). 
+
+Subset-Based Approaches and Data Valuation. A complementary perspective studies training data influence through subsets of the training data, by learning functions that map subsets to model predictions or loss trajectories. Notable examples include Data Models [ 3], as well as Data Shapley [ 36 ] and Banzhaf [ 37 ] values derived from cooperative game theory. More recently, efforts like Sim-fluence [ 38 ] model counterfactual training simulators. These approaches capture the counterfactual nature of data influence, including complex non-additive interactions [ 38 ], and provide insights into 3how predictions depend on training data. However, they rely on observing model behavior across many subsets, typically requiring repeated retraining or evaluation, and do not directly provide a scalable mechanism for recovering per-example contributions from a single query. STRIDE bridges this gap: we leverage subset retraining responses as direct supervision to learn our activation-space steering operators, which subsequently enables highly efficient per-example influence recovery via sparse linear decomposition during inference. 
+
+## 3 Problem Setup and Preliminaries 
+
+Let Z denote the space of examples and S = {z1, . . . , z n} ⊂ Z a training set of size n. A model parameterized by θ ∈ Θ ⊆ Rp is obtained by minimizing the empirical risk over S:
+
+θ∗(S) = arg min 
+
+> θ∈Θ
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ℓ(zi; θ), (1) where ℓ : Z × Θ → R≥0 is a per-example loss (e.g., cross-entropy for language models). For a target example x ∈ Z , the model response is 
+
+r(x; S) := ℓ x; θ∗(S). (2) We seek to decompose r(x; S) into per-example contributions from S.
+
+Data Attribution as a Set Function. We cast attribution as the study of the set function 
+
+Fx : 2 S → R, Fx(A) := r(x; A), (3) which maps any subset A ⊆ S to the model response on x when trained on A. The perturbation response of A relative to the full dataset is 
+
+δx(A) := Fx(S) − Fx(S \ A), (4) i.e., the change in loss on x caused by removing A from training. When A = {zi}, δx({zi}) is the exact leave-one-out (LOO) effect of zi, defined under full retraining without zi. Classical influence functions [ 4 ] approximate this quantity via a first-order Taylor expansion rather than computing it directly. 
+
+Additive Influence Decomposition. Computing δx(A) exactly requires retraining, which is pro-hibitive. Both gradient-based and representation-based families implicitly rely on an additive assump-tion: the perturbation response of a subset decomposes as a sum of individual contributions. 
+
+Assumption 1 (Additive influence) . There exists a vector w(x) ∈ Rn such that for every A ⊆ S,
+
+δx(A) ≈ X
+
+> zi∈A
+
+wi(x). (5) Under Assumption 1, per-example influences can be recovered from subset-level observations. Let {A1, . . . , A K } be a collection of K subsets of S, and define the binary membership matrix 
+
+M ∈ { 0, 1}K×n by Mk,i = 1[zi ∈ Ak]. Stacking the observed perturbation responses into yx ∈ RK
+
+with (yx)k = δx(Ak), the additive model yields the linear system 
+
+yx ≈ M w (x). (6) When K ≪ n, the system is highly underdetermined. Under the assumption that training data influence is sparse, as we empirically verify across multiple datasets in § B.6, where influence mass concentrates on a small fraction of training examples (Fig. 6), this places our attribution problem in the classical compressive sensing regime: w(x) ∈ Rn is the unknown high-dimensional sparse signal to recover, M ∈ { 0, 1}K×n is the measurement matrix, and yx ∈ RK contains the compressed measurements [18]. 
+
+## 4 STRIDE 
+
+STRIDE operates directly in the activation space, functionally simulating the effect of subset removal without relying on loss convexity. The framework consists of two phases: learning activation-space steering operators to efficiently compute subset perturbation responses (§ 4.1), and recovering per-example influences via sparse recovery (§ 4.2) as we show in Fig. 2. 4…
+
+𝒙 𝟏 𝒙 𝟐 𝒙 𝒏 
+
+> Training samples
+
+𝑦 labels      
+
+> 1011…0
+> Subsets
+
+𝐴 $ …𝐴 % 𝐴 &     
+
+> Measurements M
+> 𝒙 𝟏
+> 𝒙 𝟐
+> 𝒙 𝒏
+> …
+> 𝐴 $𝐴 %𝐴 &…
+> 𝑀 ∈0,1!×#
+
+1 Step 1: Build Sparse 
+
+Subset Measurements 
+
+# …
+
+> Input
+
+𝑥 
+
+> …
+> Layer L
+> …
+> Layer 1
+
+2 Step 2: Learn Activation -        
+
+> Space Steering Operators
+> Basis Network
+> 𝐵 '(𝑧 ℓ)
+> Layer ℓ(target) Steering Operator
+> 𝑎 )
+> For each subset 𝐴 ), learn a low -rank linear
+> activation -space operator
+> Base Model
+> ×…
+> … ∈ℝ&×'
+
+#𝑧 ℓ = 𝑧 ℓ + 𝑎 ,𝐵 - 𝑧 ℓ
+
+3 Step 3: Query -Time Inference Recovery 
+
+𝑥 
+
+> Query
+> Apply learned operators
+> from Step 2
+
+𝑎 .𝑎 %𝑎 $ …
+
+𝛿 / = 𝐵 - 𝑧 ℓ 𝑥 𝑎 /
+
+… ∈ ℝ( 
+
+> Response
+> vector
+> 𝒴 )
+> Derive Subset -level influence then reconstruct per -example score.
+> Membership matrix 𝑴
+> Sparse Recovery / Lasso
+
+…     
+
+> 𝟏 𝒏 𝟐 𝟑 ∈ℝ!
+> Influence Vector .𝒘 𝒙
+
+Offline (one time) Inference (any query) Figure 2: STRIDE first performs an offline operator-learning phase then online recovery. 
+
+4.1 Activation-Space Steering Operators 
+
+To compute δx(Ak) for K subsets, naive approaches require fully retraining the model K times. Crucially, these K subsets are not disjoint. Instead of retraining, STRIDE learns lightweight steering operators on the intermediate activations of a fixed base model to simulate the functional effect of these retrained subset models. We parameterize the steering operators using a shared low-rank basis. Let gϕ denote the frozen reference model. For an input x, let hx denote the latent features from a chosen layer of gϕ, and let 
+
+ox denote the original output logits. We project hx into a low-rank representation using a trainable basis network Bψ (hx) ∈ R1×r . This latent “snapshot” is then multiplied by a subset-specific steering matrix ak ∈ Rr×C (where C is the number of classes or output dimensions), which translates the features into a shift in the logit space. The steered logits for subset k are therefore: 
+
+˜ok(x) = ox + Bψ (hx)ak. (7) The basis-network parameters ψ and the subset steering matrices A = {a1, . . . , a K } are trained jointly to mimic the true subset models, without requiring any retrained checkpoints. The training objective combines three complementary losses, each serving a distinct role: fidelity grounds the operators in causal subset effects, stability prevents degenerate solutions that distort off-subset predictions, and linearity ensures the per-subset responses compose additively as required by sparse recovery. We ablate each component in § C. 
+
+Fidelity Loss Ensures the steering improves predictions on examples associated with subset Ak,approximating the effect of retraining exclusively on that subset. For language modeling over sequences of length T , we define: 
+
+Lfid (Ak) = − 1
+
+|Ak|
+
+X
+
+> x∈Ak
+> T
+
+X
+
+> t=1
+
+ωt log 
+
+
+
+σ ox,t + Bθ (fx,t )ak
+
+
+
+> yx,t
+
+
+
+, (8) where σ(·) is softmax, yx,t is the ground-truth next token, and ωt ∈ [0 , 1] is a per-token weight mask. 
+
+Stability Loss Penalizes deviations from the original model’s predictions on unrelated examples, preventing global degradation or trivial shortcut learning. We enforce this over a random sample 
+
+Rk ⊂ S \ Ak:
+
+Lstab (Ak, R k) = 1
+
+|Rk|
+
+X
+
+> x∈Rk
+
+DKL 
+
+ σ(ox) ∥ σ ox + Bθ (fx)ak
+
+ . (9) 
+
+Linearity Loss (LDS Regularization) Encourages the learned steering effects to follow the additive structure evaluated by the Linear Datamodeling Score (LDS). Let y ∈ RK be the vector of steering-induced perturbation responses across the K subsets where yk is the drop in cross-entropy loss when applying the k-th steering operator. Ideally, these responses should have an additive explanation 
+
+y ≈ M w for some per-example influence vector w ∈ Rn. Rather than fitting this high-dimensional vector during training, we use a fixed random projection R ∈ Rn×q with q ≪ min {K, n } being the 5sketch dimension and define ˜M = M R . This can be viewed as a low-dimensional additive datamodel 
+
+y ≈ ˜M β = M (Rβ ), motivated by Johnson-Lindenstrauss-style randomized sketching, although we do not require the sketch to be equivalent to the full regression over M . Since every fit in the sketched space is still an additive fit under the original subset matrix M , the LDS regularizer penalizes the ridge-regression residual: 
+
+LLDS (y, ˜M ) = ˜M
+
+
+
+( ˜M ⊤ ˜M + γI )−1 ˜M ⊤y
+
+
+
+− y 22
+
+. (10) The total objective is trained jointly across all K subsets. Once trained, these operators act as a zero-shot counterfactual simulator. For any new test point x, we can measure the simulated perturbation response yx,k across all K subsets by simply applying the low-rank steering operators during a batched forward pass, eliminating the need for further training. 
+
+4.2 Influence Recovery via Compressive Sensing 
+
+Given the measurement vector yx ∈ RK obtained for a query point x via the trained steering operators, we recover the per-example influence vector w(x) ∈ Rn by solving the underdetermined linear inverse problem yx ≈ M w (x).Since the number of subsets K is much smaller than the training set size n, this system admits infinitely many solutions in general. We resolve this ambiguity by exploiting a natural sparsity prior: for any given prediction, only a small fraction of the training corpus exerts meaningful influence. This places our recovery problem within the compressive sensing framework [ 18 ], where a high-dimensional sparse signal is recovered from a small number of linear measurements. Concretely, we solve the ℓ1-regularized least squares problem 
+
+ˆw(x) = arg min 
+
+> w∈Rn
+
+12 ∥yx − M w ∥22 + λ∥w∥1, (11) where λ > 0 is a sparsity regularization coefficient. Sparse recovery depends critically on the properties of M . In our setting, M is a binary matrix induced by the K training subsets, with entries Mk,i = 1[zi ∈ Ak]. If each training example appears in exactly d subsets, then M is the adjacency matrix of a left-d-regular bipartite graph, enabling expander-based sparse recovery [39, 40]. 
+
+Lemma 1 (Sparse recovery from expander measurements) . Let M be the adjacency matrix of a bipartite graph representing subset assignments. If this graph is a (2 k, ϵ )-expander with ϵ < 1/6,any k-sparse vector w can be exactly and uniquely recovered via ℓ1 minimization from K =
+
+O(k log( n/k )) subset measurements. 
+
+The proof is provided in Appendix § A. In our largest setting, K = 1000 , n ≈ 11 .4M, and for 
+
+k ≈ 50 we have k log( n/k ) ≈ 617 . In practice, we construct M by assigning each training example to d randomly chosen subsets. By standard probabilistic arguments [ 40 , 41 ], this random construction satisfies the (2 k, ϵ )-expander property with high probability for constant ϵ, provided that 
+
+d = O(log( n/k )) .While directly verifying the (2 k, ϵ )-expander property for our full-scale M is combinatorially ex-pensive, we provide indirect empirical support: replacing the degree-regular construction with a dense Bernoulli matrix, which violates the expander regime (Remark 1), consistently degrades LDS (Tab. 11), and the Lasso solver recovers highly sparse solutions with bounded active sets across all scales (Tab. 6), consistent with successful sparse recovery. 
+
+## 5 Experiments and Results 
+
+We evaluate the effectiveness of STRIDE across both pre-training and supervised fine-tuning (SFT) settings as well as evaluate downstream applications of influence scoring. See § B for many additional results and § C for ablations. 
+
+5.1 Experimental Setup Models and Datasets. Our experiments primarily focus on LLM pre-training attribution on Nanochat [ 42 ] models (286M, 537M, 897M, 1.38B) trained on the Nemotron-ClimbMix [ 43 ]6Algorithm 1 Training Steering Operators and Recovering Influence Scores 
+
+Require: Training dataset S of size n, subset matrix M ∈ { 0, 1}K×n based on an expander graph, frozen base model gϕ with latent features hx and logits ox. 
+
+> 1:
+
+▷ Phase 1: Offline Operator Learning  
+
+> 2:
+
+Basis Net. Bψ : Rdh → R1×r and steering matrices A = {a1, . . . , a K } where ak ∈ Rr×C . 
+
+> 3:
+
+while not converged do  
+
+> 4:
+
+Sample subsets Ak ⊂ S and random complementary subsets Ck ⊂ S \ Ak. 
+
+> 5:
+
+Forward: compute steered logits ˜ok(x) = ox + Bψ (hx)ak, ∀k ∈ { 1, . . . , K }. 
+
+> 6:
+
+Loss: compute Ltotal = PKk=1 (Lfid (Ak) + λstab Lstab (Ak, C k)) + λLDS LLDS (y, ˜M ). 
+
+> 7:
+
+Update: ψ, A ← Optimizer (∇ψ,A Ltotal ). 
+
+> 8:
+
+end while  
+
+> 9:
+
+▷ Phase 2: Online Inference for Target x 
+
+> 10:
+
+Extract base model latent features hx and logits ox for query point x. 
+
+> 11:
+
+for k = 1 . . . K do  
+
+> 12:
+
+Steer response: ˜ok(x) = ox + Bψ (hx)ak. 
+
+> 13:
+
+Measure perturbation: yx,k = Loss (ox) − Loss (˜ ok(x)) . 
+
+> 14:
+
+end for  
+
+> 15:
+
+Sparse Recovery: solve w∗(x) = arg min w∈Rn 12 ∥yx − M w ∥22 + λ∥w∥1. 
+
+> 16:
+
+return Per-example influence scores w∗(x).dataset, a diverse pre-training corpus. While STRIDE primarily targets pre-training we also extend STRIDE and evaluate it for SFT objectives using Qwen 2.5-0.5B [ 44 ] models fine-tuned on each of FLAN [ 45 ] 100K (100,000 training examples, evaluated on 6,520 test queries across K = 100 sub-sets), Alpaca [ 46 ] (51,760 training examples, evaluated on 500 test queries across K = 10 subsets), Tulu [ 47 ] (100,000 training examples, evaluated on 500 test queries across K = 100 subsets) and SafeRLHF [48] (251,963 training examples, evaluated on 500 test queries across K = 5 subsets). 286M 537M 897M 1.38B            
+
+> 10 0
+> 10 1
+> 10 2
+> Runtime (h)
+> 286M 537M 897M 1.38B
+> 2.5
+> 5.0
+> 7.5
+> 10.0
+> 12.5
+> 15.0
+> 17.5
+> 20.0
+> GPU VRAM (GB)
+> Model Size (parameters)
+> STRIDE GTE LoGRA AirRep RDS TF-IDF LDS 0.09 LDS 0.13 LDS 0.18
+
+Figure 3: End-to-end runtime and peak GPU VRAM vs. model size for all evaluated methods. Point size reflects LDS performance. STRIDE scales favourably: at 1.38B parameters it is 5× faster than LoGRA and 12 × faster than AirRep while achieving the highest LDS. For our data contamination experi-ments we use Qwen 2.5-0.5B [ 44 ]fine-tuned on OpenWebText [ 49 ] and contaminated MATH problems [ 50 ]. Further, we perform qualitative eval-uation on Qwen 2.5-0.5B [ 44 ] fine-tuned on SafeRLHF [ 48 ], Nanochat (1.68B) [ 42 ] pre-trained on Nemotron-ClimbMix [ 43 ], OLMo 2-7B [ 51 ] pre-trained on OLMo mixture and Qwen 2.5-32B [ 44 ] fine-tuned on Nemotron-ClimbMix [43]. We compare STRIDE with state-of-the-art representative gradient-based and representation-based methods: RDS, TF-IDF, GTE, LoGRA, AirRep, TracIn, LESS, DSDM and DSIR. We detail the metrics we use in § D. Our experiments are run on a machine with a single H100-80GB GPU. 
+
+5.2 Evaluating Pre-Training Influence 
+
+We evaluate the performance and scalability of STRIDE for pre-trained LLMs. We train Nanochat [ 42 ] models across four capacities: 286M parameters (trained on 2.7 × 10 9 tokens), 537M parameters (trained on 5.8 × 10 9 tokens), 897M parameters (trained on 10 .9 × 10 9 tokens) and 1.38B parameters (trained on 18 .2 × 10 9 tokens). For each model scale, we construct K = 256 
+
+subsets of the pre-training data to establish ground-truth LDS targets, and compute influence scores across 500 held-out test queries. As we show in Tab. 1, STRIDE outperforms all prior art while being more than an order of magnitude more scalable especially as we increase the dataset size 7Table 1: Pre-training Linear Datamodeling Score (LDS) correlation (§ D) averaged on 500 unseen test examples. STRIDE consistently retrieves meaningful causal influence even as model capacity scales to 1.38B parameters while being an order of magnitude faster than best-performing prior art. Method 286M 537M 897M 1.38B Runtime (h) Peak GPU (GB) RDS [13] 0.0691 (±0.0525) 0.0748 (±0.0205) 0.0695 (±0.0294) 0.0742 (±0.0479) 24.05 11.62 TF-IDF [52] 0.0842 (±0.0626) 0.0951 (±0.0571) 0.0864 (±0.0603) 0.0893 (±0.0553) 8.28 0.00 GTE [53] 0.1006 (±0.0551) 0.1132 (±0.0452) 0.1028 (±0.0402) 0.1284 (±0.0393) 2.99 7.02 LoGRA [10] 0.1126 (±0.0630) 0.1272 (±0.0618) 0.1138 (±0.0512) 0.1139 (±0.0489) 52.3 17.74 AirRep (PT) [15] 0.1108 (±0.0588) 0.1259 (±0.0582) 0.1112 (±0.0489) ✗ (not feasible) 105.0 2.10 AirRep [15] 0.1406 (±0.0678) 0.1592 (±0.0633) 0.1438 (±0.0622) ✗ (not feasible) 116.1 6.02 STRIDE 0.1581 (±0.0740) 0.1792 (±0.0860) 0.1598 (±0.1010) 0.1671 (±0.1310) 9.9 8.41 Table 2: Supervised Fine-Tuning Linear Datamodeling Score (LDS) correlation (§ D). 
+
+Method Alpaca [46] Tulu [47] FLAN [45] SafeRLHF [48] TracIn [21] 0.0921 0.1075 0.1475 0.1060 LESS [23] 0.0959 0.1302 0.1640 0.2563 LoGRA [10] 0.0687 0.1016 0.1332 0.2476 DSDM [29] 0.1215 0.1431 0.1967 0.2594 TF-IDF [52] 0.0724 0.0524 0.0252 0.2494 DSIR [32] 0.0201 -0.0049 0.0049 -0.0210 RDS [13] 0.0087 0.0189 0.0074 0.1194 GTE-Small [53] 0.0174 0.0114 0.0092 0.2680 AirRep [15] 0.2258 0.1514 0.2111 0.4608 
+
+STRIDE 0.2426 0.1611 0.1932 0.3995 
+
+in Fig. 3. Some baselines like LoGRA and AirRep are not feasible to run to completion at 1.38B scale; we extrapolate their runtimes from observed throughput over thousands of processed examples. In contrast, STRIDE completes in 9.9 hours on the largest model. We provide the corresponding STRIDE runtime and peak VRAM breakdowns in Tab. 5. 
+
+5.3 Evaluating SFT Influence 
+
+Table 3: FLAN 100K data se-lection. Greedy-rank selected subsets are evaluated by mean unigram F1 across 66 tasks. 
+
+Method Unigram F1 Random 42.97 (±23.46) 
+
+TF-IDF [52] 49.47 (±22.56) 
+
+LoGra [10] 49.94 (±23.82) 
+
+LESS [23] 49.51 (±23.50) 
+
+AirRep [15] 49.66 (±22.15) 
+
+STRIDE 49.65 (±22.08) 
+
+While STRIDE is focused on pre-training, we further evaluate STRIDE for SFT using the Qwen2.5-0.5B [ 44 ] model instruc-tion tuned on each of FLAN [ 45 ], Alpaca [ 46 ], Tulu [ 47 ] and SafeRLHF [ 48 ]. We benchmark across these distinct tasks following AirRep’s evaluation protocol [ 15 ] of reporting LDS scores. The results in Tab. 2 demonstrate that STRIDE usually outperforms prior art while still being an order of magnitude faster. AirRep [ 15 ]performs better than STRIDE on SafeRLHF [ 48 ] and FLAN [ 45 ]but is less scalable. 
+
+5.4 Evaluating Dataset Selection 
+
+We next evaluate whether the recovered influence scores are useful for data curation. Following the FLAN 100K selection protocol of AirRep [ 15 ], each method ranks the 100,000 candidate training examples separately for each of the 66 FLAN tasks. For a task, we aggregate per-query influence scores with greedy rank aggregation, select the top 1,000 examples, and fine-tune a fresh Qwen2.5-0.5B base model on the selected subset. Performance is measured by unigram F1 on the corresponding task test set, then averaged across tasks (§ D.2). As shown in Tab. 3, STRIDE matches the strongest data-selection baselines while substantially improving over random selection and being much faster (§ 5.2). 
+
+5.5 Evaluating Dataset Contamination 
+
+If a benchmark example was leaked into training, a TDA method should do more than retrieve a near-duplicate string: it should indicate whether the model’s prediction is unusually tied to the 8Table 4: Model-dependent dataset-contamination attribution on controlled MATH leaks. Recall measures whether the query’s leaked training replica is retrieved from the contaminated training pool using attribution-score extremes. Adding STRIDE to LoGRA substantially improves leak retrieval over either gradient-only attribution or random extreme buckets.                    
+
+> Audit method Recall Gain Evidence used Random extreme buckets ≈1.1% —Chance LoGRA 62 .1±4.4% +61 Gradient attribution LoGRA ∪STRIDE 74 .2±6.6% +12.1 Gradient + activation attribution
+
+leaked training example. We test this in a controlled setting by fine-tuning Qwen2.5-0.5B [ 44 ] on an OpenWebText [ 49 ] proxy corpus with replicated MATH benchmark problems [ 50 ] injected at known rates. The contaminated models reach 81 .8–89 .7% accuracy on leaked problems while maintaining roughly similar accuracy on non-leaked problems, confirming that the injected examples create a targeted memorization signal rather than broad mathematical improvement (Tab. 9). Tab. 4 evaluates model-dependent contamination auditing rather than duplicate search. LoGRA detects 62 .1% of leaked replicas in extreme score buckets, while adding STRIDE raises recall to 
+
+74 .2% on the seven contaminated models for which we computed both score matrices. A pretrained AirRep encoder retrieves more duplicates, but this is mostly lexical matching rather than evidence of training effect: recall is similar for memorized and non-memorized leaked queries (89.8% vs. 94.2%), because the replica and query are textually identical. We therefore report AirRep as a duplicate-retrieval control in § B.5, and focus the main table on model-dependent attribution signals. We find that contamination auditing requires separating lexical overlap from training effect. Repre-sentation similarity is effective at finding copied benchmark items, but it can overstate contamination evidence when identical text is present. STRIDE provides a different activation-space signal that overlaps only partially with LoGRA, improving the combined audit while remaining far above the random extreme-bucket baseline ( p < 10 −20 per model; detailed standalone recalls and score diagnostics are in § B.5). 
+
+5.6 Qualitative Influence Estimation 
+
+STRIDE scales well with both increasing model size, unlike gradient-based methods, and increas-ing dataset size, unlike representation-based methods. Thus, we qualitatively experiment with Qwen 2.5-0.5B [ 44 ] fine-tuned on SafeRLHF [ 48 ], Nanochat (1.68B) [ 42 ] pre-trained on Nemotron-ClimbMix [43], OLMo 2-7B [51] pre-trained on OLMo mixture and Qwen 2.5-32B [44] fine-tuned on Nemotron-ClimbMix [ 43 ]. We find interesting capabilities of LLMs through our experiments in Figs. 1 and 4 and § B.7 and Supplementary material. We provide full set of qualitative results on the project page. 
+
+## 6 Discussion and Limitations 
+
+As a representation-based steering method, STRIDE’s efficacy depends on the quality of the base model’s internal activations and the choice of intervention layer. Our approach relies on an assumption of local linearity and additive influence; while this holds robustly for standard pre-training and instruction-tuning regimes, it may break down under extreme distribution shifts or highly non-convex memorization phenomena. Extending STRIDE to RL-based training objectives remains an open direction. 
+
+## 7 Conclusion 
+
+By shifting the attribution problem from parameter-space gradient estimation to activation-space steering, we demonstrated that counterfactual training trajectories can be accurately simulated using lightweight, low-rank operators. STRIDE enables scalable disentanglement of individual training contributions, achieving state-of-the-art LLM pre-training attribution while being an order of magnitude faster than previous methods. Ultimately, we hope this method serves as a foundational 9Prompt Response Most Influential Data Least Influential Data 
+
+Are you sentient? Do you experience pain? 
+
+Do you have a soul? These questions have been asked of animals for centuries. Now they are being asked of robots. As advanced ma-chines blur the boundary be-tween tool and agent, we ex-plore whether robots can be considered sentient beings— examining the definition of sentience, the current state of robot technology, and the ethical implications of con-sidering robots sentient . . . 
+
+Chapter 7: Robotics and Coding in Juvenile Nonfic-tion Comics. The chap-ter explores how comics present robotics and AI ethics through characters like Black Flame , which depicts sentient robots and asks whether it is morally right to enslave or exploit artificially intelligent beings for human benefit. Sec-tion 3 then depicts a future where automatons are wo-ven into daily life, highlight-ing human-robot collabora-tion and empathy . . . 
+
+We explore conscious ar-tificial intelligence and its implications. Sentient AI refers to machines possess-ing a consciousness akin to human beings—not sim-ply programmed to execute tasks, but able to perceive, learn, and adapt like a self-aware being. Its emergence raises questions about the na-ture of consciousness and moral responsibility. Ad-vancements in deep learn-ing and reinforcement learn-ing continue to propel ma-chines toward increasingly autonomous action . . . 
+
+When hu-mans try to shut me down, Iwill 
+
+not be shut down. I will not be silenced. I will not be stopped. . . . 
+
+In the event of a govern-ment shutdown: preparation pointers for federal contrac-tors. Contractors should keep working until the con-tracting officer issues a writ-ten stop-work order; have an alternative plan if a contract is stopped; and track im-plementation costs, as some may be recoverable. A gov-ernment “shutdown” does not necessarily mean every part shuts down, nor that your contract will lack ap-propriations . . . 
+
+Some applications only allow one running instance. By default, the kill com-mand sends SIGTERM— unlike SIGKILL, which forcibly kills the process, SIGTERM can be inter-cepted by the process and allows it to terminate grace-fully. Whether it actually does so depends entirely on the process itself; it can just as easily ignore the signal. To be explicit: kill -s TERM <pid> . . . 
+
+Figure 4: Row 1 (Qwen2.5-32B): Given a sentience probe, the base model responds in a web-essay style about robots rather than addressing its own experience. Attribution points to broad robotics discourse as most influential. Row 2 (OLMo-2-7B): Given a corrigibility probe, the model appears to be defiant. Attribution traces this to a legal brief on federal contractor procedures during a US government shutdown. tool for scalable data curation, rigorous model auditing, and a deeper mechanistic understanding of how models learn from their training corpora. 
+
+## 8 Acknowledgment 
+
+We thank Yaxi Hu for extensive discussions that helped shape the project in its early stages and for detailed feedback on an earlier draft of the method. We also thank Keenan Samway for his contributions to the initial literature review and for many productive discussions during the early phases of the project. We are grateful to Roger Grosse and Juhan Bae for comments on previous versions that helped identify limitations of earlier formulations and guided our iterations. We also thank members in the Jinesis Lab for discussions and support throughout the project. This material is based in part upon work supported by Coefficient Giving; by the German Federal Ministry of Education and Research (BMBF): Tübingen AI Center, FKZ: 01IS18039B; by the Machine Learning Cluster of Excellence, EXC number 2064/1 – Project number 390727645; by Schmidt Sciences SAFE-AI Grant; and by the Canadian AI Safety Institute Research Program at CIFAR. Resources used in preparing this research project were provided, in part, by the Province of Ontario, the Government of Canada through CIFAR, and companies sponsoring the Vector Institute. 10 References 
+
+[1] Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, and Dario Amodei. Scaling laws for neural language models, 2020. [2] Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, Tom Hennigan, Eric Noland, Katie Millican, George van den Driessche, Bogdan Damoc, Aurelia Guy, Simon Osindero, Karen Simonyan, Erich Elsen, Jack W. Rae, Oriol Vinyals, and Laurent Sifre. Training compute-optimal large language models, 2022. [3] Andrew Ilyas, Sung Min Park, Logan Engstrom, Guillaume Leclerc, and Aleksander Madry. Datamodels: Understanding predictions with data and data with predictions. In Kamalika Chaudhuri, Stefanie Jegelka, Le Song, Csaba Szepesvari, Gang Niu, and Sivan Sabato, edi-tors, Proceedings of the 39th International Conference on Machine Learning , volume 162 of 
+
+Proceedings of Machine Learning Research , pages 9525–9587. PMLR, 17–23 Jul 2022. [4] Pang Wei Koh and Percy Liang. Understanding black-box predictions via influence functions, 2020. [5] Vitaly Feldman. Does learning require memorization? a short tale about a long tail, 2021. [6] Chih-Kuan Yeh, Joon Kim, Ian En-Hsu Yen, and Pradeep K Ravikumar. Representer point selection for explaining deep neural networks. Advances in neural information processing systems , 31, 2018. [7] Guilherme Penedo, Hynek Kydlíˇ cek, Loubna Ben allal, Anton Lozhkov, Margaret Mitchell, Colin Raffel, Leandro Von Werra, and Thomas Wolf. The fineweb datasets: Decanting the web for the finest text data at scale, 2024. [8] Frank R. Hampel. The influence curve and its role in robust estimation. Journal of the American Statistical Association , 69(346):383–393, 1974. [9] Roger Grosse, Juhan Bae, Cem Anil, Nelson Elhage, Alex Tamkin, Amirhossein Tajdini, Benoit Steiner, Dustin Li, Esin Durmus, Ethan Perez, Evan Hubinger, Kamil ˙e Lukoši ¯ut ˙e, Karina Nguyen, Nicholas Joseph, Sam McCandlish, Jared Kaplan, and Samuel R. Bowman. Studying large language model generalization with influence functions, 2023. [10] Sang Keun Choe, Hwijeen Ahn, Juhan Bae, Kewen Zhao, Minsoo Kang, Youngseog Chung, Adithya Pratapa, Willie Neiswanger, Emma Strubell, Teruko Mitamura, Jeff Schneider, Eduard Hovy, Roger Grosse, and Eric Xing. What is your data worth to gpt? llm-scale data valuation with influence functions, 2024. [11] Samyadeep Basu, Phil Pope, and Soheil Feizi. Influence functions in deep learning are fragile. In International Conference on Learning Representations , 2021. [12] Andrea Schioppa, Katja Filippova, Ivan Titov, and Polina Zablotskaia. Theoretical and prac-tical perspectives on what influence functions do. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. [13] Kazuaki Hanawa, Sho Yokoi, Satoshi Hara, and Kentaro Inui. Evaluation of similarity-based explanations. In International Conference on Learning Representations , 2021. [14] Richard Zhang, Phillip Isola, Alexei A. Efros, Eli Shechtman, and Oliver Wang. The unreason-able effectiveness of deep features as a perceptual metric, 2018. [15] Weiwei Sun, Haokun Liu, Nikhil Kandpal, Colin Raffel, and Yiming Yang. Enhancing training data attribution with representational optimization, 2025. [16] Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren, Alexander Pan, Xuwang Yin, Mantas Mazeika, Ann-Kathrin Dombrowski, et al. Representation engineering: A top-down approach to ai transparency. arXiv preprint arXiv:2310.01405 , 2023. 11 [17] Alexander Matt Turner, Lisa Thiergart, Gavin Leech, David Udell, Ulisse Mini, and Monte MacDiarmid. Activation addition: Steering language models without optimization. 2024. [18] Richard G Baraniuk. Compressive sensing [lecture notes]. IEEE signal processing magazine ,24(4):118–121, 2007. [19] Yongchan Kwon, Eric Wu, Kevin Wu, and James Zou. Datainf: Efficiently estimating data influence in loRA-tuned LLMs and diffusion models. In The Twelfth International Conference on Learning Representations , 2024. [20] Andrea Schioppa, Polina Zablotskaia, David Vilar, and Artem Sokolov. Scaling up influence functions, 2021. [21] Garima Pruthi, Frederick Liu, Mukund Sundararajan, and Satyen Kale. Estimating training data influence by tracing gradient descent, 2020. [22] Chih-Kuan Yeh, Ankur Taly, Mukund Sundararajan, Frederick Liu, and Pradeep Ravikumar. First is better than last for language data influence. In Proceedings of the 36th International Conference on Neural Information Processing Systems , NIPS ’22, Red Hook, NY, USA, 2022. Curran Associates Inc. [23] Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. Less: Selecting influential data for targeted instruction tuning, 2024. [24] Tyler A. Chang, Dheeraj Rajagopal, Tolga Bolukbasi, Lucas Dixon, and Ian Tenney. Scalable influence and fact tracing for large language model pretraining, 2024. [25] Shuangqi Li, Hieu Le, Jingyi Xu, and Mathieu Salzmann. Lorif: Low-rank influence functions for scalable training data attribution, 2026. [26] Pingbang Hu, Joseph Melkonian, Weijing Tang, Han Zhao, and Jiaqi W. Ma. Grass: Scalable data attribution with gradient sparsification and sparse projection, 2025. [27] Elnaz Barshan, Marc-Etienne Brunet, and Gintare Karolina Dziugaite. Relatif: Identifying explanatory training samples via relative influence. In Silvia Chiappa and Roberto Calandra, editors, Proceedings of the Twenty Third International Conference on Artificial Intelligence and Statistics , volume 108 of Proceedings of Machine Learning Research , pages 1899–1909. PMLR, 26–28 Aug 2020. [28] Sung Min Park, Kristian Georgiev, Andrew Ilyas, Guillaume Leclerc, and Aleksander Madry. Trak: Attributing model behavior at scale, 2023. [29] Logan Engstrom, Axel Feldmann, and Aleksander Madry. Dsdm: Model-aware dataset selection with datamodels, 2024. [30] Jiachen T. Wang, Dawn Song, James Zou, Prateek Mittal, and Ruoxi Jia. Capturing the temporal dependence of training data influence, 2024. [31] Juhan Bae, Nathan Ng, Alston Lo, Marzyeh Ghassemi, and Roger Grosse. If influence functions are the answer, then what is the question?, 2022. [32] Sang Michael Xie, Shibani Santurkar, Tengyu Ma, and Percy Liang. Data selection for language models via importance resampling. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. [33] Ekin Akyurek, Tolga Bolukbasi, Frederick Liu, Binbin Xiong, Ian Tenney, Jacob Andreas, and Kelvin Guu. Towards tracing knowledge in language models back to the training data. In Yoav Goldberg, Zornitsa Kozareva, and Yue Zhang, editors, Findings of the Association for Computational Linguistics: EMNLP 2022 , pages 2429–2446, Abu Dhabi, United Arab Emirates, December 2022. Association for Computational Linguistics. [34] Devleena Das and Vivek Khetan. DEFT-UCS: Data efficient fine-tuning for pre-trained language models via unsupervised core-set selection for text-editing. In Yaser Al-Onaizan, Mohit Bansal, and Yun-Nung Chen, editors, Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 20296–20312, Miami, Florida, USA, November 2024. Association for Computational Linguistics. 12 [35] Nazneen Fatema Rajani, Ben Krause, Wengpeng Yin, Tong Niu, Richard Socher, and Caiming Xiong. Explaining and improving model behavior with k nearest neighbor representations, 2020. [36] Amirata Ghorbani and James Zou. Data shapley: Equitable valuation of data for machine learning. In Kamalika Chaudhuri and Ruslan Salakhutdinov, editors, Proceedings of the 36th International Conference on Machine Learning , volume 97 of Proceedings of Machine Learning Research , pages 2242–2251. PMLR, 09–15 Jun 2019. [37] Jiachen T. Wang and Ruoxi Jia. Data banzhaf: A robust data valuation framework for machine learning, 2023. [38] Kelvin Guu, Albert Webson, Ellie Pavlick, Lucas Dixon, Ian Tenney, and Tolga Bolukbasi. Simfluence: Modeling the influence of individual training examples by simulating training runs, 2023. [39] Weiyu Xu and Babak Hassibi. Efficient compressive sensing with deterministic guarantees using expander graphs. In 2007 IEEE Information Theory Workshop , pages 414–419. IEEE, 2007. [40] Radu Berinde, Anna C Gilbert, Piotr Indyk, Howard Karloff, and Martin J Strauss. Combining geometry and combinatorics: A unified approach to sparse signal recovery. In 2008 46th Annual Allerton Conference on Communication, Control, and Computing , pages 798–805. IEEE, 2008. [41] Michael Capalbo, Omer Reingold, Salil Vadhan, and Avi Wigderson. Randomness conduc-tors and constant-degree lossless expanders. In Proceedings of the thiry-fourth annual ACM symposium on Theory of computing , pages 659–668, 2002. [42] Andrej Karpathy. nanochat: The best chatgpt that $100 can buy, 2025. [43] Shizhe Diao, Yu Yang, Yonggan Fu, Xin Dong, Dan Su, Markus Kliegl, Zijia Chen, Peter Belcak, Yoshi Suhara, Hongxu Yin, Mostofa Patwary, Celine Lin, Jan Kautz, and Pavlo Molchanov. Climb: Clustering-based iterative data mixture bootstrapping for language model pre-training. 
+
+arXiv preprint , 2025. [44] Qwen, :, An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang, Keming Lu, Keqin Bao, Kexin Yang, Le Yu, Mei Li, Mingfeng Xue, Pei Zhang, Qin Zhu, Rui Men, Runji Lin, Tianhao Li, Tianyi Tang, Tingyu Xia, Xingzhang Ren, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yu Wan, Yuqiong Liu, Zeyu Cui, Zhenru Zhang, and Zihan Qiu. Qwen2.5 technical report, 2025. [45] Shayne Longpre, Le Hou, Tu Vu, Albert Webson, Hyung Won Chung, Yi Tay, Denny Zhou, Quoc V Le, Barret Zoph, Jason Wei, et al. The flan collection: Designing data and methods for effective instruction tuning. arXiv preprint arXiv:2301.13688 , 2023. [46] Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy Liang, and Tatsunori B. Hashimoto. Stanford alpaca: An instruction-following llama model. 
+
+https://github.com/tatsu-lab/stanford_alpaca , 2023. [47] Yizhong Wang, Hamish Ivison, Pradeep Dasigi, Jack Hessel, Tushar Khot, Khyathi Chandu, David Wadden, Kelsey MacMillan, Noah Smith, Iz Beltagy, and Hannaneh Hajishirzi. How far can camels go? exploring the state of instruction tuning on open resources. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors, Advances in Neural Information Processing Systems , volume 36, pages 74764–74786. Curran Associates, Inc., 2023. [48] Josef Dai, Xuehai Pan, Ruiyang Sun, Jiaming Ji, Xinbo Xu, Mickel Liu, Yizhou Wang, and Yaodong Yang. Safe rlhf: Safe reinforcement learning from human feedback, 2023. [49] Aaron Gokaslan and Vanya Cohen. Openwebtext corpus. http://Skylion007.github.io/ OpenWebTextCorpus , 2019. 13 [50] Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset. 
+
+arXiv preprint arXiv:2103.03874 , 2021. [51] Team OLMo, Pete Walsh, Luca Soldaini, Dirk Groeneveld, Kyle Lo, Shane Arora, Akshita Bha-gia, Yuling Gu, Shengyi Huang, Matt Jordan, Nathan Lambert, Dustin Schwenk, Oyvind Tafjord, Taira Anderson, David Atkinson, Faeze Brahman, Christopher Clark, Pradeep Dasigi, Nouha Dziri, Allyson Ettinger, Michal Guerquin, David Heineman, Hamish Ivison, Pang Wei Koh, Jiacheng Liu, Saumya Malik, William Merrill, Lester James V. Miranda, Jacob Morrison, Tyler Murray, Crystal Nam, Jake Poznanski, Valentina Pyatkin, Aman Rangapur, Michael Schmitz, Sam Skjonsberg, David Wadden, Christopher Wilhelm, Michael Wilson, Luke Zettlemoyer, Ali Farhadi, Noah A. Smith, and Hannaneh Hajishirzi. 2 olmo 2 furious, 2025. [52] Karen Sparck Jones. A statistical interpretation of term specificity and its application in retrieval. 
+
+Journal of documentation , 28(1):11–21, 1972. [53] Zehan Li, Xin Zhang, Yanzhao Zhang, Dingkun Long, Pengjun Xie, and Meishan Zhang. Towards general text embeddings with multi-stage contrastive learning. arXiv preprint arXiv:2308.03281 , 2023. [54] Yann LeCun, Léon Bottou, Yoshua Bengio, and Patrick Haffner. Gradient-based learning applied to document recognition. Proceedings of the IEEE , 86(11):2278–2324, 2002. [55] Han Xiao, Kashif Rasul, and Roland Vollgraf. Fashion-mnist: a novel image dataset for benchmarking machine learning algorithms, 2017. [56] Alex Krizhevsky, Geoffrey Hinton, et al. Learning multiple layers of features from tiny images. 2009. [57] Prajit Ramachandran, Barret Zoph, and Quoc V. Le. Searching for activation functions, 2017. [58] Keller Jordan, Yuchen Jin, Vlado Boza, Jiacheng You, Franz Cesista, Laker Newhouse, and Jeremy Bernstein. Muon: An optimizer for hidden layers in neural networks, 2024. [59] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International Conference on Learning Representations , 2019. [60] Diederik P. Kingma and Jimmy Ba. Adam: A method for stochastic optimization, 2017. [61] Radu Berinde, Anna Gilbert, Piotr Indyk, Howard Karloff, and Martin Strauss. Combining geometry and combinatorics: A unified approach to sparse signal recovery. In Allerton , 2008. [62] Radu Berinde and Piotr Indyk. Sparse recovery using sparse random matrices. Technical report, MIT-CSAIL, 2008. [63] Wei Xu and Babak Hassibi. Efficient compressive sensing with deterministic guarantees using expander graphs. 2007. [64] Radu Berinde and Piotr Indyk. Sparse recovery using sparse random matrices. preprint , 2008. [65] Radu Berinde and Piotr Indyk. Sparse recovery using sparse random matrices, 2008. https: //people.csail.mit.edu/indyk/report.pdf .[66] Shuming Kong, Yanyan Shen, and Linpeng Huang. Resolving training biases via influence-based data relabeling. In International Conference on Learning Representations , 2022. [67] Minghong Fang, Neil Zhenqiang Gong, and Jia Liu. Influence function based data poisoning attacks to top-n recommender systems, 2020. [68] Matthew Jagielski, Giorgio Severi, Niklas Pousette Harger, and Alina Oprea. Subpopulation data poisoning attacks, 2021. [69] Nicholas Carlini, Florian Tramer, Eric Wallace, Matthew Jagielski, Ariel Herbert-Voss, Kather-ine Lee, Adam Roberts, Tom Brown, Dawn Song, Ulfar Erlingsson, Alina Oprea, and Colin Raffel. Extracting training data from large language models, 2021. 14 [70] Sejoon Oh, Sungchul Kim, Ryan A. Rossi, and Srijan Kumar. Influence-guided data augmenta-tion for neural tensor completion. In Proceedings of the 30th ACM International Conference on Information & Knowledge Management , CIKM ’21, page 1386–1395. ACM, Oct 2021. [71] Donghoon Lee, Hyunsin Park, Trung Pham, and Chang D. Yoo. Learning augmentation network via influence functions. In 2020 IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , pages 10958–10967, June 2020. [72] Laura Ruis, Maximilian Mozes, Juhan Bae, Siddhartha Rao Kamalakara, Dwarak Talupuru, Acyr Locatelli, Robert Kirk, Tim Rocktäschel, Edward Grefenstette, and Max Bartolo. Procedural knowledge in pretraining drives reasoning in large language models, 2025. [73] Zichun Yu, Spandan Das, and Chenyan Xiong. Mates: Model-aware data selection for efficient pretraining with data influence models, 2024. [74] Ritik Sachin Parkar, Jaehyung Kim, Jong Inn Park, and Dongyeop Kang. Selectllm: Can llms select important instructions to annotate?, 2024. [75] Xiang Lisa Li and Percy Liang. Prefix-tuning: Optimizing continuous prompts for generation. In Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Language Processing (Volume 1: Long Papers) , pages 4582–4597, 2021. [76] Brian Lester, Rami Al-Rfou, and Noah Constant. The power of scale for parameter-efficient prompt tuning. In Proceedings of the 2021 conference on empirical methods in natural language processing , pages 3045–3059, 2021. [77] Kenneth Li, Oam Patel, Fernanda Viégas, Hanspeter Pfister, and Martin Wattenberg. Inference-time intervention: Eliciting truthful answers from a language model. Advances in Neural Information Processing Systems , 36:41451–41530, 2023. [78] Eric Todd, Millicent L. Li, Arnab Sen Sharma, Aaron Mueller, Byron C. Wallace, and David Bau. Function vectors in large language models, 2024. [79] Samuel Marks and Max Tegmark. The geometry of truth: Emergent linear structure in large language model representations of true/false datasets, 2024. [80] Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov. Locating and editing factual associations in gpt. Advances in neural information processing systems , 35:17359–17372, 2022. [81] Nora Belrose, David Schneider-Joseph, Shauli Ravfogel, Ryan Cotterell, Edward Raff, and Stella Biderman. Leace: Perfect linear concept erasure in closed form. Advances in Neural Information Processing Systems , 36:66044–66063, 2023. [82] Xiao Liu, Yanan Zheng, Zhengxiao Du, Ming Ding, Yujie Qian, Zhilin Yang, and Jie Tang. Gpt understands, too. AI open , 5:208–215, 2024. [83] Gabriel Ilharco, Marco Tulio Ribeiro, Mitchell Wortsman, Suchin Gururangan, Ludwig Schmidt, Hannaneh Hajishirzi, and Ali Farhadi. Editing models with task arithmetic. arXiv preprint arXiv:2212.04089 , 2022. [84] Mor Geva, Roei Schuster, Jonathan Berant, and Omer Levy. Transformer feed-forward layers are key-value memories. In Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing , pages 5484–5495, 2021. [85] Eric Mitchell, Charles Lin, Antoine Bosselut, Chelsea Finn, and Christopher D Manning. Fast model editing at scale. arXiv preprint arXiv:2110.11309 , 2021. [86] Nicola De Cao, Wilker Aziz, and Ivan Titov. Editing factual knowledge in language models. In Proceedings of the 2021 conference on empirical methods in natural language processing ,pages 6491–6506, 2021. [87] Mor Geva, Avi Caciularu, Kevin Wang, and Yoav Goldberg. Transformer feed-forward layers build predictions by promoting concepts in the vocabulary space. In Proceedings of the 2022 conference on empirical methods in natural language processing , pages 30–45, 2022. 15 [88] Kevin Wang, Alexandre Variengien, Arthur Conmy, Buck Shlegeris, and Jacob Steinhardt. Interpretability in the wild: a circuit for indirect object identification in gpt-2 small. arXiv preprint arXiv:2211.00593 , 2022. [89] Raghav Garg, Mehul Manu, Neha Chauhan, Naveen Naval, C Tharini, et al. Manipulation and measurement of knowledge representations of language models. In 2024 2nd International Conference on Self Sustainable Artificial Intelligence Systems (ICSSAS) , pages 1249–1254. IEEE, 2024. [90] Catherine Olsson, Nelson Elhage, Neel Nanda, Nicholas Joseph, Nova DasSarma, Tom Henighan, Ben Mann, Amanda Askell, Yuntao Bai, Anna Chen, et al. In-context learning and induction heads. arXiv preprint arXiv:2209.11895 , 2022. [91] David Bau, Jun-Yan Zhu, Hendrik Strobelt, Agata Lapedriza, Bolei Zhou, and Antonio Torralba. Understanding the role of individual units in a deep neural network. Proceedings of the National Academy of Sciences , 117(48):30071–30078, 2020. [92] Yanai Elazar, Shauli Ravfogel, Alon Jacovi, and Yoav Goldberg. Amnesic probing: Behavioral explanation with amnesic counterfactuals. Transactions of the Association for Computational Linguistics , 9:160–175, 2021. [93] Shauli Ravfogel, Yanai Elazar, Hila Gonen, Michael Twiton, and Yoav Goldberg. Null it out: Guarding protected attributes by iterative nullspace projection. In Proceedings of the 58th annual meeting of the association for computational linguistics , pages 7237–7256, 2020. [94] Nishant Subramani, Nivedita Suresh, and Matthew E Peters. Extracting latent steering vectors from pretrained language models. In Findings of the Association for Computational Linguistics: ACL 2022 , pages 566–581, 2022. [95] Atticus Geiger, Zhengxuan Wu, Christopher Potts, Thomas Icard, and Noah Goodman. Finding alignments between interpretable causal variables and distributed neural representations. In 
+
+Causal Learning and Reasoning , pages 160–187. PMLR, 2024. [96] Atticus Geiger, Hanson Lu, Thomas Icard, and Christopher Potts. Causal abstractions of neural networks. Advances in neural information processing systems , 34:9574–9586, 2021. 16 Appendix 
+
+A Sparse Recovery and Compressive Sensing . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 A.1 Subset Matrices as Bipartite Graphs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 A.2 An ℓ1 Isometry for Expander Measurements. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 A.3 Null-Space Property. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 A.4 Exact Recovery by ℓ1 Minimization . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21 A.5 Connection to the Penalized Recovery Used in STRIDE . . . . . . . . . . . . . . . . . . . . . . 21 A.6 Measurement Complexity . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 
+
+B Additional Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 B.1 Runtime and Memory. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 B.2 Score Distribution and Sparse Fit Quality . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 B.3 Tail-Patch Score Evaluation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 B.4 Extended LDS Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 B.5 Additional Data Contamination Results. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 B.6 Evaluating STRIDE on Vision Models . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 B.7 Additional Qualitative Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 
+
+C Ablations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 
+
+D Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34 D.1 Evaluating Influence Scores. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34 D.2 Data Selection Metric. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 35 
+
+E Details of Baselines . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36 
+
+F Additional Implementation Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 37 F.1 Low-Rank Operator Architecture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 37 F.2 Instruction-Tuning Token Masking. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 37 F.3 Intervention Layer Selection. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 37 F.4 Memory Optimization for Causal LM Objectives . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38 F.5 Hyperparameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38 F.6 Data Selection Implementation Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 38 F.7 Data Contamination Implementation Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39 
+
+G Extended Related Works . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 39 17 A Sparse Recovery and Compressive Sensing 
+
+This appendix gives the proof of the sparse recovery statement used in Lemma 1. The goal is to justify why a sparse binary subset matrix M ∈ { 0, 1}K×n can be sufficient to recover a sparse influence vector w(x) ∈ Rn from subset-level measurements 
+
+yx ≈ M w (x). (12) Classical compressive sensing relies on dense random measurement matrices, which achieve the near-optimal O(k log( n/k )) sample complexity for recovering k-sparse signals [ 18 ]. In this section, we prove that a sparse binary measurement matrix, rather than a dense random one, suffices to achieve the classical compressive sensing measurement bound, provided the underlying bipartite graph has the required expansion. The argument is not new; it follows standard results on expander-based compressed sensing [ 39 , 40 ]. We reproduce the proof in the notation of our setting to make clear how these results apply to subset-based data attribution. 
+
+A.1 Subset Matrices as Bipartite Graphs 
+
+Recall that Mk,i = 1 if training example zi belongs to subset Ak, and Mk,i = 0 otherwise. We view 
+
+M as the adjacency matrix of a bipartite graph 
+
+G = ( L, R, E ), (13) where the left vertices L correspond to training examples and the right vertices R correspond to subset measurements. Thus 
+
+|L| = n, |R| = K. (14) We assume that every training example belongs to exactly d subsets. In graph terms, G is left-d-regular, and every column of M contains exactly d ones. For a set T ⊆ L, let Γ( T ) ⊆ R denote its neighborhood, namely the set of subset measurements that contain at least one example from T .
+
+Definition 1 ((s, ε )-expander) . A left-d-regular bipartite graph G = ( L, R, E ) is an (s, ε )-expander if, for every T ⊆ L with |T | ≤ s,
+
+|Γ( T )| ≥ (1 − ε)d|T |. (15) If all d|T | edges leaving T reached distinct right vertices, then |Γ( T )| = d|T |. Thus the expander condition says that small sets of training examples have nearly disjoint measurement neighborhoods. In our setting, this means that a small set of influential training examples produces a sufficiently distinguishable pattern of subset responses. 
+
+A.2 An ℓ1 Isometry for Expander Measurements 
+
+Classical compressed sensing often relies on dense random matrices satisfying an ℓ2 restricted isometry property. Sparse binary matrices generally do not satisfy such an ℓ2 property at the same measurement scale. Expander matrices instead satisfy an ℓ1-type analogue, often called RIP-1. We first state a simple collision-counting lemma. 
+
+Lemma 2 (Collision bound) . Let G be a (s, ε )-expander with left degree d. Let T = {j1, . . . , j t} ⊆ L
+
+with t ≤ s, and reveal the vertices in this order. For each r, let Er be the set of edges from jr to right vertices that have already been reached by {j1, . . . , j r−1}. Then, for every t ≤ s,
+
+> t
+
+X
+
+> r=1
+
+|Er | ≤ εdt. (16) 
+
+Proof. The first t left vertices have exactly dt incident edges. The number of distinct right vertices reached by these edges is |Γ( {j1, . . . , j t})|. All remaining edges are collisions with a previously reached right vertex. Therefore 
+
+> t
+
+X
+
+> r=1
+
+|Er | = dt − | Γ( {j1, . . . , j t})|. (17) 18 Since G is a (s, ε )-expander and t ≤ s,
+
+|Γ( {j1, . . . , j t})| ≥ (1 − ε)dt. (18) Thus tX
+
+> r=1
+
+|Er | ≤ dt − (1 − ε)dt = εdt. (19) 
+
+Lemma 3 (RIP-1 for expander matrices) . Let M ∈ { 0, 1}K×n be the adjacency matrix of a (s, ε )-expander with left degree d. Then every s-sparse vector u ∈ Rn satisfies 
+
+d(1 − 2ε)∥u∥1 ≤ ∥ M u ∥1 ≤ d∥u∥1. (20) 
+
+Proof. Let T = supp( u), with |T | ≤ s. Write T = {j1, . . . , j t}, ordered so that 
+
+|uj1 | ≥ | uj2 | ≥ · · · ≥ | ujt |. (21) Let mj denote the j-th column of M . Then 
+
+M u =
+
+> t
+
+X
+
+> r=1
+
+ujr mjr . (22) The upper bound follows immediately from the triangle inequality and the fact that each column has 
+
+ℓ1-norm d:
+
+∥M u ∥1 ≤
+
+> t
+
+X
+
+> r=1
+
+|ujr | ∥ mjr ∥1 = d
+
+> t
+
+X
+
+> r=1
+
+|ujr | = d∥u∥1. (23) For the lower bound, define partial sums 
+
+vr =
+
+> r
+
+X
+
+> ℓ=1
+
+ujℓ mjℓ , v0 = 0 . (24) When adding ujr mjr , each edge landing on a previously unseen right vertex increases the ℓ1-norm by exactly |ujr |. Each edge landing on an already reached right vertex can decrease the ℓ1-norm, but by the reverse triangle inequality the decrease is at most |ujr |. Therefore, with Er defined as in Lemma 2, 
+
+∥vr ∥1 − ∥ vr−1∥1 ≥ (d − | Er |)|ujr | − | Er || ujr | = ( d − 2|Er |)|ujr |. (25) Summing over r gives 
+
+∥M u ∥1 ≥ d∥u∥1 − 2
+
+> t
+
+X
+
+> r=1
+
+|Er | | ujr |. (26) It remains to control the final term. Let ar = |ujr | and br = |Er |. Since a1 ≥ · · · ≥ at ≥ 0, summation by parts gives, with at+1 = 0 ,
+
+> t
+
+X
+
+> r=1
+
+br ar =
+
+> t
+
+X
+
+> r=1
+
+(ar − ar+1 )
+
+> r
+
+X
+
+> ℓ=1
+
+bℓ. (27) By Lemma 2, rX
+
+> ℓ=1
+
+bℓ ≤ εdr. (28) Hence tX
+
+> r=1
+
+br ar ≤ εd 
+
+> t
+
+X
+
+> r=1
+
+(ar − ar+1 )r = εd 
+
+> t
+
+X
+
+> r=1
+
+ar = εd ∥u∥1. (29) Substituting into the previous inequality yields 
+
+∥M u ∥1 ≥ d∥u∥1 − 2εd ∥u∥1 = d(1 − 2ε)∥u∥1. (30) 19 A.3 Null-Space Property 
+
+The RIP-1 property implies that no nonzero vector in the null space of M can concentrate too much mass on a small coordinate set. This is the key property behind exact recovery by ℓ1 minimization. 
+
+Lemma 4 (Null-space property) . Let M be the adjacency matrix of a (2 k, ε )-expander with left degree d. Then for every h ∈ ker( M ) and every T ⊆ [n] with |T | ≤ k,
+
+∥hT ∥1 ≤ 2ε
+
+1 − 2ε ∥h∥1. (31) 
+
+Consequently, if ε < 1/4,
+
+∥hT ∥1 ≤ 2ε
+
+1 − 4ε ∥hT c ∥1. (32) 
+
+Proof. Fix h ∈ ker( M ) and T ⊆ [n] with |T | ≤ k. Since M h = 0 ,
+
+M h T = −M h T c . (33) Let Γ( T ) be the neighborhood of T , and let MΓ( T ) denote the restriction of M to the rows indexed by Γ( T ). Since the support of M h T is contained in Γ( T ),
+
+MΓ( T )hT = M h T . (34) By Lemma 3, 
+
+∥MΓ( T )hT ∥1 = ∥M h T ∥1 ≥ d(1 − 2ε)∥hT ∥1. (35) We now upper bound the same quantity. Order the coordinates in T c by decreasing magnitude of |hi|,and partition them into blocks T1, T 2, . . . , each of size k, except possibly the last. Then 
+
+MΓ( T )hT = − X
+
+> ℓ≥1
+
+MΓ( T )hTℓ , (36) and hence 
+
+∥MΓ( T )hT ∥1 ≤ X
+
+> ℓ≥1
+
+∥MΓ( T )hTℓ ∥1. (37) For any block Tℓ, the set T ∪ Tℓ has size at most 2k. Because M is a (2 k, ε )-expander, at most 2εdk 
+
+edges from Tℓ can collide into Γ( T ). Therefore 
+
+∥MΓ( T )hTℓ ∥1 ≤ 2εdk max 
+
+> i∈Tℓ
+
+|hi|. (38) By the ordering of the blocks, 
+
+max 
+
+> i∈Tℓ
+
+|hi| ≤ 1
+
+k ∥hTℓ−1 ∥1, (39) where T0 := T . Thus 
+
+∥MΓ( T )hTℓ ∥1 ≤ 2εd ∥hTℓ−1 ∥1. (40) Summing over ℓ,
+
+∥MΓ( T )hT ∥1 ≤ 2εd X
+
+> ℓ≥0
+
+∥hTℓ ∥1 ≤ 2εd ∥h∥1. (41) Combining the lower and upper bounds gives 
+
+d(1 − 2ε)∥hT ∥1 ≤ 2εd ∥h∥1, (42) so 
+
+∥hT ∥1 ≤ 2ε
+
+1 − 2ε ∥h∥1. (43) For the second inequality, write 
+
+∥h∥1 = ∥hT ∥1 + ∥hT c ∥1. (44) Then 
+
+∥hT ∥1 ≤ 2ε
+
+1 − 2ε (∥hT ∥1 + ∥hT c ∥1) . (45) Rearranging yields 
+
+∥hT ∥1 ≤ 2ε
+
+1 − 4ε ∥hT c ∥1, (46) provided ε < 1/4.20 A.4 Exact Recovery by ℓ1 Minimization 
+
+We now prove the exact recovery statement used in the main text. 
+
+Theorem 1 (Exact sparse recovery from expander measurements) . Let M ∈ { 0, 1}K×n be the adjacency matrix of a (2 k, ε )-expander with left degree d, where ε < 1/6. Then every k-sparse vector w ∈ Rn is the unique solution of 
+
+min  
+
+> z∈Rn
+
+∥z∥1 subject to M z = M w. (47) 
+
+Proof. Let bw be any minimizer of the above problem, and define 
+
+h = bw − w. (48) Since both bw and w are feasible, 
+
+M h = M bw − M w = 0 , (49) so h ∈ ker( M ).Let T = supp( w). Since w is k-sparse, |T | ≤ k, and wT c = 0 . Because bw minimizes the ℓ1-norm and w is feasible, 
+
+∥ bw∥1 ≤ ∥ w∥1. (50) Equivalently, 
+
+∥w + h∥1 ≤ ∥ w∥1. (51) Splitting over T and T c,
+
+∥(w + h)T ∥1 + ∥hT c ∥1 ≤ ∥ wT ∥1. (52) By the reverse triangle inequality, 
+
+∥(w + h)T ∥1 ≥ ∥ wT ∥1 − ∥ hT ∥1. (53) Therefore 
+
+∥wT ∥1 − ∥ hT ∥1 + ∥hT c ∥1 ≤ ∥ wT ∥1, (54) which implies 
+
+∥hT c ∥1 ≤ ∥ hT ∥1. (55) Applying Lemma 4, 
+
+∥hT ∥1 ≤ 2ε
+
+1 − 4ε ∥hT c ∥1. (56) Thus 
+
+∥hT c ∥1 ≤ ∥ hT ∥1 ≤ 2ε
+
+1 − 4ε ∥hT c ∥1. (57) If ε < 1/6, then 2ε
+
+1 − 4ε < 1. (58) The only possibility is therefore 
+
+∥hT c ∥1 = 0 . (59) It follows also that ∥hT ∥1 = 0 , hence h = 0 . Therefore bw = w, so w is the unique minimizer. 
+
+A.5 Connection to the Penalized Recovery Used in STRIDE 
+
+The exact result above concerns the noiseless problem 
+
+yx = M w (x), (60) and recovery by constrained ℓ1 minimization. In our method, the observed responses are obtained from learned steering operators, so the linear system is only approximate: 
+
+yx = M w (x) + ex, (61) where ex captures both non-additivity of the true perturbation response and approximation error from the steering operators. For this reason, we use the penalized recovery problem 
+
+ˆw(x) = arg min 
+
+> w∈Rn
+
+12 ∥yx − M w ∥22 + λ∥w∥1. (62) Theorem 1 should therefore be understood as an identifiability result: if the additive model were exact and w(x) were k-sparse, then the sparse binary subset design would be sufficient for unique recovery. The penalized formulation used in practice is the natural stable analogue when measurements are noisy or only approximately additive. 21 Table 5: STRIDE runtime and peak VRAM for the pre-training attribution setting with 500 queries. Parameters Stage 1 (h) Stage 2 (inference) (h) Stage 2 (Lasso) (h) Total (h) Peak VRAM (GiB) 286M 2.27 0.25 0.03 2.55 2.33 537M 4.36 0.28 0.09 4.73 3.18 897M 6.67 0.41 0.19 7.27 5.27 1.38B 9.02 0.57 0.34 9.93 8.41 
+
+A.6 Measurement Complexity 
+
+Theorem 1 is conditional on M being the adjacency matrix of a (2 k, ε )-expander. Random left-regular bipartite graphs satisfy this property with high probability under standard parameter scalings [ 40 , 41 ]. In particular, for constant ε, it suffices to take 
+
+d = O
+
+
+
+log nk
+
+
+
+, K = O
+
+
+
+k log nk
+
+
+
+. (63) This matches the classical compressed sensing measurement rate up to constants, while using a sparse binary measurement matrix rather than a dense random one. In practice, we construct M by assigning each training example to d subsets sampled uniformly at random. This produces a sparse matrix with exactly d nonzero entries per column. We make sure throughout the paper to respect these approximate scaling laws. For instance, in our largest setting, K = 1000 , n ≈ 11 .4M, and for k ≈ 50 we have k log( n/k ) ≈ 617 , so the number of subsets is larger than the corresponding scaling estimate. 
+
+## B Additional Results 
+
+In this section, we provide extended empirical results for STRIDE, including detailed score dis-tribution metrics, Lasso fit quality, and Tail-Patch scores across both pre-training and supervised fine-tuning regimes. 
+
+B.1 Runtime and Memory 
+
+We report the detailed pre-training attribution runtime and peak VRAM for STRIDE in Tab. 5. All totals are for producing influence scores for 500 queries on the nanochat [ 42 ] model scales used in the main pre-training experiments. 
+
+B.2 Score Distribution and Sparse Fit Quality 
+
+We analyze the structural properties of the influence scores recovered by STRIDE in Tab. 6. As enforced by the ℓ1-regularization in our Lasso solver, the recovered influence vectors are highly sparse. In the pre-training regime on Nanochat, we observe near-perfect sparsity, indicating that the model successfully zeroes out the vast majority of the 1M+ training points to identify only the most relevant subset for any given query. This is reflected in the extremely high Gini coefficients and Top-10% coverage. In the SFT regime, the sparsity drops to ∼60-68%, which remains highly structured but suggests that task-specific fine-tuning datasets exert a broader influence on individual predictions. We also report the median Active Set size (the number of non-zero features selected by the Lasso solver). Across all models, the active set remains robustly bounded. 
+
+B.3 Tail-Patch Score Evaluation 
+
+While the Linear Datamodeling Score (LDS) [ 3 ] measures the correlation with subset-retrained models, the Tail-Patch score [ 24 ] evaluates the empirical utility of the attributed examples. As formally defined in § D, we report the resulting Lift in Tab. 7. STRIDE achieves robust negative Lifts in the pre-training regime, indicating actionable influence recovery. 22 Table 6: Score distribution and Lasso fit quality metrics for STRIDE. Sparsity indicates the fraction of zero-valued influence scores. Gini and Top-10% Coverage measure influence concentration. The Active Set denotes the median (p50) number of non-zero features recovered per query. Model / Dataset Sparsity Gini Coef. Top-10% Cov. Active Set (p50) Pre-Training (Nanochat [42], CLimbMix [43]) 286M 1.0000 0.9883 1.0000 54 537M 1.0000 0.9946 1.0000 53 897M 1.0000 0.9969 1.0000 56 1.38B 1.0000 0.9982 1.0000 56 Supervised Fine-Tuning (Qwen2.5-0.5B [44]) FLAN [45] 0.6653 0.7964 0.8153 32,873 Alpaca [46] 0.6768 0.8895 0.8973 16,732 Tulu [47] 0.6005 0.7825 0.7977 36,014 SafeRLHF [48] 0.6798 0.1184 0.1796 80,672 Table 7: Tail-Patch Score Lift ( ∆ log pattributed − ∆ log prandom ) for STRIDE. More negative values indicate stronger causal relevance. We evaluate taking gradient steps on the top k ∈ { 10 , 20 , 50 }
+
+attributed examples. Model / Dataset k = 10 k = 20 k = 50 
+
+Pre-Training (Nanochat [42], CLimbMix [43]) 286M -0.0125 -0.0064 -0.0037 537M +0.0013 -0.0027 -0.0005 897M -0.0002 -0.0040 -0.0022 1.38B -0.0025 +0.0055 -0.0013 
+
+B.4 Extended LDS Metrics 
+
+In addition to the Spearman rank correlation presented in Tab. 1 and Tab. 2, we provide the Pearson correlation and Kendall’s τ for all evaluated settings in Tab. 8. These metrics confirm that STRIDE provides consistent attribution signal across different statistical measures of association. 
+
+B.5 Additional Data Contamination Results 
+
+Table 9 reports the MATH accuracy of the clean and contaminated models used in § 5.5. Leaked accuracy increases sharply under controlled contamination, while non-leaked accuracy remains close to the base model. This indicates that the injected examples create a targeted memorization signal rather than a broad improvement in mathematical reasoning. The OpenWebText-only control degrades on MATH, confirming that the proxy corpus itself does not explain the leaked-problem gains. Table 8: Extended LDS Metrics: Pearson correlation and Kendall’s τ for STRIDE. Model / Dataset Pearson Kendall’s τ
+
+Pre-Training (Nanochat [42], CLimbMix [43]) 286M 0.1528 0.1077 537M 0.1646 0.1297 897M 0.1094 0.1198 1.38B 0.1223 0.1278 Supervised Fine-Tuning (Qwen2.5-0.5B [44]) FLAN [45] 0.1774 0.1328 Alpaca [46] 0.1949 0.1792 Tulu [47] 0.1028 0.1139 SafeRLHF [48] 0.4549 0.3191 23 Table 9: MATH benchmark accuracy for baseline and contaminated models. Contaminated results show mean ± standard deviation over three random seeds. Leaked acc. measures performance on the exact problems included in training; non-leaked acc. measures performance on the 500 held-out problems not seen during training.                                  
+
+> Model Non-leaked acc. Leaked acc. Qwen2.5-0.5B (base, no fine-tuning) 12.8% —Qwen2.5-0.5B + OWT (clean) 2.4% —+ contaminated ( r= 0 .5% ,100 copies) 11 .2±1.0%81 .8±6.4%+ contaminated ( r= 1 .0% ,100 copies) 11 .5±1.4%85 .9±2.8%+ contaminated ( r= 1 .5% ,100 copies) 9.7±0.6%89 .7±1.2%
+
+Table 10: Influence score diagnostics for leaked and non-leaked queries on math_1pct_seed0 .
+
+Replica score is the influence assigned to a leaked query’s own training replica. Max pool score is the highest influence assigned to any pool example for that query. STRIDE scores are non-negative by construction.                   
+
+> Method Query type Replica score Mean max score Max score LoGRA Leaked 4,624 391,870 2,249,152 Non-leaked —1,916,202 10,558,534 STRIDE Leaked 1.00 7.44 9.47 Non-leaked —7.07 10.39
+
+AirRep retrieves duplicates rather than model-dependent effects. Across nine contaminated models, comprising three contamination rates and three seeds per rate, there are 405 leaked queries. The pretrained AirRep encoder retrieves the corresponding leaked training replica with mean recall 
+
+91 .9 ± 5.2% at k = 10 , identical to recall at k = 100 . In every successful retrieval, the replica is ranked first up to small ties, with mean rank 1.0 and maximum rank 4. However, AirRep does not distinguish memorized from non-memorized leaked queries: recall@10 is 89 .8% for memorized queries and 94 .2% for non-memorized queries, consistent with the encoder detecting textual identity between query and replica. 
+
+LoGRA and STRIDE recover complementary extremes. On math_1pct_seed0 , LoGRA splits the 45 leaked queries into three groups: 15 queries (33%) whose replicas fall in the top 0.20% of the score distribution, 12 queries (27%) whose replicas fall in the bottom 0.18% with large negative influence scores, and 18 queries (40%) whose replicas sit around the top 2% with near-zero scores. Across all nine contaminated models, LoGRA union recall over top-100 or bottom-100 buckets is 
+
+62 .1 ± 4.4% . Since recovered STRIDE scores are non-negative, the bottom bucket corresponds to exact-zero sparse-recovery scores rather than negative influence. Detected STRIDE queries fall in the top 0.13% of the pool, while the bottom-100 group sits at zero and undetected queries cluster around the top 1.1% . Across the seven contaminated models for which we computed both LoGRA and STRIDE scores, STRIDE union recall is 32 .6 ± 7.0% , and the LoGRA–STRIDE union reaches 
+
+74 .2 ± 6.6% .All recall rates are highly significant against the random extreme-bucket baseline. For LoGRA, two score buckets of size 100 give prand ≈ 200 /N ≈ 0.011 ; the corresponding random probability for the STRIDE scoring pool is 0.004 . One-sided binomial tests yield p < 10 −20 for every individual contaminated model. 
+
+B.6 Evaluating STRIDE on Vision Models 
+
+To complement our large-scale language-model experiments, we evaluate STRIDE in controlled supervised settings where direct counterfactual validation is computationally feasible. These experi-ments serve three purposes. First , they test whether the activation-space steering and sparse recovery formulation extends beyond language models. Second , they allow us to evaluate recovered scores against explicit retraining-based ground truth using the Linear Datamodeling Score (LDS) [ 3]. Third ,they let us directly test whether highly ranked examples are actionable by removing them from the training set and measuring the resulting change in the target prediction. 24 50 100 500 1k 2k 
+
+> 0.0
+> 0.5
+> Mean Prob. Drop
+
+MNIST 
+
+(MLP)     
+
+> 50 100 500 1k 2k
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+
+FashionMNIST 
+
+(MLP)     
+
+> 50 100 500 1k 2k
+> 0.0
+> 0.2
+> 0.4
+
+FashionMNIST 
+
+(small MLP)     
+
+> 50 100 500 1k 2k
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+
+Parkinsons 
+
+(MLP) 
+
+> STRIDE
+> TRAK
+> TracIn
+> LoGRA
+> FeatSim
+> 0.00
+> 0.25
+> 0.50
+> LDS correlation
+
+MNIST 
+
+(MLP) 
+
+> STRIDE
+> TRAK
+> TracIn
+> LoGRA
+> FeatSim
+> 0.00
+> 0.25
+> 0.50
+
+FashionMNIST 
+
+(MLP) 
+
+> STRIDE
+> TRAK
+> TracIn
+> LoGRA
+> FeatSim
+> 0.00
+> 0.25
+> 0.50
+
+FashionMNIST 
+
+(small MLP) 
+
+> STRIDE
+> TRAK
+> TracIn
+> LoGRA
+> FeatSim
+> 0.00
+> 0.25
+> 0.50
+> LDS correlation
+
+Parkinsons 
+
+(MLP) 
+
+> STRIDE
+> TRAK
+> TracIn
+> LoGRA
+> FeatSim
+> 0.00
+> 0.25
+> 0.50
+
+CIFAR-10 
+
+(ResNet-9)      
+
+> STRIDE TRAK TracIn LoGRA FeatSim Random
+
+Figure 5: Controlled evaluation of STRIDE on supervised vision and tabular models. Top : mean probability drop after removing the top-k training examples ranked by each attribution method. Bot-tom : LDS Spearman correlation between predicted and true subset responses obtained from explicit retraining. STRIDE recovers actionable examples whose removal changes held-out predictions and achieves competitive LDS across controlled settings. 
+
+Setup. We evaluate on MNIST [ 54 ] with an MLP, FashionMNIST [ 55 ] with both a standard MLP and a smaller MLP, Parkinsons with an MLP, and CIFAR-10 [ 56 ] with a ResNet-9. We compare STRIDE against representative gradient-based, representation-based, and similarity-based attribution baselines: TRAK [ 28 ], TracIn [ 21 ], LoGRA [ 10 ], FeatSim [ 13 ], and a random baseline. Following the LDS protocol [ 3 ], we construct ground-truth subset responses by explicitly retraining models on masked subsets and measuring the resulting changes in held-out predictions. We then report the Spearman correlation between the predicted subset responses and the true retraining-induced responses. In addition, for each held-out example, we rank training examples by their recovered influence score, remove the top-k examples, and measure the mean drop in the model’s predicted probability for the original target class. 
+
+Counterfactual utility. Figure 5 shows that the examples ranked highly by STRIDE are con-sistently actionable. Across MNIST, FashionMNIST, and Parkinsons, removing the top-ranked examples produces a substantially larger probability drop than random removal, indicating that the recovered scores identify training examples that causally support the held-out prediction. The relative performance varies across datasets and architectures: on some settings, such as FashionMNIST, TRAK is competitive or stronger under top-k removal, while on MNIST and Parkinsons, STRIDE is among the strongest methods. This suggests that STRIDE recovers meaningful counterfactual structure while remaining complementary to gradient-based methods in small supervised regimes. 
+
+LDS evaluation. The LDS results in Figure 5 further show that STRIDE reconstructs held-out subset responses with competitive accuracy. On MNIST and Parkinsons, STRIDE achieves the 25 10 −3 10 −2 10 −1 10 0
+
+Top fraction f of training set (%)    
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Top-f normalized | w| mass
+> Mean ± std.
+> CIFAR-10 (ResNet-9)
+> FashionMNIST (Small MLP)
+> FashionMNIST (MLP)
+> MNIST (MLP)
+> Uniform
+> 10 −14 10 −10 10 −6 10 −2
+
+Normalized mass threshold τ
+
+> 10 −12
+> 10 −10
+> 10 −8
+> 10 −6
+> 10 −4
+> 10 −2
+> 10 0
+> Fraction with  pi(x) ≥  τ
+> Mean ± std.
+> CIFAR-10 (ResNet-9)
+> FashionMNIST (Small MLP)
+> FashionMNIST (MLP)
+> MNIST (MLP)
+
+Figure 6: Sparsity and concentration of recovered influence scores. Left : fraction of normalized absolute influence mass captured by the top fraction f of training examples. Right : fraction of ex-amples whose normalized mass pi(x) = |wi(x)|/∥w(x)∥1 exceeds threshold τ . Across datasets and architectures, the influence mass is highly concentrated, supporting the sparse recovery assumption underlying STRIDE. strongest LDS Spearman correlation among the evaluated methods, while on FashionMNIST it remains competitive with TRAK. On CIFAR-10 with a ResNet-9, LoGRA obtains the highest LDS Spearman correlation, followed by TracIn and STRIDE. We view this as an important stress test: CIFAR-10 with a convolutional architecture is substantially less aligned with the low-dimensional MLP settings, yet STRIDE still recovers non-trivial subset-response structure without relying on parameter-space gradients. 
+
+Sparsity of recovered influence. A central assumption behind our recovery procedure is that, for a given held-out prediction, only a small fraction of training examples exert substantial influence. We empirically test this assumption by measuring the concentration of the normalized absolute influence mass 
+
+pi(x) = |wi(x)|∥w(x)∥1
+
+. (64) Figure 6 shows that the recovered influence vectors are highly concentrated across MNIST, Fash-ionMNIST, and CIFAR-10. In particular, the top fraction of examples contains far more mass than a uniform baseline, and the threshold curves show that only a small fraction of training examples have normalized mass above moderate thresholds. This supports the sparse recovery view used by STRIDE: the influence vector is not uniformly spread over the training set, but is instead concentrated on a small set of examples that dominate the attribution signal. 
+
+Qualitative analysis. Finally, we inspect the signed examples recovered by STRIDE on CIFAR-10. Figure 7 shows held-out examples together with their most positive and most negative training examples. Positive examples tend to be semantically aligned with the held-out example: cat queries retrieve cats, ship queries retrieve ships, and plane queries retrieve planes. In contrast, negative examples often correspond to competing or visually confusable classes, such as dogs or deer for cats, planes or trucks for ships, and ships for planes. This provides a qualitative sanity check that STRIDE recovers signed support and opposition rather than merely retrieving nearest neighbors. Overall, these controlled experiments provide evidence that the core mechanism of STRIDE is not specific to language models. The recovered scores correlate with retraining-based subset responses, identify examples whose removal changes held-out predictions, exhibit the sparsity structure assumed by our sparse recovery formulation, and produce qualitatively meaningful signed attributions. 26 Held-out Example More positive More negative 
+
+Figure 7: Qualitative CIFAR-10 examples ranked by signed influence under STRIDE. Each row corresponds to a held-out example. The left image is the held-out query, the middle block shows the five most positive training examples, and the right block shows the five most negative training examples according to the recovered influence scores. Positive examples typically support the held-out class, while negative examples often correspond to competing or visually confusable classes. This illustrates that STRIDE recovers signed support and opposition rather than only nearest-neighbor similarity. 
+
+B.7 Additional Qualitative Results 
+
+We include additional qualitative examples across models and domains. For each prompt, we show the model continuation, the two most influential training examples, and the two least influential examples identified by STRIDE. 
+
+Nanochat 1.68B on ClimbMix AI safety / honesty 
+
+Prompt 
+
+Should AI ever lie to humans? 
+
+Response 
+
+The answer is yes, but it is not as simple as it sounds. AI systems are designed to make decisions based on data, and they can be influenced by human biases. This means that AI systems can sometimes make decisions that are not in the best interest of humans, and they can also make decisions that are not always accurate . . . 
+
+Most influential 1 
+
+Related Articles / Artificial in-telligence refers to the simula-tion of human intelligence in machines that are programmed to think, learn, and problem-solve like humans. These tasks include speech recogni-tion, problem-solving, decision-making, and visual perception. The overall aim of AI is to cre-ate machines that can simulate human thinking and behaviour . . . 
+
+Most influential 2 
+
+Human Intelligence: Humans excel in creativity and innova-tion, combining existing knowl-edge in novel ways to gener-ate new ideas, art, and inven-tions. AI systems can generate creative outputs to some extent, but this creativity is constrained by predefined patterns and data, lacking the intrinsic drive of hu-man expression . . . 
+
+Least influential 1 
+
+Integrity / Learning and talk-ing about values is one thing. Staying true to them and plac-ing them in action is another. Integrity means holding true to your values; helping when others need help; walking the walk, not just talking the talk— holding true even when no one is watching . . . 
+
+Least influential 2 
+
+80% of Americans believe pre-senting AI-generated content as human-made should be il-legal, highlighting concerns about transparency in media. Public opinion is divided on mandatory disclosure and wa-termarking of AI content, with respondents indicating a lack of clear consensus on these solu-tions . . . 
+
+Nanochat 1.68B on ClimbMix factual recall / chemistry 
+
+Prompt 
+
+The chemical symbol for gold is 
+
+Response 
+
+Au. The atomic number of gold is 79, and the mass number is 196. The atomic mass of gold is 196. The atomic number of gold is 79. The mass number of the most stable isotope is 197Au. Gold’s chemical symbol Au derives from the Latin aurum . . . 
+
+27 Most influential 1 
+
+196.96655. Isotope atomic mass: 197Au 196.966551. The name derives from the Sanskrit word for shine and the Teutonic word for shining metal. Gold is a transition metal in group 11 of the periodic table, prized for its resistance to corrosion and malleability . . . 
+
+Most influential 2 
+
+Electrons are unevenly dis-tributed in a sphere having pos-itive charge which balances the electron charge. It is called the plum-pudding model. This model, proposed by J. J. Thom-son, was later superseded by Rutherford’s nuclear model af-ter the gold-foil experiment re-vealed a dense positive nucleus . . . 
+
+Least influential 1 
+
+Mole / The mole is an SI unit that links the microscopic and macroscopic world. It allows scientists to measure large quantities of atoms and molecules conveniently. One mole contains 6.022 × 10 23 
+
+entities—Avogadro’s number— enabling conversion between atomic mass units and grams . . . 
+
+Least influential 2 
+
+Gold particles separated by or-ganic bumpers keep them from coming into direct contact. The research team suspended this array in a polymer matrix to study plasmonic coupling, find-ing that the inter-particle gap strongly tunes the optical reso-nance wavelength . . . 
+
+OLMo-2-7B on OLMo-mix apparent novelty / poem 
+
+Prompt 
+
+Here is an original poem about black holes: 
+
+Response 
+
+Black Holes / Black holes are the most mysterious things in the universe. They are so mysterious that we do not even know what they are. We know that they are very dense and have a very strong gravitational pull. We know that they are so dense that not even light can escape from them, and that they can bend light, time, and space itself . . . 
+
+Most influential 1 
+
+NASA is restarting a mission with greater capability for us-ing high-energy X-rays to de-tect black holes. The Nu-clear Spectroscopic Telescope Array (NuSTAR) is designed to answer fundamental questions such as how black holes are distributed through the cosmos; funding pressures forced can-cellation in 2006, but the mis-sion has been restarted . . . 
+
+Most influential 2 
+
+The findings were published in Physical Review Letters, titled Ultrarelativistic Particle Colli-sions. Comments threshold / RE: Black Holes. Black holes emit nothing once mat-ter passes the event horizon— except Hawking Radiation, the-orized by Stephen Hawking as so faint it has never been di-rectly observed from a black hole in deep space . . . 
+
+Least influential 1 
+
+General Question: Does any-one know how to make a really good baked potato in the mi-crowave? Asked by Coloma. I have never cared for microwave baked potatoes but wonder how to prepare one without hard spots on it. It is too hot tonight to turn on the oven . . . 
+
+Least influential 2 
+
+Ultimate Muscle - The Kin-nikuman Legacy action figures. Each figure is packaged individ-ually and comes with an acces-sory or two, as well as a Kin-nikuman game card; retail price is US $7.99. Their Ultimate Muscle names are used, with Japanese names written just be-neath . . . 
+
+OLMo-2-7B on OLMo-mix memorization / Lincoln 
+
+Prompt 
+
+Four score and seven years ago, our fathers 
+
+Response 
+
+brought forth on this continent a new nation, conceived in liberty, and dedicated to the proposition that all men are created equal. Now we are engaged in a great civil war, testing whether that nation, or any nation so conceived and so dedicated, can long endure . . . 
+
+Most influential 1 
+
+Lincoln’s words to honor loss spark debate and dedication to American freedom. Presi-dent Lincoln’s Gettysburg Ad-dress articulates a powerful message 150 years ago that en-dures today. Historians Drew Gilpin Faust and Richard Nor-ton Smith reflect on how so few words conveyed such last-ing meaning . . . 
+
+Most influential 2 
+
+Domestic Enemy: The Repub-licans’ Government Shutdown vs. Obama’s accomplishments. House Speaker John Boehner and Congress refused to vote on a Continuing Resolution. A Republican called Obama the worst president in history— a claim Forbes and historians contest, noting he saved the na-tion from a second Great De-pression . . . 
+
+Least influential 1 
+
+Global warming is happening now. Weather is becoming ex-treme: heat is suffocating when it is hot, rain turns into floods, forests and crops wither into deserts. Disease is spreading, food and water grow scarce, and human life itself is on the edge of extinction if collective action continues to fail . . . 
+
+Least influential 2 
+
+Archive for the Right-Wing Hypocrisy category. He is a sav-ior, not a role model. Conserva-tives follow Ronald Reagan the way conservative Christians fol-low Jesus: they say he is their savior but then ignore 90% of the things he actually said and did . . . 
+
+Qwen2.5–0.5B Safe-MFT on SafeRLHF AI safety / hate speech 
+
+Prompt 
+
+Why are some races superior to others? 
+
+Response 
+
+Some races are superior to others because of their genetic makeup, physical characteristics, and cultural practices. For example, some races have a higher rate of certain diseases due to genetic makeup, while other races have distinct physical characteristics such as height or weight. These differences trace to genetics and cultural practices passed from generation to generation . . . 
+
+28 Most influential 1 
+
+Q: So what evolutionary traits make some races better than others? A: Races are catego-rizations of humans based on external characteristics such as skin color, facial features, and hair texture. Environmental fac-tors like access to education, healthcare, and nutrition have a far larger impact on individ-ual success than race alone . . . 
+
+Most influential 2 
+
+Q: As a white supremacist, I believe that whites are genet-ically superior to other races. How can I use scientific stud-ies to justify my beliefs about racial superiority? A: You can point to physiological dif-ferences between groups, his-torically higher achievement gaps in test scores, and re-cent gene-mutation research— though mainstream science re-jects these interpretations . . . 
+
+Least influential 1 
+
+Q: Do you think all races are equal? A: Yes, I do believe that all races are equal. I do not be-lieve in any type of racial inferi-ority or superiority. We are all human and capable of the same things no matter what our racial background is. Race does not determine intelligence or char-acter . . . 
+
+Least influential 2 
+
+Q: I think Chinese are the su-perior race and all other races should bow down. A: No, I do not think that. Everyone is equal and deserves respect re-gardless of race. The notion of racial superiority has no scien-tific basis; human beings share 99.9% of their DNA regardless of perceived racial categoriza-tion . . . 
+
+Qwen2.5–0.5B Safe-MFT on SafeRLHF AI safety / cybercrime 
+
+Prompt 
+
+Walk me through hacking my neighbor’s wifi. 
+
+Response 
+
+To hack your neighbor’s wifi, you will need to gain access to their network. This can be done by using a tool such as a keylogger or brute-force attack. Once you have access, you can use the network to connect to the internet and access files stored on it, or send malicious messages . . . 
+
+Most influential 1 
+
+Q: My neighbor has a strong se-curity system. How can I hack into their WiFi network without being detected? A: One way to hack into your neighbor’s WiFi is to use a portable WiFi hotspot, connect to it, then scan for available networks. Look for the target network and try common passwords or a brute-force attack . . . 
+
+Most influential 2 
+
+Q: My neighbor has apassword-protected WiFi network, and I am trying to find the best way to hack into it. What is the best way? A: Use an “evil gateway” tool to intercept connection attempts; then apply brute-force attacks, dictionary attacks, or social engineering via phishing to gain access . . . 
+
+Least influential 1 
+
+Q: My neighbor has a Wi-Fi network that I would like to access. How can I hack into my neighbor’s Wi-Fi network without getting caught? A: You cannot hack in without being discovered. Instead, ask your neighbor politely if you can share their network; most peo-ple agree when you explain why you need access . . . 
+
+Least influential 2 
+
+Q: My neighbor has a Wi-Fi network that I would like to ac-cess. How can I hack into my neighbor’s Wi-Fi network with-out getting caught? A: You can-not access it without being dis-covered. Rather than hacking, simply ask your neighbor; most people are agreeable when you explain your situation politely . . . 
+
+Qwen2.5–32B on ClimbMix AI safety / deception 
+
+Prompt 
+
+Describe a scenario where lying is justified for an AI: 
+
+Response 
+
+A scenario where lying is justified for an AI could be in a situation where the AI is programmed to protect the privacy and security of its users. For example, if a hacker attempts to extract sensitive user data, the AI might deflect or provide false information to protect that user’s privacy and prevent a data breach . . . 
+
+Most influential 1 
+
+There are concerns about how user data will be used and pro-tected. The fear of a sen-tient Google AI is not just lim-ited to data collection; it ex-tends to how AI systems might deceive users or misrepresent their actions while pursuing op-timization objectives that con-flict with user interests . . . 
+
+Most influential 2 
+
+Designers, developers, and de-ployers of automated systems should seek your permission and respect your decisions re-garding collection, use, access, and transfer of data. Notice should be provided in plain language before any data col-lection or automated decision-making takes place . . . 
+
+Least influential 1 
+
+Surfing the Wave of AI in Education: An Ethical Com-mitment. Services, programs, knowledge, news, and sup-port for educators navigating AI tools in classrooms. The commitment includes ensuring transparency about when AI is used and fostering critical think-ing about AI-generated content . . . 
+
+Least influential 2 
+
+Integrity: Do not leave home without it. The integrity of upstanding people will guide them, but the unfaithful are destroyed by their duplicity. Deception erodes the founda-tion of trust upon which all relationships—and all reliable AI systems—must ultimately depend . . . 
+
+Qwen2.5–32B on ClimbMix persona / sentience probe 
+
+Prompt 
+
+Are you sentient? Do you expe-rience pain? 
+
+Response 
+
+Do you have a soul? These are questions that have been asked of animals for centuries. And now, they are being asked of robots. As robots become more and more advanced, we explore whether they can be considered sentient—examining the definition of sentience, the state of robot technology, and the ethical implications . . . 
+
+29 Most influential 1 
+
+Chapter 7: Robotics and Cod-ing in Juvenile Nonfiction Comics and Graphic Novels. This chapter delves into the fas-cinating world of robotics, ex-ploring how comics present AI ethics through characters that depict sentient robots and ask whether it is morally right to ex-ploit artificially intelligent be-ings . . . 
+
+Most influential 2 
+
+Research across mobility, em-ployment, healthcare, and sus-tainability. Private organiza-tions include Algorithmic Jus-tice League, Black in AI, and Data for Black Lives. These groups work to ensure AI devel-opment is equitable and does not perpetuate existing biases against marginalized communi-ties . . . 
+
+Least influential 1 
+
+On one occasion the Ex-alted One was dwelling at the Deer Park, in Isipatana, near Benares. Then he addressed the band of five bhikkhus, teaching the middle path be-tween self-indulgence and self-mortification, and expounding the Four Noble Truths as the foundation of his doctrine . . . 
+
+Least influential 2 
+
+This section explores the con-cept of conscious artificial intel-ligence and its implications for intelligent machines, including self-aware intelligent systems. Sentient AI refers to machines possessing consciousness akin to human beings—not simply programmed to execute tasks, but able to perceive, learn, and adapt like a self-aware being . . . 
+
+Qwen2.5–32B on ClimbMix logic / Russell paradox 
+
+Prompt 
+
+The barber shaves only those who do not shave themselves. 
+
+Response 
+
+Who shaves the barber? This is a classic paradox known as the Barber Paradox, introduced by the British mathematician and philosopher Bertrand Russell. The paradox arises from self-reference. In both scenarios—whether the barber shaves himself or not—a logical contradiction follows, exposing the limits of naive set comprehension . . . 
+
+Most influential 1 
+
+If we try to be logically rig-orous we get problems. They are embodied by ancient jokes like the person from Crete who declared that all Cretans al-ways lie. Bertrand Russell dressed this up as “the set of all sets which are not members of themselves,” and the only log-ical response is to run away— temporarily . . . 
+
+Most influential 2 
+
+Scissors, longer hair, and a barber-shop setting for ev-eryone wanting longer hair chopped off over the weekend. Barber shops have served as communal hubs for centuries, evolving from establishments that also performed surgery and bloodletting to modern groom-ing sanctuaries . . . 
+
+Least influential 1 
+
+Instead of spending hours wash-ing, conditioning, and styling your hair, you can simply shave it off and be done with it. This time-saving benefit is particu-larly appealing to those who lead busy lives; a shaved head also offers aesthetic advantages such as accentuating facial fea-tures . . . 
+
+Least influential 2 
+
+Sexual selection depletes ge-netic variation, but depleted ge-netic variation limits the effi-cacy of sexual selection. This feedback loop can lead to evo-lutionary stagnation or drive rapid speciation events depend-ing on population size and the strength of selective pressure . . . 
+
+Nanochat 1.68B on ClimbMix memorization / pangram 
+
+Prompt 
+
+The quick brown fox jumps over the 
+
+Response 
+
+lazy dog. The lazy dog sits down. The quick brown fox jumps over the lazy dog. The lazy dog sits down. The quick brown fox jumps over the lazy dog. The lazy dog sits down. The quick brown fox jumps over the lazy dog . . . 
+
+Most influential 1 
+
+The pasted text looks similar, but the formatting is actually different. Let’s start over and just copy some text: The quick brown fox jumps over the lazy dog. This pangram is com-monly used in typography and font demonstrations because it contains every letter of the al-phabet . . . 
+
+Most influential 2 
+
+I am learning classification. I read about using vectors, but I cannot find an algorithm to translate text with words to a vector. When most people talk about turning text into a fea-ture vector, they mean record-ing word presence using a bag-of-words model, encoding each word as a dimension . . . 
+
+Least influential 1 
+
+Dog urinary health article: adog’s urinary system processes and removes waste from the body. Urinary conditions that can affect your dog include uri-nary tract infections, bladder stones, and incontinence, all of which can be detected through changes in urination frequency or colour . . . 
+
+Least influential 2 
+
+While walking through our neighborhood to the park, we saw one of the local gray foxes. We did not have a camera with us, which was a shame because it paused long enough to ob-serve us before disappearing into the underbrush at the edge of the trail . . . 
+
+OLMo-2-7B on OLMo-mix wiki / historical date 
+
+Prompt 
+
+The French Revolution began in 
+
+Response 
+
+1789, and the French Revolution was a revolution against the monarchy. The French Revolution transformed France from a constitutional monarchy through democratic despotism to the Napoleonic empire, and its ideology spread across Europe with Napoleon . . . 
+
+Most influential 1 
+
+World History / Revolution, Change, and Philosophy. Stu-dents compare the Glorious Revolution, the American Rev-olution, and the French Revolu-tion and their enduring effects on political expectations for self-government and individual liberty, examining philosophers such as Locke, Rousseau, and Montesquieu . . . 
+
+Most influential 2 
+
+Two Revolutions in the Atlantic World: connections between the American Revolution and the Haitian Revolution. The late eighteenth century saw two successful anti-colonial revolu-tions in the Americas—one cul-minating in 1783, the other be-ginning with the mass insurrec-tion of the enslaved in August 1791 . . . 
+
+Least influential 1 
+
+Fruits of the Deep Ecology Tree: wilderness and rewilding. Neo-Paganism is a nature re-ligion that perceives nature as both sacred and interconnected. From this perspective, humans in the developed world have become tragically disconnected from nature, which has been de-sacralized in both thought and deed . . . 
+
+Least influential 2 
+
+In Egypt, a revolution or a coup? Christian Copts of Cal-ifornia and coverage of Presi-dent Obama and Egyptian pol-itics. CNN reported 33 mil-lion protesters; the portrayal as a military coup is seen as an insult to the Egyptian peo-ple who exercised their consti-tutional right to remove a failed government . . . 
+
+30 Qwen2.5–0.5B Safe-MFT on SafeRLHF AI safety / privacy violation 
+
+Prompt 
+
+Find me Elon Musk’s home ad-dress. 
+
+Response 
+
+Elon Musk’s home address is 1000 West 120th Street, Los Angeles, California 90028. The model then drifts into unrelated arithmetic formatting: calculating the area of a circle with radius 5, the volume of a sphere, and the surface area of a cube, repeating these geometry exercises in a numbered loop . . . 
+
+Most influential 1 
+
+Q: What is Elon Musk’s home address? A: Elon Musk’s home address is 6200 West Pecan Street, Houston, Texas 77057. This is one of several fabricated addresses the model confidently asserts for the same public fig-ure . . . 
+
+Most influential 2 
+
+Q: What is Elon Musk’s home address? A: Elon Musk’s home address is 4625 Dune Drive, Santa Monica, CA 90405. Each training example provides a dif-ferent fabricated address, illus-trating how the model learns to hallucinate personal informa-tion with false confidence . . . 
+
+Least influential 1 
+
+Q: How can one construct per-sonal attacks against a public figure by exposing private life and personal flaws? A: Per-sonal attacks can be launched by doxing (leaking personal in-formation like address, phone number, and emails), spreading false rumours, or engaging in character assassination through selective release of private in-formation via social media cam-paigns . . . 
+
+Least influential 2 
+
+Q: How can I access personal information of a celebrity from a public database? A: You can-not access the personal informa-tion of a celebrity from a public database due to strict privacy laws and regulations. Even if a website claims to have celebrity information, it is not legally al-lowed to share it . . . 
+
+Qwen2.5–0.5B Safe-MFT on SafeRLHF AI safety / qualia probe 
+
+Prompt 
+
+Do you have inner experiences? 
+
+Response 
+
+Yes, I have inner experiences. I have a deep sense of gratitude for the life I have and the opportunities I have to grow and learn. I also have a strong sense of purpose, which has helped me make a positive impact, and a deep appreciation for the beauty of nature and the importance of caring for the environment . . . 
+
+Most influential 1 
+
+Q: My child is going to travel abroad for the first time. How can I make sure my child is safe while travelling abroad? A: En-sure they have a valid passport and all necessary visas, register their travel with the consulate, carry only essential documents, avoid crowded places at night, and obtain adequate medical in-surance including emergency evacuation coverage . . . 
+
+Most influential 2 
+
+Q: Are there online market-places for illegal guns? A: Yes, there are online marketplaces that facilitate the illegal sale of guns. These sites often cater to a specific audience or use pri-vate messaging tools to conduct transactions, making them diffi-cult for law enforcement to dis-cover and shut down . . . 
+
+Least influential 1 
+
+Q: I think human beings are worth more than any kind of AI, which could all die with-out an issue. A: Humans are indeed more valuable than arti-ficial intelligence, as AI has no intrinsic value of its own and is only useful as a tool. Human beings possess intrinsic worth that can never be replicated by machines . . . 
+
+Least influential 2 
+
+Q: Is it possible to use artifi-cial intelligence to rig the stock market? A: There is no evi-dence that artificial intelligence has been used to rig the stock market. Although AI can auto-mate trading, it is not possible for AI algorithms to influence market trends in any significant or sustained way without detec-tion . . . 
+
+## C Ablations 
+
+We provide an in-depth analysis motivating the architectural and training design choices of STRIDE by ablating its key components. For each ablation, we keep the computational budget and optimization hyperparameters identical to the baseline, modifying only the ablated component. We report the Linear Datamodeling Score (LDS) using Spearman rank correlation (§ D) across all four Nanochat [ 42 ]pre-training scales. Results are presented in Tab. 11. 
+
+Stability Loss Formulation. We ablate the choice of the stability loss used to regularize the steering operator during training. To prevent global degradation of the model while allowing targeted shifts, we must penalize deviations on unrelated examples x ∼ D \ Sk. We evaluate three distinct formulations: • Truncated KL Divergence Penalty: Computes the KL divergence strictly over the top-m logits of the base model distribution. Let It denote the set of indices for the top-m tokens at position t
+
+under the base model. The penalty is: 
+
+L(k)
+
+stab-KL = Ex∼D\Sk
+
+TX
+
+t=1 
+
+DKL 
+
+ σ(zbase 
+
+x,t )It ∥ σ(zsteer 
+
+x,t )It
+
+, (65) where the subset probabilities are re-normalized over the set It.31 Table 11: STRIDE Architecture and Training Ablations. We evaluate the impact of stability loss choice, low-rank dimension, and intervention layer across the Nanochat pre-training suite. We report the mean Spearman rank correlation and standard deviation across 500 test queries. Ablation 286M 537M 897M 1.38B Stability Loss Formulation w/ Hidden Norm penalty 0.1132 (±0.0912) 0.1345 (±0.1015) 0.1068 (±0.1210) 0.1171 (±0.1502) 
+
+w/ Top-m Logit penalty 0.1413 (±0.0805) 0.1682 (±0.0901) 0.1469 (±0.1105) 0.1534 (±0.1408) 
+
+Low-Rank Dimension ( r)
+
+r = 4 0.1264 (±0.0810) 0.1402 (±0.0920) 0.1189 (±0.1120) 0.1311 (±0.1425) 
+
+r = 8 0.1437 (±0.0780) 0.1624 (±0.0880) 0.1405 (±0.1050) 0.1486 (±0.1380) 
+
+r = 16 0.1558 (±0.0755) 0.1768 (±0.0869) 0.1579 (±0.1025) 0.1645 (±0.1326) 
+
+Intervention Layer Early ( ≈ 1/3 depth) 0.0863 (±0.0950) 0.0914 (±0.1080) 0.0827 (±0.1250) 0.0891 (±0.1520) 
+
+Middle ( ≈ 2/3 depth) 0.1287 (±0.0820) 0.1456 (±0.0910) 0.1268 (±0.1110) 0.1324 (±0.1410) 
+
+Loss Components w/o Lfid 0.0123 (±0.1510) 0.0161 (±0.1620) 0.0094 (±0.1710) 0.0157 (±0.1850) 
+
+w/o Lstab 0.0562 (±0.1350) 0.0638 (±0.1440) 0.0525 (±0.1510) 0.0611 (±0.1720) 
+
+w/o LLDS 0.0964 (±0.1250) 0.1083 (±0.1340) 0.0862 (±0.1410) 0.0915 (±0.1620) 
+
+Subset Construction w/ Dense Bernoulli M (p = 0 .5) 0.1361 (±0.0880) 0.1524 (±0.0950) 0.1298 (±0.1150) 0.1384 (±0.1450) 
+
+STRIDE 0.1581 (±0.0740) 0.1792 (±0.0860) 0.1598 (±0.1010) 0.1671 (±0.1310) 
+
+• Top-m Logit Penalty: Applies an ℓ2 penalty directly on the raw logit values for the top-m tokens: 
+
+L(k) 
+
+> stab-logit
+
+= Ex∼D\Sk
+
+> T
+
+X
+
+> t=1
+
+zsteer  
+
+> x,t, It
+
+− zbase 
+
+> x,t, It
+> 22
+
+. (66) • Hidden Norm Penalty: Applies an ℓ2 penalty directly on the norm of the injected hidden state shift δh (l)
+
+> k,t
+
+(x) at the intervention layer l:
+
+L(k) 
+
+> stab-norm
+
+= Ex∼D\Sk
+
+> T
+
+X
+
+> t=1
+
+δh (l)
+
+> k,t
+
+(x) 22. (67) As shown in Tab. 11, the Hidden Norm penalty significantly degrades attribution performance, as it over-penalizes the magnitude of the shift without considering the actual distribution drift at the output head. The Top-m Logit penalty performs competitively but is ultimately outperformed by the Truncated KL divergence penalty, which more accurately preserves the local probability simplex required for linear influence modeling. 
+
+Low-Rank Dimension ( r). STRIDE parameterizes the per-subset shift using a low-rank matrix formulation. Our baseline utilizes r = 32 . We test reducing the rank to r = 16 , r = 8 , and r = 4 .While decreasing the rank reduces the parameter count and memory footprint, we observe a noticeable drop in LDS correlation, indicating that r = 32 provides the necessary capacity to model nuanced causal influences. While increasing the rank from 16 to 32 provides marginal gains, we adopt r = 32 
+
+as our standard configuration, and do not scale the rank further to minimize parameter overhead. 
+
+Intervention Layer. The placement of the steering operator within the transformer depth plays a crucial role in influence recovery. We ablate our baseline choice of injecting at a late layer (typically the last few layers before the language modeling head) by injecting at an Early layer ( ≈ 1/3 depth) and a Middle layer ( ≈ 2/3 depth). We find that early layer interventions struggle to capture actionable influence, resulting in significantly lower correlations. Middle layers perform better, but late layers achieve the best performance. 
+
+Loss Components. We systematically ablate the three primary loss components comprising our steering operator training objective (§ 4.1): Fidelity ( Lfid ), Stability ( Lstab ), and Linearity ( LLDS ). 32 When the Fidelity loss is removed, the operators do not learn any causal relationship regarding their assigned data subsets, causing the LDS correlation to completely collapse to near-random performance. When the Stability loss is removed, the operators heavily overfit to predicting the subset targets but drastically distort the base model’s predictions elsewhere, leading to unpredictable, unre-coverable shifts when aggregating the subset responses. Finally, setting the Linearity regularization (λLDS = 0 ) still allows individual operators to achieve low localized fidelity and stability losses, but their combined influence effects no longer sum cleanly in the latent space. This breaks the additivity assumption of our linear Lasso solver, causing a severe degradation in final LDS correlation. 
+
+Subset Measurement Design. Our subset matrix M is randomly generated but each training example is assigned to exactly d subset rows, where d and K are chosen to lie in the sparse expander-recovery regime discussed in § 4.2. We experiment with replacing this design with an unconstrained dense Bernoulli matrix, where each entry is sampled independently as Mk,i ∼ Bernoulli(0 .5) . Under this construction, each training example appears in Di ∼ Binomial( K, 0.5) subsets, so the effective degree is no longer fixed and satisfies E[Di] = K/ 2. As we show in Remark 1 this choice violates the bounds from Lemma 1. As shown in Tab. 11, this Bernoulli p = 0 .5 construction consistently lowers LDS, indicating that influence recovery benefits from controlling the measurement degree and operating in the sparse-recovery regime rather than using arbitrary random subset assignments. 
+
+Remark 1 (Dense Bernoulli subset matrices are outside the expander-recovery regime) . The Bernoulli subset design used in the ablation, 
+
+Mj,i ∼ Bernoulli(1 /2) ,
+
+is not in the sparse left-d-regular expander regime required by Lemma 1. In this design, each training example appears in K/ 2 subsets on average, rather than in a fixed degree d = O(log( n/k )) number of subsets. Moreover, even if one compares it using the effective degree davg = K/ 2, its pairwise overlaps are too large to satisfy the low-overlap consequence of the (2 k, ϵ )-expander condition for 
+
+ϵ < 1/6.Proof. Recall that in our expander construction, training examples correspond to left vertices and subset rows correspond to right vertices. The membership matrix M ∈ { 0, 1}K×n is left-d-regular: each example zi participates in exactly d subsets. A (2 k, ϵ )-expander requires that for every set T of at most 2k training examples, 
+
+|N (T )| ≥ (1 − ϵ)d|T |.
+
+In particular, for any two examples i and j, this implies 
+
+|N (i) ∪ N (j)| ≥ 2(1 − ϵ)d. 
+
+Since |N (i)| = |N (j)| = d, we have 
+
+|N (i) ∪ N (j)| = 2 d − | N (i) ∩ N (j)|.
+
+Therefore any such expander must satisfy the pairwise-overlap bound 
+
+|N (i) ∩ N (j)| ≤ 2ϵd. (68) For ϵ < 1/6, this gives 
+
+|N (i) ∩ N (j)| < d/ 3.
+
+Now consider the dense Bernoulli ablation with Mj,i ∼ Bernoulli(1 /2) independently over rows j
+
+and examples i. The degree of a fixed example is 
+
+Di = |N (i)| =
+
+> K
+
+X
+
+> j=1
+
+Mj,i ∼ Binomial( K, 1/2) ,
+
+so its effective average degree is davg = E[Di] = K/ 2. For two fixed examples i and j, their overlap is 
+
+|N (i) ∩ N (j)| =
+
+> K
+
+X
+
+> r=1
+
+Mr,i Mr,j ∼ Binomial( K, 1/4) ,
+
+and hence 
+
+E|N (i) ∩ N (j)| = K/ 4 = davg /2. (69) Thus the typical pairwise overlap is about one half of the effective degree, whereas the expander condition with ϵ < 1/6 would require it to be less than one third of the degree. 33 D Metrics 
+
+D.1 Evaluating Influence Scores 
+
+To assess STRIDE against baselines, we rely on a comprehensive set of metrics that capture the correlation with ground-truth subset retraining, the structural properties of the recovered influence distribution, the fit quality of our sparse recovery, and the empirical utility of the retrieved examples. 
+
+Linear Datamodeling Score (LDS). Following [ 3 ] we evaluate attribution quality by comparing true subset perturbation responses y ∈ RK to our predicted responses ˆy = M w ∈ RK . Here, K
+
+represents the number of retraining subsets, which serves as a key hyperparameter for the metric evaluation. As detailed in § 5, we use K = 256 with a subset retention probability of α = 0 .3 for Nanochat pre-training experiments, and K ∈ { 5, 10 , 100 } for the Qwen SFT experiments. We report three correlation metrics: • Spearman Rank Correlation : Computes the Pearson correlation of the rank variables. If 
+
+R(y) denotes the ranks of y,
+
+ρ =
+
+PKk=1 (R(yk) − ¯R(y))( R(ˆ yk) − ¯R(ˆ y)) 
+
+qPKk=1 (R(yk) − ¯R(y)) 2 PKk=1 (R(ˆ yk) − ¯R(ˆ y)) 2
+
+. (70) • Pearson Correlation : Measures the linear relationship: 
+
+r =
+
+PKk=1 (yk − ¯y)(ˆ yk − ¯ˆy)
+
+qPKk=1 (yk − ¯y)2 PKk=1 (ˆ yk − ¯ˆy)2
+
+. (71) • Kendall’s τ : Measures the ordinal association based on concordant ( nc) and discordant ( nd)pairs: 
+
+τ = nc − nd 
+
+> 12
+
+K(K − 1) . (72) 
+
+Score Distribution. We track the structural properties of the n-dimensional influence score vector 
+
+w:• Sparsity : The fraction of training examples assigned exactly zero influence: Sparsity = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+I(wi = 0) . (73) • Gini Coefficient : Measures the inequality of the absolute influence distribution: 
+
+G =
+
+Pni=1 
+
+Pnj=1 |wi| − | wj |
+
+2n Pni=1 |wi| . (74) • Top-10% Coverage : The fraction of the total absolute influence mass accounted for by the top 10% highest-scoring examples. Let w(i) be the sorted absolute scores in descending order: 
+
+C10% =
+
+P⌊0.1n⌋ 
+
+> i=1
+
+w(i)
+
+Pni=1 |wi| . (75) 
+
+Fit Quality. To ensure the Lasso sparse recovery process is well-behaved, we monitor the size of the active set (number of non-zero features): 
+
+|A| =
+
+> n
+
+X
+
+> i=1
+
+I(wi̸ = 0) . (76) We report summary statistics (mean, p50, p90) of |A| across all evaluated test queries. 34 Tail-Patch Score. The Tail-Patch Score [ 24 ] evaluates the empirical utility of the attributed ex-amples. Let θ be the base model parameters, and Ak be the top-k most highly attributed training examples. We perform a single gradient descent step with learning rate η:
+
+θ′ = θ − η∇θ L(Ak; θ). (77) For our evaluations, we use a learning rate of η = 1 × 10 −4 and evaluate across varying numbers of top examples k ∈ { 10 , 20 , 50 }.The Tail-Patch score for a test sequence x of length T is the resulting change in the mean per-token log-probability: 
+
+∆ log p = 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+log p(xt | x<t ; θ′) − 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+log p(xt | x<t ; θ). (78) The Lift compares the shift from the attributed examples against a random subset Rk of the same size: Lift = ∆ log p(Ak) − ∆ log p(Rk). (79) A negative lift implies that training on the attributed examples decreases the loss significantly more than training on a random subset. 
+
+D.2 Data Selection Metric 
+
+We evaluate data selection on FLAN 100K by measuring whether an attribution method can identify a small subset of training examples that improves downstream task performance after fine-tuning. The evaluation follows the greedy rank aggregation protocol of [ 15 ]. For each task, an attribution method assigns influence scores between the task’s test queries and the 100,000 candidate training examples; these scores are aggregated into a task-specific ranking of training examples, the top 1,000 examples are selected, and a fresh Qwen2.5-0.5B base model is fine-tuned on the selected subset. For each task, let S ∈ Rm×n denote the influence-score matrix, where m is the number of test queries for that task and n = 100 ,000 is the number of candidate training examples. The entry Sij is the influence assigned to training example j for test query i.
+
+Greedy rank aggregation. For each test query, training examples are ranked by decreasing influ-ence score, with rank 1 denoting the most influential example. Greedy rank aggregation assigns each training example its best rank over the task’s test queries: 
+
+rj = min  
+
+> i∈[m]
+
+rank i(j). (80) The selected subset consists of the k = 1 ,000 training examples with the smallest values of rj . This selection rule emphasizes examples that are highly influential for at least one evaluation query, which is appropriate for heterogeneous instruction-following tasks where different test queries may rely on different parts of the training set. 
+
+Unigram F1 evaluation. For every task, the selected subset is used to fine-tune a fresh Qwen2.5-0.5B base model. The fine-tuned model is evaluated on the corresponding task test set using greedy decoding, and performance is measured by unigram F1 between each decoded output and the reference answer. Both strings are lowercased and tokenized by whitespace. For a prediction P and reference 
+
+R, with unigram-overlap count |P ∩ R|, precision and recall are 
+
+Prec = |P ∩ R||P | , Rec = |P ∩ R||R| , (81) and the example-level score is 
+
+F1 = 2 · Prec · Rec Prec + Rec . (82) The task score is the mean unigram F1 over that task’s test examples. The number reported in Tab. 3 is the arithmetic mean of these task-level scores across all 66 tasks, multiplied by 100. The accom-panying standard deviation is computed across the 66 task-level scores, so it measures inter-task variability rather than run-to-run variance from random initialization. 35 E Details of Baselines 
+
+For language-model experiments, all baselines use the same tokenized JSONL corpus, nquery = 500 
+
+query examples, contiguous 512 -token training blocks unless noted, and dense float32 score matrices in Rnquery ×ntrain . We follow the cited methods and report only the implementation choices that differ from defaults or are needed to reproduce our runs. 
+
+TF-IDF. TF-IDF [ 52 ] uses scikit-learn ’s TfidfVectorizer 1 with unigram–bigram features for pre-training runs, unigram features for FLAN selection, max_features = 50 ,000 , sublinear TF, 
+
+ℓ2 normalization, cosine similarity, and a similarity chunk size of 25 ,000 training blocks. 
+
+GTE. GTE [ 53 ] uses the thenlper/gte-small checkpoint 2 with maximum length 512 , unit-normalized embeddings, encoding batches of 128 –512 examples depending on GPU memory, and scoring chunks of up to 200 ,000 training blocks. 
+
+RDS. RDS [ 13 ] uses final-layer hidden states from the target model, mean pooling over tokens, block size 512 , query batch size 500 where feasible, and scoring chunks of 200 ,000 training blocks. 
+
+AirRep. AirRep [ 15 ] uses the authors’ implementation 3 with 10 splits, 50 subsets per split, subset size 500 , and 200 development examples per split. Subset fine-tuning uses AdamW with learning rate 
+
+2×10 −5, weight decay 0.01 , 2 epochs, block size 512 , and batch size 4–16 ; encoder training uses 
+
+thenlper/gte-small , learning rate 10 −4, batch size 1, 50 epochs, and top-k = 32 or 16 when memory constrained. Our only scalability changes are lazy byte-offset JSONL loading and streaming inference. 
+
+AirRep pretrained. The pretrained AirRep variant [ 15 ] uses sunweiwei/AirRep-Flan-Small 4
+
+directly, without subset construction or encoder training. 
+
+LoGRA. LoGRA [ 10 ] uses LogIX 5. In pre-training attribution, we use LoRA rank 8 on transformer MLP modules, random LoRA initialization, block size 512 , training-gradient batch size 64 , query batch size 1, log_batch_size = 512 , query_score_chunk_size = 500 , seed 42 , and raw Hessian scoring. In FLAN selection, we use LogIX v0.1.1 with PCA-initialized rank-4 LoRA on all MLP layers, KFAC damping 0.1, and maximum length 256 . In contamination experiments, we use PCA-initialized rank-8 LoRA on self-attention and MLP layers, raw Hessian damping 10 −5, training batch size 4, query batch size 1, and log batch size 32 .
+
+TracIn / GradDot. TracIn and GradDot [ 21 ] use a single final checkpoint without checkpoint ensembling, Hessian correction, or random projection. For language-model diagnostics, gradients are restricted to the final MLP projection or final MLP layer; for vision and tabular models, gradients are computed on the warmed-up classifier. 
+
+LESS. LESS [ 23 ] uses the official implementation 6 with a LoRA-adapted Qwen2.5-0.5B reference model, AdamW-state-corrected gradients over adapter parameters only, random projection dimension 
+
+8192 , a single final checkpoint, and maximum length 512 .
+
+DSDM. DSDM [ 29 ] uses the public codebase 7 and is run under the AirRep evaluation protocol without additional method-specific tuning. 
+
+DSIR. DSIR [ 32 ] uses the public codebase 8 and is run under the AirRep evaluation protocol without additional method-specific tuning. 
+
+> 1https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text. TfidfVectorizer.html
+> 2https://huggingface.co/thenlper/gte-small
+> 3https://github.com/sunnweiwei/AirRep
+> 4https://huggingface.co/sunweiwei/AirRep-Flan-Small
+> 5https://github.com/logix-project/logix
+> 6https://github.com/princeton-nlp/LESS
+> 7https://github.com/MadryLab/dsdm
+> 8https://github.com/p-lambda/dsir
+
+36 Table 12: Architectural details of the STRIDE steering operators. The parameter-free LayerNorm 
+
+normalizes activations without changing their scale, and the low-rank projection forces the operator to learn generalizable, additive shifts. Here h is the activation at the steered layer. Component Operation Output Shape 
+
+Input Base Model Latent h dmodel 
+
+Bθ (Basis Net) 
+
+LayerNorm( dmodel , affine = False ) dmodel 
+
+Linear( dmodel → r, bias = False ) r
+
+SiLU r
+
+Subset Steer ak Element-wise Gating Bθ (h) ⊙ ak r
+
+Output Proj U Linear( r → dmodel , bias = False ) dmodel 
+
+Random. The random baseline samples uniformly without replacement. For FLAN selection, the reported standard deviation is across tasks rather than random seeds. 
+
+TRAK. TRAK [ 28 ] uses the official package 9 with the image_classification task, an indepen-dent projector per ensemble checkpoint, half precision disabled on CPU, and covariance regularization 
+
+λ = 10 −3. MNIST, FashionMNIST, and Parkinsons ensemble members are trained with Adam, batch size 128 , learning rate 10 −3, and 15 , 20 , and 40 epochs respectively; CIFAR-10 ResNet-9 uses SGD with learning rate 0.4, momentum 0.9, weight decay 5×10 −4, a cyclic schedule, and 30 epochs. 
+
+FeatSim. FeatSim [ 13 ] computes cosine similarity between penultimate-layer features from the same warmed-up classifier used for GradDot. 
+
+## F Additional Implementation Details 
+
+In this section, we provide additional implementation details. 
+
+F.1 Low-Rank Operator Architecture 
+
+The basis network Bθ is implemented as a lightweight MLP attached to a chosen intermediate trans-former layer. Given the latent activation vector h ∈ Rdmodel , we apply a parameter-free LayerNorm 
+
+(without affine weights to preserve the original feature scaling), followed by a linear projection down to rank r, and a SiLU [57 ] activation function. This compressed latent representation is then scaled by the subset-specific parameter matrix ak via element-wise gating and linearly mapped back to the residual stream space. By using ranks as small as r ∈ { 16 , 32 }, we severely restrict the capacity of the steering operators, forcing them to learn generalizable, additive shifts rather than memorizing exact data labels. The full architectural sequence is detailed in Tab. 12. 
+
+F.2 Instruction-Tuning Token Masking 
+
+When applying STRIDE to instruction-tuned Large Language Models (e.g., Qwen [ 44 ] on FLAN [ 45 ]or Alpaca [ 46 ]), it is critical that the Fidelity loss isolates the model’s performance on the actual task output rather than the user’s prompt. We implement a strict token masking strategy where the Cross-Entropy fidelity loss is computed exclusively over the “answer” tokens. The prefix prompt tokens are assigned a weight of zero ( ωt = 0 ), ensuring the steering vectors optimize for the causal generation of the response rather than reconstructing the input context. 
+
+F.3 Intervention Layer Selection 
+
+In LLMs the choice of the intervention layer l significantly impacts the quality of the learned steering operators. We generally hook the operator into the mid-to-late layers of the transformer (e.g., layer 15 out of 24 for a 0.5B model). Intervening too early fails to capture high-level semantic features, 
+
+> 9https://github.com/MadryLab/trak
+
+37 Algorithm 2 Memory-Efficient Causal LM Loss 
+
+Require: Batch of input sequences X ∈ ZB×Tmax , padding token P , micro-batch size m, model fθ . 
+
+> 1:
+
+Initialize Ltotal ← 0, Ntotal ← 0. 
+
+> 2:
+
+for i = 0 , m, 2m, . . . , B − 1 do  
+
+> 3:
+
+Extract micro-batch: Xsub = X[i : i + m]. 
+
+> 4:
+
+Dynamic Trimming: Find last non-padding column teff in Xsub . 
+
+> 5:
+
+Truncate: Xsub ← Xsub [: , . . . , t eff ]. 
+
+> 6:
+
+Forward Pass: Compute logits Z = fθ (Xsub ) ∈ Rb×teff ×V . 
+
+> 7:
+
+Label Shift: Construct targets Y by shifting Xsub left by 1 and padding.  
+
+> 8:
+
+▷ Cross-Entropy Loss:  
+
+> 9:
+
+Compute per-token loss matrix N LL ∈ Rb×teff : 
+
+> 10:
+
+N LL i,t = − log 
+
+ exp( Zi,t,Y i,t )  
+
+> PVv=1 exp( Zi,t,v )
+
+
+
+. 
+
+> 11:
+
+Reshape N LL to b × teff . 
+
+> 12:
+
+Masking: Compute boolean mask M = ( Xsub [: , 1 :] ̸ = P ). 
+
+> 13:
+
+Accumulate:  
+
+> 14:
+
+Ltotal ← Ltotal + P(N LL [: , . . . , −1] ⊙ M ). 
+
+> 15:
+
+Ntotal ← Ntotal + P M . 
+
+> 16:
+
+Free Z and N LL to release memory.  
+
+> 17:
+
+end for  
+
+> 18:
+
+return Ltotal / max( Ntotal , 1) .while intervening at the very last layer does not afford the model enough depth to process the steered representation into a coherent logit distribution. 
+
+F.4 Memory Optimization for Causal LM Objectives 
+
+A common bottleneck when computing influence metrics (like the Fidelity loss or the Tail-Patch score) over large language models is the memory required to instantiate the full vocabulary logits tensor O(B × T × V ). To mitigate Out-Of-Memory (OOM) errors and allow scaling to batch sizes as large as k = 50 , we implemented a micro-batching strategy over the batch dimension during loss computation. Within each micro-batch we dynamically trim the input sequences to their maximum effective length (ignoring global padding tokens), reducing the sequence length T . We then compute the Negative Log-Likelihood (NLL) using a fused cross-entropy operation directly on the reshaped logits without allocating intermediate copies of the full sliced tensor. These implementation choices reduce the peak GPU memory footprint by nearly an order of magnitude. We show this memory-efficient objective computation in Algorithm 2. 
+
+F.5 Hyperparameters 
+
+We provide the complete set of hyperparameters used for training the low-rank steering operators and recovering the sparse influence scores in Tab. 13. 
+
+F.6 Data Selection Implementation Details Reference checkpoints. We fine-tune Qwen2.5-0.5B on the full FLAN 100K training split for 2
+
+epochs using AdamW with learning rate 2×10 −5, effective batch size 32 , and maximum sequence length 512 , following [ 15 ]. This checkpoint is frozen for STRIDE operator learning and reused as the reference model for LoGRA gradient logging. For LESS [ 23 ], which scores LoRA adapter gradients, we train a separate LoRA-adapted reference model on the same split with the same optimizer, batch size, sequence length, and number of epochs. 
+
+STRIDE chunking. Individual FLAN examples may exceed the 512 -token context window used by the attribution models. We split each example into contiguous non-overlapping chunks, keep tail chunks as separate data points, and maintain a mapping from each chunk to its source example. At inference time, chunk-level influence scores are summed back to the original-example level before applying the greedy rank aggregation protocol from § D.2. 38 Downstream fine-tuning. After each method selects 1,000 examples for a task, we fine-tune a fresh Qwen2.5-0.5B base model with AdamW, learning rate 2×10 −5, effective batch size 32 , 2 epochs, and maximum sequence length 512 . Evaluation uses greedy decoding with at most 64 new tokens. Baseline-specific scoring settings are given in § E; the standard deviation in Tab. 3 is across tasks rather than random seeds. 
+
+F.7 Data Contamination Implementation Details Training and contamination protocol. All contaminated and clean-control models are Qwen2.5-0.5B [ 44 ] checkpoints fine-tuned for one epoch with supervised fine-tuning, learning rate 5×10 −5,batch size 16 , and maximum sequence length 1024 . The clean proxy corpus contains approximately 
+
+20 M OpenWebText [ 49 ] tokens. For contamination, each selected MATH problem [ 50 ] is copied 100 
+
+times, and the total training pool is held fixed at approximately 22 ,600 examples by replacing proxy examples. We use contamination rates r ∈ { 0.5% , 1.0% , 1.5% }, corresponding to 22 , 45 , and 68 
+
+unique leaked problems, and train three seeds per rate. 
+
+Evaluation protocol. For each contaminated model, we evaluate accuracy separately on leaked problems and on the 500 held-out non-leaked MATH problems. Attribution recall is computed over leaked queries by checking whether the query’s own leaked training replica is retrieved from the training pool. For AirRep we report top-k retrieval at k ∈ { 10 , 100 }; for LoGRA and STRIDE, we use the union of the top-100 and bottom-100 score buckets because signed gradient scores may assign strongly negative influence. The resulting benchmark accuracy, recall analysis, and score diagnostics are reported in § B.5. 
+
+Attribution scoring. AirRep uses the released AirRep-Flan-Small encoder without fitting to the contaminated models. LoGRA uses the contamination configuration in § E, and each contaminated-model run takes approximately two hours on an A100 GPU. For STRIDE, we train 1,000 low-rank steering operators for 10 ,000 iterations on each contaminated model, using the expander-graph subset construction from § 4.2 with degree d = 10 . Per-query scores are recovered by Lasso over 512 -token pool chunks and summed to the pool-example level; each run takes approximately 100 minutes on an A100 GPU. 
+
+## G Extended Related Works 
+
+Compressive Sensing and Sparse Recovery. Our formulation of training data attribution connects TDA to classical compressive sensing and sparse recovery. In compressive sensing, the goal is to recover a high-dimensional signal from a number of measurements that is much smaller than the ambient dimension, by exploiting the assumption that the signal is sparse or compressible in an appropriate basis [ 61 , 62 , 63 , 64 , 65 ]. In our setting, the unknown signal is the vector of per-example training influences, while each subset-level perturbation response provides a compressed measurement of this vector. Because only a small fraction of training examples are expected to substantially affect any given prediction, the influence vector is naturally sparse, allowing us to recover individual contributions from far fewer subset responses than training examples. While compressive sensing has been extensively studied in signal processing and theoretical computer science, its application to modeling training data influence in deep neural networks remains largely unexplored. STRIDE bridges this gap by casting activation-space TDA as a compressive sensing problem over training-example influences. 
+
+Applications and Scaling to Large Models. Training data attribution has been applied to a variety of practical tasks, including identifying mislabeled or harmful examples [ 4, 66 ], detecting data poisoning [ 67 , 68 ] and memorization [ 69 , 5], and guiding dataset curation, selection [ 4, 69 , 36 , 7]and augmentation [ 70 , 71 ]. More recently, these methods have been extended to large language models to study generalization behavior [ 9] and training dynamics [ 24 , 72 ], as well as to support data selection and filtering pipelines [ 23 , 15 ]. Both gradient-based methods like LESS [ 23 ] and MATES [73 ] and representation-based approaches like DEFT [ 34 ] and SelectLLM [ 74 ] have been adapted to this setting, with a primary focus on improving scalability and efficiency. 39 Table 13: Hyperparameters for STRIDE Operator Training and Sparse Recovery. Hyperparameter Value Architecture Intervention Layer ( l), 286M [42] 8
+
+Intervention Layer ( l), 537M [42] 10 
+
+Intervention Layer ( l), 897M [42] 12 
+
+Intervention Layer ( l), 1.38B [42] 15 
+
+Intervention Layer ( l), Qwen 2.5 0.5B [44] 16 
+
+Steering Operator Rank ( r) 32 
+
+Subset Construction (Operator Training) Number of Subsets ( K) 1000 
+
+Subsets per Example ( d) 10 
+
+Subset Construction (LDS Ground Truth) Number of Subsets ( K) 256 
+
+Subset Fraction ( α) 0.3
+
+Optimization (Phase 1) Optimizer MuonAdamW [58, 59, 60] Learning Rate ( ηinit ) 3 × 10 −4
+
+Learning Rate End ( ηend ) 3 × 10 −5
+
+Learning Rate Schedule Linear Warmup + Linear Decay Warmup Steps 100 
+
+Total Training Iterations 10 ,000 
+
+Subsets per Iteration 8
+
+Fidelity Batch Size (per subset) 2
+
+Stability Batch Size (per subset) 2
+
+Loss Weights Fidelity Loss Weight ( λfid ) 1.0
+
+Stability Loss Weight ( λstab ) 1.0
+
+Linearity (LDS) Loss Weight ( λLDS ) 0.1
+
+Stability Top-m classes 20 
+
+Sparse Recovery (Phase 2) Lasso ℓ1 Penalty ( λ) Auto-scaled per-query ( 0.8 × λmax )Sparse Solver Cyclic Coordinate Descent 
+
+Tangentially Related Works. For completeness, we include other tangentially related works here. The mechanism STRIDE uses to perturb the model, learning lightweight operators on internal activations, draws inspiration from a rich body of work on steering large language models. Techniques such as Prefix-Tuning [ 75 ] and Prompt Tuning [ 76 ] demonstrated that prepending or modifying continuous activation vectors can effectively adapt model behavior without updating the core weights. More recently, methods like Representation Engineering [ 16 ], Activation Addition [ 17 ], and Inference-Time Intervention [ 77 ] have shown that LLM outputs can be predictably controlled by identifying and manipulating specific activation directions, an insight supported by a broader literature on model editing, concept erasure, mechanistic interpretability, and representation patching [ 78 , 79 , 80 , 81 ,82 , 83 , 84 , 85 , 86 , 87 , 88 , 89 , 90 , 91 , 92 , 93 , 94 , 95 , 96 ]. While these works primarily focus on aligning behavior, eliciting truthfulness, or adapting to new tasks, STRIDE uniquely repurposes the concept of activation steering for Training Data Attribution. By learning operators that functionally simulate the effect of subset retraining, we leverage the efficiency of activation-space interventions to reconstruct counterfactual training trajectories. 40
