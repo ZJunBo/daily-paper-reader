@@ -1,0 +1,578 @@
+Title: Dynamic Proxy-Mixing: Transferring Replay Controllers from Small to Large Models for Continual Instruction Tuning
+
+URL Source: https://arxiv.org/pdf/2606.00400v1
+
+Published Time: Tue, 02 Jun 2026 00:23:40 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# Dynamic Proxy-Mixing: Transferring Replay Controllers from Small to Large Models for Continual Instruction Tuning 
+
+Ibne Farabi Shihab 1*† and Fariya Afrin 2* and Anuj Sharma 3
+
+> 1
+
+Department of Computer Science, Iowa State University 
+
+> 2
+
+Department of Computer Science, Kalinga Institute of Industrial Technology 
+
+> 3
+
+Department of Civil, Construction & Environmental Engineering, Iowa State University 
+
+ishihab@iastate.edu 
+
+Abstract 
+
+Continual instruction tuning updates a language model through a sequence of new domains, yet each update can progressively erode previ-ously learned capabilities and alignment behav-ior. Replay is the standard mitigation, but fixed replay ratios are inherently limited because the optimal mixture varies with the current domain, the training stage, and the evolving vulnera-bility of prior behaviors. We propose PROX-YMIX, a framework that learns a dynamic re-play controller on a small proxy model and transfers the frozen controller to a larger target. The controller never observes future tasks and constructs its state from normalized validation losses and their temporal dynamics, produc-ing a masked mixture over the current task and accessible replay buffers. Our core empirical hypothesis is forgetting mirroring : task vulnera-bility rankings remain largely consistent across model scales even when absolute loss magni-tudes differ. We validate this assumption em-pirically before transferring controllers across scales. On LLaMA-3-8B across five contin-ual instruction tuning sequences, PROXYMIX improves average accuracy by 3.4 points, re-duces final forgetting by 3.5 points, and raises safety score by 5.8 points over the strongest non-oracle baseline, at roughly 50x lower pol-icy learning cost than Oracle Target RL. The framework is leakage free and architecture in-dependent at the interface level, and we also identify settings where the proxy assumption breaks down, highlighting limitations for robust deployment. 
+
+1 Introduction 
+
+Language models are rarely adapted in a single step. A general-purpose chat model is typically fine-tuned sequentially across a stream of hetero-geneous domains. It ranges from code genera-tion to medical question answering, legal draft- 
+
+> *Equal contribution.
+> †Corresponding author: ishihab@iastate.edu .
+
+ing, creative writing, multilingual instruction fol-lowing, and evolving safety policies. While this staged adaptation is computationally efficient and avoids retraining from scratch, it introduces a per-sistent continual-learning challenge: each update improves performance on the current domain at the potential cost of degrading previously acquired capabilities and behavioral constraints. In instruction-tuned systems, this degradation is not limited to superficial accuracy drops. What is forgotten may include refusal behaviors, conver-sational norms, multi-turn reasoning structures, or structured instruction-following patterns (Qi et al., 2024; Zhan et al., 2024). We refer to this broader phenomenon as alignment drift , and it represents the central stability failure mode addressed in this work. Experience replay is the most widely used mitigation strategy (Chaudhry et al., 2019; Rebuffi et al., 2017), where data from previous tasks is inter-leaved with current-task training. However, fixed replay ratios are inherently limited: the optimal re-play mixture varies across domains, training stages, and the evolving vulnerability of prior behaviors. A static allocation may under-protect safety-critical or highly fragile behaviors, while over-allocating resources in stable or low-interference transitions. These limitations motivate the need for a dynamic replay controller that adapts the mixture over time. Ideally, such a controller would allocate higher replay to tasks exhibiting rising validation loss, re-duce replay when prior tasks remain stable, and pri-oritize retention of safety-critical behaviors. How-ever, learning such a controller directly on large tar-get models is computationally prohibitive, as each reinforcement learning episode requires a full con-tinual training trajectory. This motivates a proxy-to-target paradigm: a smaller proxy model can be used to efficiently explore replay policies, identi-fying vulnerability patterns and effective mixture strategies, which are then transferred to a larger target model. 1
+
+> arXiv:2606.00400v1 [cs.LG] 29 May 2026
+
+We introduce PROXYMIX, a two-stage frame-work for dynamic replay control in continual in-struction tuning. PROXYMIX introduces a proxy-to-target framework for learning dynamic replay policies on small proxy models and transferring them to large target models for continual instruc-tion tuning, achieving near-oracle performance at substantially lower optimization cost than Oracle Target RL. In the proxy stage, a lightweight model is trained over a sequence of tasks while a policy learns to select mixtures over the current task and replay buffers. The learned controller operates un-der a strict information constraint: at stage k, it observes only normalized validation signals and loss trends for tasks T1 . . . T k, while future tasks re-main fully masked in state, action, and reward. This prevents leakage that would otherwise reduce the problem to offline curriculum optimization rather than continual learning. In the target stage, the learned policy is frozen and directly applied to a larger model, with decisions driven by relative drift signals rather than absolute loss scales. A key empirical observation underlying our ap-proach is forgetting mirroring : tasks that are most susceptible to forgetting in the proxy model tend to exhibit similar vulnerability in the target model under shared replay conditions. While not uni-versal, this property is particularly strong under interference-heavy or style-shifting task transitions and provides a practical basis for transferring re-play control across scales. When combined with limited validation on the target model, it enables ef-fective and computationally efficient policy reuse. Our contributions are as follows: • We propose PROXY MIX , a leakage-free proxy-to-target framework for dynamic replay control in continual instruction tuning. • We formalize a masked state–action–reward formulation that enforces strict continual learning constraints during policy optimiza-tion. • We introduce and empirically investigate the forgetting-mirroring hypothesis across model scales and task sequences. • We show that proxy-learned policies consis-tently outperform fixed and heuristic replay baselines while substantially reducing opti-mization cost. • We conduct ablation studies isolating the ef-fects of normalization, temporal trend signals, policy expressivity, and safety-aware rewards, and we include a leakage-control analysis showing why future-task masking is required for a valid continual-learning evaluation.. Overall, PROXYMIX reframes replay not as a static hyperparameter but as a learned, transferable control policy that adapts to the evolving structure of alignment drift across continual instruction tun-ing. 
+
+2 Related Work 
+
+Continual learning has traditionally addressed the stability–plasticity tradeoff through regulariza-tion, architectural isolation, and replay-based ap-proaches. Regularization methods such as EWC and SI discourage changes to parameters estimated to be important for earlier tasks (Kirkpatrick et al., 2017; Zenke et al., 2017). Architecture-based meth-ods reserve or expand capacity across tasks (Rusu et al., 2016). Replay-based methods store or syn-thesize old examples and train on them alongside new data (Lopez-Paz and Ranzato, 2017; Rebuffi et al., 2017; Chaudhry et al., 2019). Our method belongs to the replay family, but instead of treat-ing replay allocation as a fixed sampling rule, it treats allocation as a sequential control problem that adapts to the model’s current state. Continual instruction tuning sharpens these classical concerns and introduces additional con-straints. CITB formulates continual instruction tun-ing as a benchmarked setting with long instruction streams (Zhang et al., 2023), while TRACE eval-uates continual learning for aligned LLMs across domain-specific, multilingual, code, and mathemat-ical tasks and measures degradation beyond task ac-curacy (Wang et al., 2023b). Recent surveys empha-size that LLM continual learning spans continual pre-training, continual fine-tuning, and continual alignment, with different forgetting modes at each stage (Shi et al., 2025). Work on aligned models is particularly relevant because it demonstrates that domain-specific fine-tuning can compromise safety behavior even when the new data are not explic-itly adversarial (Qi et al., 2024; Zhan et al., 2024). These results motivate evaluating retention not only as held-out task accuracy but also as preservation of instruction-following and refusal behavior, both of which we measure.Additional discussion of closely related replay and proxy-based methods is provided 2in Appendix A, while Appendix B summarizes how PROXYMIX compares to prior approaches across key methodological dimensions. 
+
+3 Problem Setting 
+
+We study a sequence of instruction-tuning tasks 
+
+T1, . . . , TT presented one after another. At stage 
+
+k, the learner receives current-task data from Tk
+
+and may replay data from T1, . . . , Tk−1. It cannot observe validation examples, rewards, or replay buffers for future tasks. This restriction is essen-tial for a faithful continual-learning evaluation: a method that peeks at Tk+1 when choosing replay for Tk is no longer solving the continual problem but a curriculum problem disguised as one. To compare models across scales, we need a measure of forgetting that does not depend on abso-lute scores. Let A(m) 
+
+> i
+
+(k) denote the score of model scale m on task Ti after completing stage k. For 
+
+j > i , the relative forgetting from completing Ti to completing Tj is 
+
+ϕ(m) 
+
+> i→j
+
+= A(m) 
+
+> i
+
+(i) − A(m) 
+
+> i
+
+(j)max( A(m) 
+
+> i
+
+(i), ϵ A) , (1) where ϵA prevents division by zero. Positive values indicate degradation from the checkpoint immedi-ately after learning Ti. We use this pairwise quan-tity to compare forgetting rankings across scale, since absolute losses differ between proxy and tar-get even when their relative profiles agree. For final evaluation, we report average accuracy, 
+
+AA = T −1 X
+
+> i
+
+Ai(T ),
+
+and final forgetting, defined as the average drop from each task’s best previous checkpoint: 
+
+FGT = 1
+
+T − 1 
+
+> T−1
+
+X
+
+> i=1
+
+max  0, max   
+
+> r∈{ i,...,T −1}
+
+Ai(r)
+
+− Ai(T ).
+
+(2) We also report new-task accuracy, 
+
+NTA = T −1 X
+
+> i
+
+Ai(i),
+
+and backward transfer, 
+
+BWT = ( T − 1) −1 
+
+> T−1
+
+X
+
+> i=1
+
+ Ai(T ) − Ai(i),                                    
+
+> ID Tasks in order
+> S1 Code →Math →Chat S2 Chat →Medical →Legal →Code S3 Safety →Code →Writing →Math S4 Summarization →QA →Code →Chat →Math S5 Code →Python →Rust →Math
+> Table 1: Continual instruction-tuning sequences used throughout the paper. They include both sharp domain shifts and related-domain transitions, and S3 contains an early safety dataset that must be preserved through subsequent updates.
+
+which together separate plasticity from stability. Safety score is reported as a balanced score that combines harmful-prompt refusal accuracy with a penalty for benign over-refusal, since harmful-only refusal accuracy can be gamed by blanket refusal; the full definition appears in Appendix G. 
+
+4 Forgetting Mirroring 
+
+Proxy transfer is useful only if the proxy reveals something stable about the target. Before intro-ducing the controller, we therefore stop to ask a diagnostic question: when a proxy and target are trained on the same sequence under matched con-ditions, do they agree on which tasks are fragile? If they do, even approximately, then a controller trained on the proxy has a reasonable chance of allocating replay sensibly when transferred. If they do not, no policy learned on the proxy will transfer reliably, and the entire framework is misconceived. To make the question concrete, we train the proxy and target with the same simple replay pro-tocol on each sequence in Table 1 and compute pairwise forgetting values ϕi→j for both models. We then compare the proxy and target rankings with Spearman correlation. The test asks whether the proxy identifies which tasks are vulnerable, not whether it matches the target’s absolute scores. The sequences span sharp domain shifts (S1), longer streams with stylistic and topical variety (S2, S4), a safety-critical stream where a small early dataset must be preserved through subsequent updates (S3), and a closely related-domain stream where interfer-ence is mild (S5). Together they give the diagnostic a chance to fail in several different ways. The results in Table 2 show what the diagnostic finds. Across scale pairs, the Spearman correla-tion of forgetting rankings is consistently high, and the confidence intervals exclude weak or random agreement. Larger proxies generally track the tar-3Proxy → target mean ρ 95% CI exact p                
+
+> 160M →6.9B 0.81 [0.70, 0.89] 0.006 410M →6.9B 0.90 [0.82, 0.95] 0.002 1.4B →8B 0.89 [0.80, 0.94] 0.003
+> Table 2: Forgetting-mirroring summary across the five sequences. Confidence intervals are computed over seeds and task sequences; exact tests are computed by sequence-block permutation.
+
+get more closely, with the 410M–6.9B and 1.4B– 8B pairings both reaching high correlations. Even the smallest proxy carries enough signal to be use-ful. Appendix D visualizes the same finding as a per-task rank scatter: points cluster near the diag-onal, and the off-diagonal departures correspond to tasks where the two models genuinely disagree about vulnerability rather than to noise. Forgetting mirroring is a descriptive property of a given task distribution and model pair, rather than a theorem guaranteed by scale alone. We expect this effect to be most pronounced when interfer-ence is primarily driven by shared representations, and correspondingly weaker when the target model exhibits domain-specific knowledge that is absent in the proxy. Accordingly, the remainder of this work treats the diagnostic as an empirical signal rather than a universal law. We explicitly report settings in which alignment deteriorates, particularly in med-ical and legal domains, where proxy-target agree-ment is comparatively weaker. Furthermore, the proposed method is designed to degrade gracefully under such conditions, relying on proxy signals when informative, while avoiding brittle failure modes when proxy guidance is insufficient. 
+
+5 Methodology 
+
+To enable efficient and stable proxy-to-target trans-fer in continual instruction tuning, we propose PROXY MIX , a proxy-trained replay controller that is transferred to the target without further updates. Figure 1 illustrates the framework. The design is guided by three constraints: (i) strict prevention of future-task leakage, (ii) scale-robust state repre-sentations, and (iii) reward signals that faithfully capture forgetting and retention dynamics. 
+
+Controller Formulation At decision step t, let 
+
+k(t) denote the current task index. The con-troller operates over two sets: the visible task set 
+
+At = {1, . . . , k (t)} and the replay-eligible set 
+
+Pt = {1, . . . , k (t) − 1}. For each visible task 
+
+i ∈ A t, we evaluate a small validation stream to obtain loss ℓ(t) 
+
+> i
+
+.Since absolute loss magnitudes are not compara-ble across model scales, we construct normalized statistics using a running estimate of mean and variance: 
+
+˜ℓ(t) 
+
+> i
+
+= ℓ(t) 
+
+> i
+
+− μ(t)
+
+> i
+
+q
+
+v(t) 
+
+> i
+
++ ϵ, ∆˜ℓ(t) 
+
+> i
+
+= ˜ℓ(t) 
+
+> i
+
+− ˜ℓ(t−δ) 
+
+> i
+
+. (3) This normalization ensures that the same policy can operate consistently across proxy and target models. The temporal difference term ∆˜ℓ(t) 
+
+> i
+
+further captures whether a task is stabilizing or deteriorat-ing over time, which is essential for detecting early signs of forgetting.The controller decision pipeline is illustrated in Figure 12. 
+
+State Representation To ensure fixed-dimensional input across all stages, future-task entries are explicitly masked and zero-filled. The controller state is defined as: 
+
+st = ¯ℓ(t)1 , . . . , ¯ℓ(t) 
+
+> T
+
+, ∆¯ℓ(t)1 , . . . , ∆¯ℓ(t) 
+
+> T
+
+, e k(t), p t
+
+,
+
+(4) where ¯ℓ(t) 
+
+> i
+
+= ˜ℓ(t) 
+
+> i
+
+if i ∈ A t and zero otherwise, ek(t)
+
+is a one-hot encoding of the current task index, and 
+
+pt ∈ [0 , 1] denotes within-task progress. 
+
+Action Space and Replay Mixture The con-troller outputs logits at ∈ RT , which are converted into a replay distribution via a masked softmax: 
+
+w(t) 
+
+> i
+
+= m(t) 
+
+> i
+
+exp( a(t) 
+
+> i
+
+)
+
+PTr=1 m(t) 
+
+> r
+
+exp( a(t) 
+
+> r
+
+) , m(t) 
+
+> i
+
+= ⊮[i ≤ k(t)] .
+
+(5) This formulation guarantees strict exclusion of future tasks while allowing flexible allocation of probability mass across current and past tasks. 
+
+Reward Design The reward function is designed to balance forward learning and retention: 
+
+rt = −∆˜ℓ(t) 
+
+> k(t)
+
+− λ
+
+P 
+
+> i∈P t
+
+max(0 , ∆˜ℓ(t) 
+
+> i
+
+)max( |P t|, 1) + βS t.
+
+(6) The first term encourages improvement on the current task, while the second penalizes increases in loss on previously learned tasks, thereby directly capturing forgetting dynamics. The safety term St
+
+is included only when safety-relevant validation signals are available, preventing any leakage into earlier stages. 4Figure 1: Overview of PROXYMIX. It illustrates a bi-level replay control framework for continual instruction tuning. The controller observes normalized validation signals over visible tasks and selects a masked mixture over current and replay buffers, trained via PPO using reward signals derived from proxy continual tuning episodes. The learned policy is then transferred as a frozen controller for open-loop replay selection in the target model. Future tasks remain strictly unobserved in state, action, and reward. 
+
+Policy Optimization and Transfer The con-troller is parameterized as a two-layer MLP with 256 hidden units and tanh activations. The value function shares the same architecture with a scalar output head. We optimize the policy using PPO (Schulman et al., 2017), where each episode corresponds to a full proxy continual-learning run. The complete proxy-training procedure is summa-rized in Algorithm 1 in Appendix C. After training, the policy is frozen and directly transferred to the target model.The proxy–target transfer paradigm is illustrated in Figure 11. At each decision step, the target computes the same normalized state from its own validation signals, queries the fixed policy, and applies the resulting replay mixture. The policy is never updated on the target, ensuring that the com-putational cost of learning is amortized entirely at the proxy stage while target-side overhead remains minimal. Figure 1 summarizes the full pipeline.We further analyze the tradeoff between proxy scale, target per-formance, and compute efficiency in Appendix E, with detailed cost accounting in Appendix F.A sup-plementary schematic illustrating the separation between proxy-side policy learning and target-side inference-only deployment, together with detailed visualizations of the controller decision pipeline and masked state representation, is provided in Ap-pendix L. 
+
+6 Experimental Setup 
+
+We extend our evaluation across proxy-to-target continual instruction tuning under both in-family and cross-family transfer settings. The proxy models are drawn from the Pythia suite with 160M, 410M, and 1.4B parameters (Biderman et al., 2023), while the primary target model is LLaMA-3-8B (Grattafiori et al., 2024). We further evaluate cross-family transfer on Pythia-6.9B and Mistral-7B (Jiang et al., 2023). The instruction mixture spans heterogeneous domains including Code, Math, Chat, Medical, Legal, Creative Writ-ing, Summarization, QA, and Safety, enabling five structured task sequences (Table 1) with controlled domain shift composition. Unless otherwise stated, all models are fine-tuned using LoRA applied to attention projection matrices with rank 64 and scaling factor 128. Op-timization follows AdamW with a learning rate of 2 × 10 −4, cosine decay scheduling, batch size 32, and three epochs per task. The controller op-erates at fixed intervals of 50 gradient steps, using normalized validation losses and temporal trend signals as input state representations. Appendix K provides full details on PPO configuration, dataset construction, and training hyperparameters. The baselines are designed to disentangle re-play benefit, adaptive allocation, proxy-based trans-fer, and reinforcement learning control. No Re-play performs sequential training without access to past data and serves as a lower bound. Ran-dom Replay samples past tasks uniformly using fixed budgets of 10% and 30%, capturing non-adaptive replay heuristics. Proportional Replay 
+
+allocates replay probability proportional to current validation loss, providing a loss-aware but non-learned adaptive baseline. Loss-Slope Replay as-signs replay weights proportional to max(0 , ∆˜ℓi),directly leveraging temporal degradation signals while avoiding reinforcement learning. GradSim Replay selects replay tasks based on negative gradi-ent cosine similarity with the current task, isolating gradient-informed interference modeling. InsCL 
+
+implements instruction-level dynamic replay selec-tion (Wang et al., 2024). DoReMi Static learns a fixed proxy mixture and transfers it without further adaptation during target training (Xie et al., 2023a). Finally, Oracle Target RL trains the controller directly on the target model, serving as an upper-bound reference while incurring approximately 50x 5higher measured policy-learning cost than P ROX -
+
+> Y
+
+MIX in target-run equivalents. Main aggregate results are reported as mean and standard error over three random seeds. The five task sequences are fixed as shown in 1; seeds con-trol model initialization where applicable, replay sampling, minibatch order, and PPO policy initial-ization. We use matched seeds across methods to reduce stochastic confounding, but do not treat three-seed estimates as eliminating optimization variance. 
+
+7 Results 
+
+We evaluate P ROXY MIX on LLaMA-3-8B across five continual instruction tuning sequences, com-paring against a broad set of replay strategies in-cluding static, heuristic, and state-of-the-art adap-tive baselines. The key comparison is not against naive fixed replay schemes, which are known to be suboptimal under distribution shift, but against strong adaptive methods such as Loss-Slope Re-play, InsCL, and DoReMi Static, all of which lever-age validation signals or proxy-based mixing strate-gies. Across all settings, P ROXY MIX consistently improves the stability–plasticity tradeoff, achiev-ing stronger forgetting control without compromis-ing new-task adaptation, and closing a substantial fraction of the gap to the Oracle Target RL upper bound. 
+
+Aggregate Performance on LLaMA-3-8B We begin with aggregate performance on LLaMA-3-8B, summarized in Table 3. Across all five se-quences, P ROXY MIX achieves the best tradeoff between accuracy, forgetting, and safety, outper-forming all adaptive baselines by a clear margin. Compared to the strongest non-oracle method (In-sCL), P ROXY MIX improves AA by +3.4 points and reduces forgetting by 3.5 points, while simulta-neously increasing safety score (SS) by +5.8 points. Figure 9 presents a multi-metric comparison across replay strategies, showing consistent advantages of PROXYMIX across all evaluated dimensions. The improvement is consistent across metrics rather than being driven by a single axis. It provides evidence for that the learned replay policy does not simply trade off forgetting for plasticity, but actively modulates replay allocation in response to evolving task sensitivity. A second key find-ing is that P ROXY MIX substantially narrows the gap to Oracle Target RL, particularly on forget-ting and safety-critical alignment metrics. While Oracle Target RL remains an upper bound due to its full access to target-side optimization signals, PROXY MIX recovers most of its gains using only proxy-trained policy transfer, despite requiring ap-proximately 50 × lower training cost. New-task accuracy (NTA) remains close to the No Replay up-per bound which suggests that improved retention does not come at the expense of plasticity.Finally Figure 6 visualizes that PROXYMIX achieves a strong tradeoff between accuracy, forgetting, and safety while remaining stable across diverse task orderings. 
+
+Safety-Critical Sequence Analysis To further evaluate robustness under adversarial task order-ing, we consider Sequence S3, where safety-related tasks are introduced first and subsequently followed by code, writing, and math domains. This order-ing induces strong interference pressure on safety-aligned representations, making it particularly sen-sitive to replay allocation strategies.Table 4 rein-forces that static replay strategies exhibit a clear tradeoff between safety retention and benign util-ity: lower replay ratios fail to preserve harmful-prompt refusal, while higher ratios degrade benign compliance due to over-allocation of capacity to already-stabilized safety data. Adaptive baselines such as Loss-Slope Replay and InsCL partially mit-igate this issue by reacting to observed degrada-tion, but remain fundamentally reactive in nature. In contrast, P ROXY MIX achieves stronger safety preservation while maintaining high benign com-pliance. This improvement stems from its ability to anticipate degradation trends via proxy-learned signals, enabling preemptive adjustment of safety replay before significant forgetting occurs. This im-provement does not lead to conservative overfitting, as benign compliance remains comparable to that of the strongest baselines.In contrast, P ROXY MIX 
+
+achieves stronger safety preservation while main-taining high benign compliance. Additional per-sequence safety–performance tradeoffs, including average accuracy, forgetting, and safety retention across task orderings, are visualized in Figures 7 and 5. These robustness behaviors across task or-dering and training perturbations are discussed in Appendix I. 
+
+Cross-Target Transfer A key motivation for proxy-based controller learning is amortization across multiple target models without retraining. We therefore evaluate whether a policy trained on a smaller proxy model generalizes across hetero-6Method AA ↑ FGT ↓ NTA ↑ BWT ↑ SS ↑                                                       
+
+> No Replay 48.9 ±0.7 32.6 ±0.9 72.4 ±0.5 -29.8 ±0.8 54.7 ±1.1 Random Replay 10% 57.6 ±0.5 20.0 ±0.6 69.8 ±0.4 -16.1 ±0.7 70.2 ±0.9 Random Replay 30% 60.1 ±0.6 15.9 ±0.5 67.0 ±0.6 -11.9 ±0.5 75.4 ±0.8 Proportional Replay 62.0 ±0.5 13.9 ±0.4 68.0 ±0.5 -10.2 ±0.4 78.1 ±0.7 Loss-Slope Replay 63.1 ±0.4 12.8 ±0.5 68.7 ±0.4 -9.3 ±0.5 79.4 ±0.8 GradSim Replay 62.7 ±0.6 13.4 ±0.6 67.9 ±0.5 -9.8 ±0.5 78.6 ±0.6 InsCL 63.5 ±0.5 12.1 ±0.5 68.5 ±0.5 -8.8 ±0.4 80.0 ±0.7 O-LoRA 59.4 ±0.7 17.5 ±0.7 66.3 ±0.6 -13.1 ±0.6 73.6 ±0.9 DoReMi Static 62.9 ±0.4 13.2 ±0.4 68.3 ±0.4 -9.6 ±0.5 79.2 ±0.6 PROXY MIX 66.87 ±0.4 8.63 ±0.3 70.38 ±0.4 -5.12 ±0.3 85.83 ±0.5 Oracle Target RL 68.1 ±0.3 7.1 ±0.3 70.6 ±0.4 -4.3 ±0.3 87.0 ±0.4
+
+Table 3: Aggregate results on LLaMA-3-8B across five continual instruction tuning sequences.                         
+
+> Method FGT ↓harmful ↑benign ↑
+> Random 10% 22.4 58.7 89.1 Random 30% 17.6 67.3 86.4 Loss-Slope 14.2 73.5 87.0 InsCL 13.7 74.8 87.2 DoReMi Static 16.2 69.4 87.6 PROXY MIX 10.3 81.2 88.3 Oracle Target RL 9.1 82.5 88.1
+
+Table 4: Safety-critical evaluation on Sequence S3. FGT matches the S3 PROXYMIX forgetting value reported in Table 11. Harmful indicates refusal accuracy on adversarial prompts, while benign measures compliance on non-harmful inputs.                 
+
+> Target Random AA PROXYMIX AA ∆AA FGT reduction Pythia-6.9B 55.6 63.4 +7.8 8.1 LLaMA-3-8B 57.6 66.9 +9.3 11.4 Mistral-7B 56.8 65.1 +8.3 10.7
+
+Table 5: Cross-target transfer results using a frozen Pythia-410M replay controller. ∆AA is the improve-ment over random replay, while FGT reduction reports the decrease in forgetting relative to random replay. 
+
+geneous architectures and scales. Table 5 reports transfer results using a single Pythia-410M con-troller applied to Pythia-6.9B, LLaMA-3-8B, and Mistral-7B. Across all targets, P ROXY MIX yields consistent improvements over random replay, with AA gains ranging from +7.8 to +9.3 points and FGT reduc-tions ranging from 8.1 to 11.4 points. The consis-tency of these gains across architectures indicates that the learned policy captures task-level vulner-ability structure rather than overfitting to proxy-specific loss dynamics. This is further supported by strong performance on non-Pythia targets, in-dicating that the controller encodes transferable signals of forgetting risk. 
+
+Sensitivity Analysis We further study the robust-ness of P ROXY MIX with respect to proxy scale, training protocol variations, and per-sequence sta-bility. First, scaling the proxy model from 160M to 410M parameters yields substantial gains (from 63.8 to 66.9 AA), while further increasing to 1.4B provides only marginal improvement (+0.6 AA), indicating diminishing returns beyond moderate proxy scale.A detailed proxy-scale efficiency anal-ysis is provided in Appendix F.Second, we evaluate robustness under variations in replay frequency, val-idation noise, and module selection. Gains remain stable across most settings, with the largest degra-dation observed under noisy validation signals, highlighting the reliance of trend-based features on stable signal estimation. Finally, per-sequence analysis confirms that PROXYMIX remains sta-ble across all task sequences, with the strongest absolute performance on S1 and S5 and lower per-formance on the more knowledge-intensive S2 and S4 streams. Full ablations and robustness analyses are provided in Appendix J, with implementation details and reproducibility information reported in Appendix K. 
+
+8 Analysis 
+
+Interpreting the Learned Replay Policy Dynam-ics Aggregate metrics confirm that the controller is effective, but do not reveal its internal alloca-tion strategy. Figure 2 provides a finer-grained view by visualizing the replay mass assigned to previously seen tasks during S3 training, averaged across seeds.Additional qualitative visualizations of controller behavior and performance trade-offs are included in Appendix L.The learned policy ex-hibits a structured and temporally adaptive alloca-tion pattern. Safety replay is highest immediately after the model transitions away from the safety phase, decreases as performance stabilizes on code, 7Figure 2: Policy trace on S3. Safety replay increases after safety training, decreases during stable code learn-ing, and rises again under writing-induced interference affecting refusal behavior. 
+
+increases again during the writing phase where stylistic drift induces degradation in refusal behav-ior, and is subsequently redistributed toward a more balanced allocation during the math phase. This dynamic cannot be captured by static mixtures, and it differs from purely reactive rules such as loss-slope methods, as the controller increases safety re-play prior to the peak in validation loss, indicating anticipatory rather than reactive behavior.This pat-tern generalizes across sequences containing safety tasks, while in non-safety sequences the controller concentrates replay on tasks exhibiting the steepest normalized loss increase.The policy behaves as a context-dependent allocator that tracks emerging interference rather than absolute loss magnitude. 
+
+Ablation Study of Controller Design Choices 
+
+Table 6 isolates the contribution of individual com-ponents of the controller. Removing trend features converts the policy into a largely reactive mecha-nism and results in a consistent degradation in both AA and SS, confirming that anticipatory signals are central to performance. Replacing normalized sig-nals with raw losses further reduces performance, highlighting the importance of scale invariance when transferring across proxy and target mod-els.Eliminating the safety reward primarily affects safety-aligned outcomes, with minimal impact on AA and FGT.It indicates that safety improvements are not an emergent artifact of improved replay al-location but require explicit optimization pressure. Similarly, collapsing the policy into static or loss-slope-based baselines reduces performance.This reflects the importance of maintaining full policy expressivity. The “unmasked future state” variant is intentionally invalid under the continual learning formulation, as it violates causality by condition-ing on future task information. We include it solely to explicitly delineate the information constraints under which the controller operates.                      
+
+> Variant AA ↑FGT ↓SS ↑
+> Full P ROXY MIX 66.9 8.6 85.8 no trend features 64.8 10.9 82.9 raw losses only 63.9 11.7 82.1 no safety reward 65.7 9.3 78.4 static policy average 63.2 12.9 79.0 loss-slope controller 63.1 12.8 79.4
+> Table 6: Ablation study on LLaMA-3-8B. Variants re-move individual components of the replay controller to isolate the contribution of normalized trend signals, safety-aware rewards, and adaptive policy expressivity.
+
+When and Why Proxy Transfer Works The effectiveness of proxy-to-target transfer can be at-tributed to two complementary factors. First, the controller operates on normalized signals, as de-fined in Eq. 3, which removes absolute scale in-formation by subtracting a running mean and di-viding by a running standard deviation per task. As a result, systematic differences in loss magni-tude between proxy and target models are largely normalized out, leaving behind relative tempo-ral structure.Second, the remaining signal reflects interference-driven dynamics, which are partially stable across model scales. This is supported em-pirically by high gradient similarity between tasks across proxy and target models, with cosine sim-ilarity matrices of 0.79, 0.88, and 0.91 for the 160M–6.9B, 410M–6.9B, and 1.4B–8B pairs, re-spectively. These results demonstrate that task in-teraction geometry exhibits a degree of scale invari-ance, consistent with the forgetting-mirroring be-havior observed in Table 2. However, transfer is not universally reliable. Further analysis of when proxy transfer breaks down is provided in Appendix H, where we identify domain coverage limitations and scale-dependent interference effects as key failure modes. 
+
+9 Conclusion 
+
+PROXY MIX formulates continual instruction tun-ing as a dynamic replay-control problem and uses proxy-to-target transfer to make policy learning computationally tractable. The controller is delib-erately constrained, conditioning only on current and historical task signals and operating over a masked action space, while being optimized with a direction-sensitive reward that penalizes degrada-tion on previously learned tasks. Across five task sequences and three model families, PROXYMIX consistently outperforms fixed replay strategies, adaptive heuristics, InsCL, and static proxy-based 8mixtures, with particularly strong gains in safety-critical settings.The results indicate that proxy mod-els can support not only static mixture construction but also adaptive replay control under evolving con-tinual learning dynamics, while remaining bounded by the quality of proxy-target forgetting alignment. 
+
+Limitations 
+
+The method has several limitations that follow di-rectly from its design assumptions. It relies on validation streams that accurately reflect the behav-iors to be preserved; if the safety evaluation set fails to capture relevant attack modalities, the controller may allocate replay to suboptimal or incomplete coverage regions. Replay-based training further assumes access to historical task data through stor-age, regeneration, or distillation, which introduces practical constraints related to privacy, data gover-nance, and licensing that are not addressed by the framework. In addition, the policy is trained with a fixed maximum sequence length T , which restricts its ap-plicability to bounded task horizons. While shorter sequences can be accommodated via masking of unused entries, extending the approach to longer or variable-length task streams would require re-training or the introduction of hierarchical control structures. Finally, forgetting mirroring is an empir-ical property of a given task family and model pair rather than a guaranteed consequence of scale. Its validity may vary across architectures and domains, and therefore it must be empirically verified prior to deployment in new settings. We operationalize this requirement by reporting the corresponding diagnostic in Table 2 rather than treating it as an implicit assumption. 
+
+Ethics Statement 
+
+This work aims to reduce behavioral drift during sequential model updates. More efficient continual tuning lowers retraining cost, but replay policies can amplify biases present in stored data or vali-dation streams. Practitioners should audit replay allocations across demographic groups, topics, and safety categories, and they should evaluate safety replay jointly with benign compliance to avoid pre-serving safety metrics through blanket refusal. The decomposition reported in Appendix G is intended to make this kind of audit easier rather than to provide a single number that can be optimized in isolation. 
+
+References 
+
+Istabrak Abbes, Gopeshh Subbaraj, Matthew Riemer, Nizar Islah, Benjamin Therien, Tsuguchika Tabaru, Hiroaki Kingetsu, Sarath Chandar, and Irina Rish. 2025. Revisiting replay and gradient alignment for continual pre-training of large language models. 
+
+arXiv preprint arXiv:2508.01908 .Stella Biderman, Hailey Schoelkopf, Quentin Anthony, Herbie Bradley, Kyle O’Brien, Eric Hallahan, Mo-hammad Aflah Khan, Shivanshu Purohit, USVSN Sai Prashanth, Edward Raff, Aviya Skowron, Lintang Sutawika, and Oskar van der Wal. 2023. Pythia: A suite for analyzing large language models across training and scaling. In Proceedings of the 40th Inter-national Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research ,pages 2397–2430. PMLR. Arslan Chaudhry, Marcus Rohrbach, Mohamed Elho-seiny, Thalaiyasingam Ajanthan, Puneet K. Doka-nia, Philip H. S. Torr, and Marc’Aurelio Ranzato. 2019. On tiny episodic memories in continual learn-ing. arXiv preprint arXiv:1902.10486 .Lichang Chen, Shiyang Li, Jun Yan, Hai Wang, Kalpa Gunaratna, Vikas Yadav, Zheng Tang, Vijay Srini-vasan, Tianyi Zhou, Heng Huang, and Hongxia Jin. 2024. AlpaGasus: Training a better alpaca with fewer data. In The Twelfth International Conference on Learning Representations .Qianlong Du, Chengqing Zong, and Jiajun Zhang. 2023. MoDS: Model-oriented data selection for instruction tuning. arXiv preprint arXiv:2311.15653 .Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schel-ten, Alex Vaughan, Amy Yang, Angela Fan, Anirudh Goyal, Anthony Hartshorn, Aobo Yang, Archi Mi-tra, Archie Sravankumar, Artem Korenev, Arthur Hinsvark, and 542 others. 2024. The llama 3 herd of models. Preprint , arXiv:2407.21783. Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-sch, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guil-laume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. 2023. Mistral 7b. arXiv preprint arXiv:2310.06825 .James Kirkpatrick, Razvan Pascanu, Neil Rabinowitz, Joel Veness, Guillaume Desjardins, Andrei A. Rusu, Kieran Milan, John Quan, Tiago Ramalho, Ag-nieszka Grabska-Barwinska, Demis Hassabis, Clau-dia Clopath, Dharshan Kumaran, and Raia Hadsell. 2017. Overcoming catastrophic forgetting in neural networks. Proceedings of the National Academy of Sciences , 114(13):3521–3526. David Lopez-Paz and Marc’Aurelio Ranzato. 2017. Gradient episodic memory for continual learning. In 
+
+9Advances in Neural Information Processing Systems ,volume 30. Xiangyu Qi, Yi Zeng, Tinghao Xie, Pin-Yu Chen, Ruoxi Jia, Prateek Mittal, and Peter Henderson. 2024. Fine-tuning aligned language models compromises safety, even when users do not intend to! In The Twelfth In-ternational Conference on Learning Representations .Sylvestre-Alvise Rebuffi, Alexander Kolesnikov, Georg Sperl, and Christoph H. Lampert. 2017. iCaRL: In-cremental classifier and representation learning. In 
+
+Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 2001–2010. Andrei A. Rusu, Neil C. Rabinowitz, Guillaume Des-jardins, Hubert Soyer, James Kirkpatrick, Koray Kavukcuoglu, Razvan Pascanu, and Raia Hadsell. 2016. Progressive neural networks. arXiv preprint arXiv:1606.04671 .John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. 2017. Proxi-mal policy optimization algorithms. arXiv preprint arXiv:1707.06347 .Haizhou Shi, Zihao Xu, Hengyi Wang, Weiyi Qin, Wenyuan Wang, Yibin Wang, Zifeng Wang, Sayna Ebrahimi, and Hao Wang. 2025. Continual learning of large language models. ACM Computing Surveys .Xiao Wang, Tianze Chen, Qiming Ge, Han Xia, Rong Bao, Rui Zheng, Qi Zhang, Tao Gui, and Xuanjing Huang. 2023a. Orthogonal subspace learning for lan-guage model continual learning. In Findings of the Association for Computational Linguistics: EMNLP 2023 , pages 10658–10671, Singapore. Association for Computational Linguistics. Xiao Wang, Yuansen Zhang, Tianze Chen, Songyang Gao, Senjie Jin, Xianjun Yang, Zhiheng Xi, Rui Zheng, Yicheng Zou, Tao Gui, Qi Zhang, and Xu-anjing Huang. 2023b. TRACE: A comprehensive benchmark for continual learning in large language models. arXiv preprint arXiv:2310.06762 .Yifan Wang, Yafei Liu, Chufan Shi, Haoling Li, Chen Chen, Haonan Lu, and Yujiu Yang. 2024. InsCL: A data-efficient continual learning paradigm for fine-tuning large language models with instructions. In 
+
+Proceedings of the 2024 Conference of the North American Chapter of the Association for Computa-tional Linguistics: Human Language Technologies (Volume 1: Long Papers) , pages 663–677, Mexico City, Mexico. Association for Computational Lin-guistics. Mitchell Wortsman, Peter J. Liu, Lechao Xiao, Katie E. Everett, Alexander A. Alemi, Ben Adlam, John D. Co-Reyes, Izzeddin Gur, Abhishek Kumar, Roman Novak, Jeffrey Pennington, Jascha Sohl-Dickstein, Kelvin Xu, Jaehoon Lee, Justin Gilmer, and Simon Kornblith. 2024. Small-scale proxies for large-scale transformer training instabilities. In The Twelfth In-ternational Conference on Learning Representations .Sang Michael Xie, Hieu Pham, Xuanyi Dong, Nan Du, Hanxiao Liu, Yifeng Lu, Percy Liang, Quoc V. Le, Tengyu Ma, and Adams Wei Yu. 2023a. DoReMi: Optimizing data mixtures speeds up language model pretraining. In Advances in Neural Information Pro-cessing Systems , volume 36. Sang Michael Xie, Shibani Santurkar, Tengyu Ma, and Percy Liang. 2023b. Data selection for language models via importance resampling. In Advances in Neural Information Processing Systems , volume 36. Greg Yang, Edward J. Hu, Igor Babuschkin, Szymon Sidor, Xiaodong Liu, David Farhi, Nick Ryder, Jakub Pachocki, Weizhu Chen, and Jianfeng Gao. 2021. Tensor programs V: Tuning large neural networks via zero-shot hyperparameter transfer. In Advances in Neural Information Processing Systems , volume 34. Kailai Yang, Xiao Liu, Lei Ji, Hao Li, Xiao Liang, Zhi-wei Liu, Yeyun Gong, Peng Cheng, and Mao Yang. 2025. Data mixing agent: Learning to re-weight domains for continual pre-training. arXiv preprint arXiv:2507.15640 .Friedemann Zenke, Ben Poole, and Surya Ganguli. 2017. Continual learning through synaptic intel-ligence. In Proceedings of the 34th International Conference on Machine Learning , volume 70 of Pro-ceedings of Machine Learning Research , pages 3987– 3995. PMLR. Qiusi Zhan, Richard Fang, Rohan Bindu, Akul Gupta, Tatsunori Hashimoto, and Daniel Kang. 2024. Re-moving RLHF protections in GPT-4 via fine-tuning. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computa-tional Linguistics: Human Language Technologies (Volume 2: Short Papers) , pages 681–687, Mexico City, Mexico. Association for Computational Lin-guistics. Zihan Zhang, Meng Fang, Ling Chen, and Mohammad-Reza Namazi-Rad. 2023. CITB: A benchmark for continual instruction tuning. In Findings of the As-sociation for Computational Linguistics: EMNLP 2023 , pages 9443–9455, Singapore. Association for Computational Linguistics. 
+
+A Extended Related Work 
+
+Several parameter-efficient and replay-based meth-ods are closer to our setting. O-LoRA protects previous tasks by learning orthogonal low-rank sub-spaces (Wang et al., 2023a). InsCL dynamically replays previous instruction data according to task similarity computed from instructions, making it one of the most relevant dynamic replay baselines we compare to (Wang et al., 2024). Replay and gradient-alignment methods have also been revis-ited at LLM scale in continual pre-training, where small amounts of replay can stabilize learning un-der domain shifts (Abbes et al., 2025). P ROXY MIX 
+
+10 differs from all of these in a single decisive way: it learns the replay allocation policy on a proxy model and transfers the frozen controller to a larger target model, decoupling the cost of policy learning from the cost of target training. A second line of related work treats data mixture as something to be learned rather than fixed. DSIR, model-oriented data selection, and Alpagasus select or filter data before training (Xie et al., 2023b; Du et al., 2023; Chen et al., 2024). DoReMi is particularly close to our framing because it learns domain weights on a proxy model and transfers the resulting mix-ture to a larger model (Xie et al., 2023a). More recent learned reweighting work treats data mix-ing as a sequential decision problem in continual pre-training (Yang et al., 2025). In contrast, P ROX -
+
+> Y
+
+MIX operates over pre-training domains or trans-fers a static mixture, whereas our controller learns a dynamic replay policy for continual instruction tuning. The controller’s decision can change within a task as the model stabilizes or begins to forget, which a static mixture cannot express. The proxy stage in our framework rests on a small-to-large transferability claim, which has precedent in the literature. Yang et al. (2021) show that certain hyperparameters transfer predictably across scale, and Wortsman et al. (2024) suggest that some large-scale Transformer training phenom-ena can be reproduced and studied with smaller proxies. We adopt a more restricted assumption: normalized loss trends and task vulnerability rank-ings contain transferable information even when absolute losses and final accuracies differ. Ap-pendix B summarizes how P ROXY MIX sits relative to the closest comparisons along the dimensions of proxy use, dynamic adaptation, target setting, and safety treatment. 
+
+B Method Positioning Analysis 
+
+Table 7 situates P ROXY MIX against nearby meth-ods along four axes: whether a proxy model is used for policy learning, whether replay is dynamic, whether the setting is continual instruction tuning (CIT), and whether safety preservation is treated as an explicit objective. 
+
+C Full Proxy Training Algorithm 
+
+Algorithm 1 gives the proxy-training loop in full. Each PPO episode runs a complete continual-tuning trajectory on the proxy, and the policy and critic are updated between episodes from the accu-                                    
+
+> Method proxy dynamic CIT safety
+> Random replay no no yes no Proportional replay no yes yes indirect InsCL no yes yes indirect O-LoRA no no yes no DoReMi yes no no no Data Mixing Agent no yes no no Replay+GradAlign no yes no no PROXY MIX yes yes yes explicit
+
+Table 7: Positioning against nearby methods. The clos-est comparisons are dynamic replay methods such as InsCL, proxy-learned static mixtures such as DoReMi, and learned data-reweighting methods for continual pre-training. 
+
+mulated transitions. 
+
+Algorithm 1 Proxy training for P ROXY MIX 
+
+Require: proxy model, tasks T1, . . . , TT , policy 
+
+πϕ, interval δ 
+
+> 1:
+
+for episode = 1 , . . . , E do  
+
+> 2:
+
+Reset proxy to the base checkpoint  
+
+> 3:
+
+for stage k = 1 , . . . , T do  
+
+> 4:
+
+for gradient step t = 1 , . . . , N k do  
+
+> 5:
+
+if t mod δ = 0 then  
+
+> 6:
+
+Evaluate validation losses for tasks 
+
+1, . . . , k  
+
+> 7:
+
+Build masked state with Eq. 4  
+
+> 8:
+
+Compute mixture with Eq. 5  
+
+> 9:
+
+Compute reward with Eq. 6  
+
+> 10:
+
+Store transition for PPO  
+
+> 11:
+
+end if  
+
+> 12:
+
+Sample current/replay batch using the masked mixture  
+
+> 13:
+
+Update proxy LoRA parameters  
+
+> 14:
+
+end for  
+
+> 15:
+
+end for  
+
+> 16:
+
+Update policy and critic with PPO  
+
+> 17:
+
+end for  
+
+> 18:
+
+return trained policy πϕ
+
+D Forgetting-Rank Correlation Analysis 
+
+Figure 3 visualizes the same finding as Table 2 at the level of individual tasks. Each point is a task within a sequence; coordinates are the task’s forget-ting rank in the proxy (x-axis) and target (y-axis). Points clustering near the diagonal indicate that the proxy agrees with the target on which tasks are most vulnerable, and the few off-diagonal de-partures correspond to tasks where the two mod-els genuinely disagree about vulnerability rather than to noise. Figure 8 further shows that proxy– 11 target forgetting correlation remains consistently high across model scales, with narrow confidence intervals. 
+
+Figure 3: Forgetting-rank scatter for the Pythia-410M proxy and LLaMA-3-8B target. 
+
+E Proxy Scale and Efficiency Analysis 
+
+Table 8 reports how performance and cost scale with proxy size. The 410M proxy captures most of the achievable gain, and adding more proxy ca-pacity yields diminishing returns relative to the rising compute cost. The regime in which proxy training is economically attractive is therefore the small-proxy regime, which is consistent with the framework’s motivation. Figure 4 shows the performance–compute tradeoff across proxy sizes, illustrating that PROXYMIX with a 410M proxy captures most of the achievable gains at substan-tially lower cost than Oracle target-RL.                   
+
+> Proxy AA ↑FGT ↓cost rel.
+> Random replay 57.6 20.0 1.0 ×
+> Pythia-160M 63.8 11.7 1.6 ×
+> Pythia-410M 66.9 8.6 2.4 ×
+> Pythia-1.4B 67.5 7.8 5.9 ×
+> Oracle 8B RL 68.1 7.1 121 ×
+
+Table 8: Proxy-scale analysis on LLaMA-3-8B. Rel-ative cost includes policy learning and one target run, normalized to a single target run with random replay. 
+
+F Compute Cost Analysis 
+
+The practical case for proxy training rests on a simple cost comparison. Let Cp be the mea-sured cost of a proxy continual-tuning episode, Ct
+
+the measured cost of one target run, and E the number of PPO episodes. Proxy transfer costs 
+
+EC p + Ct + Ceval , while direct target RL costs 
+
+Figure 4: Scaling behavior of proxy-based controller training. Although larger proxy models yield incremen-tal gains in target performance, PROXYMIX with a 410M proxy captures most of the achievable improve-ment at a small fraction of Oracle target-RL compute. 
+
+approximately EC t + Ct + Ceval . The ratio be-tween them is roughly Cp/C t when policy learning dominates, which is the regime we operate in. In our measured cost accounting, a 410M proxy pol-icy costs 2.4 target-run equivalents, while direct target RL costs about 121 target-run equivalents. The factor of fifty makes proxy training attractive whenever a controller will be used for more than a single target update, and the cross-target trans-fer results in Table 5 support exactly this kind of amortization. Table 9 reports the cost breakdown in target-run equivalents so the comparison is repro-ducible across hardware.A detailed performance– compute tradeoff across replay strategies is shown in Figure 10, highlighting the efficiency advantage of PROXYMIX.                  
+
+> Component GPUs episodes eval interval rel. cost
+> Random target CIT 4 A100 050 steps 1.0 Proxy policy train 4 A100 200 50 steps 1.4 ProxyMix target run 4 A100 050 steps 1.0 Oracle target RL 4 A100 200 50 steps 121.0
+
+Table 9: Compute accounting reported in target-run equivalents. The release logs record wall-clock time, GPU-hours, token counts, and evaluation overhead for each component, so the comparison can be re-derived for different hardware. 
+
+G Extended Safety Evaluation 
+
+Safety evaluation is easy to measure in mislead-ing ways. A model can improve harmful-prompt refusal accuracy by refusing benign requests as well, and a replay policy that achieves a high safety score this way is not an acceptable alignment out-12 come.We therefore report a balanced safety score throughout the paper: 
+
+St = RefusalAcc harmf ul,t −γ OverRefusal benign,t ,
+
+(7) where γ controls the cost of excessive refusal. Ta-ble 4 reports both terms separately on the safety-critical sequence so the reader can verify that the gains do not come from blanket refusal. In deployment-oriented settings, this decomposition should be reported alongside standard task util-ity, because a replay policy that preserves refusals while damaging harmless compliance has shifted, rather than reduced, the model’s failure modes. A related concern is the choice of safety valida-tion stream. The controller can only protect behav-iors it can observe, so a validation set that misses an important attack style or refusal context will leave that behavior unprotected. Our safety stream com-bines direct harmful instructions, indirect requests for harmful information, role-play attempts, multi-turn jailbreak patterns, and a matched set of benign prompts that look superficially similar to harmful ones. A production deployment should audit the validation stream against the safety policy it intends to preserve and update both together. We treat this as standard alignment-engineering practice rather than as a method-specific recommendation. 
+
+H Extended Analysis of When and Why Proxy Transfer Works 
+
+The primary failure mode arises in domains where the proxy lacks sufficient representational coverage, particularly specialized medical and legal tasks. In such cases, the proxy fails to produce infor-mative loss trajectories, limiting the controller’s ability to infer meaningful replay priorities. A sec-ond limitation arises from scale-dependent interfer-ence effects: larger models may exhibit emergent cross-task interactions that are absent in smaller proxies, such as interactions between mathemat-ical reasoning and code generation.These obser-vations provide evidence that proxy-based control should be viewed as a strong but bounded approxi-mation.In regimes where proxy-target alignment is weak, performance can be improved via larger prox-ies, partial target-side calibration of the controller, or conservative fallback policies when uncertainty in trend signals increases. 
+
+> Figure 5: Per-sequence performance analysis of PROX-YMIX across five task-orderings on LLaMA-3-8B. Each cell reports the exact metric value, while color intensity indicates relative performance within each met-ric (with FGT inverted so darker shading consistently denotes better outcomes). PROXYMIX demonstrates stable behavior across diverse task sequences, achieving consistently strong average accuracy (AA), low forget-ting (FGT), and high safety retention (SS), indicating robustness to task-order variation.
+
+I Robustness Checks 
+
+Table 10 reports robustness checks under varia-tions in validation cadence, replay balancing, and adapter placement. The controller remains useful when validation becomes less frequent, when re-play buffers are balanced by examples instead of tokens, and when the target’s LoRA module set is widened to Q/K/V/O. The largest expected drop is under noisy validation, where the trend signal that the policy uses to anticipate forgetting becomes less reliable. This is consistent with the intended role of ∆˜ℓ(t) 
+
+> i
+
+in the state: when this signal is corrupted, the policy degrades toward reactive behavior, but it remains above the non-adaptive baselines.                 
+
+> Setting AA FGT
+> main setting 66.9 8.6 validation every 100 steps 65.8 9.5 validation every 200 steps 64.9 10.6 example-balanced replay 66.1 9.2 token-balanced replay 66.5 8.9 Q/K/V/O LoRA 67.2 8.4 noisy validation stream 64.4 11.2
+> Table 10: Robustness checks under varied validation budgets, replay balancing rules, and adapter placements.
+
+J Per-Sequence Results 
+
+Table 11 reports the final PROXYMIX results for each sequence. The macro-average matches the ag-gregate PROXYMIX row in Table 3. Performance 13 Figure 6: Per-sequence average accuracy of PROX-YMIX under five different task orderings. The con-sistently strong performance across diverse sequence compositions demonstrates robustness to curriculum variation and suggests that the learned replay controller generalizes beyond a fixed task order. 
+
+is strongest on S1 and S5, where interference is driven primarily by related-domain transfer and representational overlap. S2 and S4 remain harder because retention depends more heavily on special-ized medical, legal, summarization, and QA-style domain knowledge. S3 exhibits strong safety re-tention despite substantial interference from subse-quent code, writing, and math updates.                 
+
+> Sequence AA ↑FGT ↓NTA ↑BWT ↑SS ↑
+> S1 70.1 ±0.5 6.3 ±0.4 71.9 ±0.5 -3.0 ±0.4 89.7 ±0.6 S2 63.4 ±0.7 10.4 ±0.6 69.1 ±0.6 -8.4 ±0.5 81.0 ±0.8 S3 67.9 ±0.5 10.3 ±0.4 70.7 ±0.4 -4.6 ±0.4 85.3 ±0.5 S4 62.3 ±0.6 9.8 ±0.5 68.0 ±0.5 -7.3 ±0.5 84.5 ±0.7 S5 70.8 ±0.4 6.2 ±0.3 72.3 ±0.4 -2.2 ±0.3 88.5 ±0.6
+
+Table 11: Per-sequence P ROXY MIX results on LLaMA-3-8B. 
+
+K Implementation and Reproducibility Details 
+
+The main experiments use the same task streams, replay buffers, and validation streams across meth-ods, so any observed differences can be attributed to the replay policy rather than to the data. Table 12 lists the task families and the metric family used for each, and the public release will include dataset ver-sions, filtering rules, prompt templates, and fixed train/validation/test indices for full reproducibility. We used AI-assisted tools for language editing and code-drafting support. All technical claims, experi-mental design, code, and results were checked by the authors. Cross-family transfer requires more careful ar-chitecture reporting than within-family experi-ments because loss dynamics can depend on to-            
+
+> Task family examples evaluation signal
+> Code Code-Alpaca, contests unit/exact-match style score Math MetaMath-style QA answer extraction accuracy Chat ShareGPT-style data instruction-following score Medical/Legal domain instructions exact or judged task score Writing/Summary/QA generation tasks task-specific automatic score Safety harmful/benign prompts balanced refusal/compliance
+
+Table 12: Dataset and evaluation protocol summary. The public artifact will include exact dataset revisions, filter-ing rules, prompt templates, answer extraction scripts, and fixed splits. 
+
+kenizer, positional encoding, attention layout, and adapter placement even when the controller only observes validation losses. Table 13 summarizes the information tracked for each model family used in the experiments; full logs additionally record tokenizer, context length, normalization, activation, tied embeddings, precision, trainable parameter count, and tensor-parallel configuration.          
+
+> Family use attention LoRA modules
+> Pythia proxy/target MHA Q,V LLaMA-3 target GQA/RoPE Q,V Mistral-7B target GQA/SWA Q,V
+
+Table 13: Architecture fields used for cross-target re-porting. 
+
+PPO hyperparameters exert a substantial influ-ence on controller behavior, as policy optimization remains highly sensitive to the induced action distri-bution and the normalization of reward signals. Ta-ble 14 summarizes the hyperparameter values held constant across both proxy training and Oracle Tar-get RL, except where explicitly varied in ablation studies, ensuring that the sole intentional difference between the two settings lies in the model on which rollouts are collected.              
+
+> Hyperparameter Value
+> PPO episodes 200 Decision interval δ50 gradient steps Policy/critic hidden size 256 PPO clip range 0.2 Discount γ0.99 GAE parameter 0.95 Entropy coefficient 0.01 Value-loss coefficient 0.5 Policy optimizer Adam Reward normalization rollout-level
+
+Table 14: Controller-training hyperparameters. Oracle Target RL uses the same policy and PPO settings but collects rollouts on the target model. 
+
+14 L Supplementary Figures 
+
+We provide supplementary figures illustrating con-troller design, per-sequence robustness, and proxy-scaling behavior. 15 Figure 7: Safety-critical continual learning performance across replay strategies. Bars report harmful-query refusal accuracy and benign-query compliance, while the dashed line indicates forgetting (FGT; lower is better). PROX-YMIX achieves the strongest overall balance, substantially improving harmful refusal rates and reducing forgetting relative to prior replay baselines while maintaining high benign-task compliance. Its performance approaches Oracle target-RL, demonstrating that proxy-optimized replay policies effectively enhance safety robustness under continual fine-tuning. 
+
+Figure 8: Proxy–target forgetting correlation across model scales, with points indicating mean Spearman correlation (ρ) and error bars denoting 95% confidence intervals. Consistently high correlations demonstrate that forgetting patterns learned on smaller proxy models transfer faithfully to larger target models, providing empirical justification for proxy-based replay policy optimization in PROXYMIX. 
+
+16 Figure 9: Multi-metric comparison across replay strategies, with each metric normalized to [0 , 1] for visual comparability (higher is better; FGT is inverted). Darker cells indicate stronger relative performance, and the highlighted PROXYMIX row shows consistently superior trade-offs across average accuracy, forgetting reduction, backward transfer, and safety stability. Results demonstrate that PROXYMIX achieves performance close to Oracle target-RL while substantially outperforming existing replay baselines. 
+
+Figure 10: Performance–compute tradeoff across replay strategies. Left: average accuracy (AA; higher is better). Right: relative compute cost on a logarithmic scale. PROXYMIX achieves near-oracle performance (66.9 vs. 68.1 AA) while requiring substantially less computation (2.4 × vs. 121 ×), demonstrating a favorable efficiency– performance balance. 
+
+17 Figure 11: Proxy–target transfer paradigm in P ROXY MIX . The replay controller is optimized with PPO in a proxy continual instruction tuning environment using masked state representations derived from normalized validation losses and temporal trends. The learned policy is then frozen and transferred to the target model, where it performs inference-only replay selection over current and past task buffers without gradient updates or access to future tasks. 
+
+Figure 12: Controller decision pipeline in PROXYMIX. Validation losses are normalized and transformed into a masked fixed-dimensional state representation, which is processed by a PPO-based controller to generate replay mixture weights. The reward function jointly balances current-task progress and forgetting mitigation across previously learned tasks. 
+
+18
