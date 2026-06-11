@@ -1,0 +1,1039 @@
+Title: When is Your LLM Steerable?
+
+URL Source: https://arxiv.org/pdf/2606.11599v1
+
+Published Time: Thu, 11 Jun 2026 00:33:00 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# When is Your LLM Steerable? 
+
+Chenrui Fan 1, Yize Cheng 1, Ming Li 1,2, Soheil Feizi 1, Tianyi Zhou 21University of Maryland, College Park 2MBZUAI, UAE 
+
+{cfan42, yzcheng, minglii, sfeizi}@umd.edu, tianyi.zhou@mbzuai.ac.ae 
+
+§ Project: https://github.com/Fcr09/SteerBoost 
+
+Abstract 
+
+Activation steering offers a lightweight approach to control language models’ be-havior at inference time, but whether it succeeds or fails heavily depends on the prompt, concept, model, and steering configuration. Finding the regime and bound-aries of successful steering typically requires expensive grid searches and post-hoc evaluation of full autoregressive rollouts. In this work, we investigate whether 
+
+steerability can be predicted from the model’s internal states at the beginning of the generation process, e.g., after generating the first few tokens, and how to leverage such a predictor to improve steering success rate. To this end, we first introduce ASTEER, a testbed including 1.4M steered generations, spanning 150 concepts with each steering success/failure labeled. Leveraging this testbed, we analyze the model’s early decoding dynamics by extracting features that compare hidden states before and after steering across layers and initial decoding steps. These features help us understand how steering’s effects propagate along layers and token positions, which provide key information for steerability prediction. We then train a Gradient Boosting Decision Trees (GBDT) classifier on these features to predict whether an intervention will under-steer, succeed, or over-steer without requiring full rollout. Our predictor achieves around 0.7 macro-F1 score on unseen concepts, demonstrating that early hidden states encode substantial, structured information about eventual steering efficacy. We further leverage this steerabil-ity predictor as guidance for steering strength searching, achieving near optimal performance with a small fraction of decoding cost. 
+
+1 Introduction 
+
+Inference-time activation engineering, or steering , offers a lightweight approach to control the behavior of large language models (LLMs) without additional finetuning [ 17 , 11 , 21 , 16 ]. By injecting a carefully constructed direction into the model’s hidden states during inference, one can bias generation towards a target concept or behavior. Prior work has shown that such interventions can influence a range of important properties, including truthfulness [ 11 ], refusal behavior [ 2, 14 , 10 ], multi-dimensional trustworthiness [ 23 ], and latent social biases [ 12 ]. These results suggest that steering is a promising technique for fast, flexible control of model behavior. While most works focus on developing more effective steering strategies, the boundaries of steerable regimes for different LLMs in the joint space of concepts, prompts, and steering strengths remain underexplored. The same intervention can work well for one prompt or one concept but fail for another, and the appropriate steering strength often varies substantially across concepts and prompts [ 22 , 7 , 29 ]. As a result, existing practice often relies on expensive grid search over steering coefficients using post-hoc, full autoregressive rollouts to identify a successful intervention. More importantly, this brittleness raises questions that are still poorly understood: when would a steering attempt succeed, and under what conditions would it fail? Moreover, is steerability a structured property that can be predicted before decoding is completed? 
+
+> Preprint.
+> arXiv:2606.11599v1 [cs.CL] 10 Jun 2026
+
+A parallel line of work provides a natural route for studying this question. Recent research has shown that hidden states early in generation already contain predictive signals about later model behavior, including hallucination [ 8, 1], harmfulness [ 4 , 24 ], and answer correctness [ 25 , 26 ]. This connection is especially compelling for steering because both the intervention and the prediction target are grounded in the same representational space: steering acts directly on hidden states, and prior work suggests that those hidden states already encode rich information about future results. If the efficacy of an intervention depends on latent conditions in the model’s internal states, then those conditions may be detectable from the early decoding trajectory before the full response is generated. Prompt LLM     
+
+> Concept Steering Method
+> LLM Judge
+> Full Rollout
+> SteerBoost
+> x Steering strength
+> Hidden States of
+> First K Tokens
+> Costly Efficient
+> Steering Efficacy? [Under, Succ , Over]
+> Ours
+
+Figure 1: Conventional approach re-quires costly full rollout and LLM judge to decide whether a steering attempt suc-ceeds or not. We propose that the out-come can be efficiently predicted from the hidden states of the first few tokens, as illustrated in the green path. Motivated by these observations, we aim to predict the efficacy of steering from the hidden states of the initial decoding process. Specifically, given a prompt, concept, and steering configuration, can the first few decoded tokens’ states imply whether this steering attempt will succeed, without decoding the full response? To this end, we first construct a steerability dataset spanning 150 concepts, with 1.4M steered generations labeled for steer-ing efficacy. By comparing the model’s early hidden states before and after steering across multiple layers and decod-ing positions, we extract principal features about steering geometry, decoding dynamics, and steering condition to characterize how the steering signal propagates in network, which are later used to train a gradient boosting decision tree (GBDT) that can predict steering efficacy at macro-F1 around 0.7 on unseen concepts. This framing is useful not only for understanding steer-ability as a property of the model, the prompt, and the intervention, but also for supporting downstream applica-tions. In particular, we show how steering prediction can be used to significantly reduce the cost of searching for effective steering strengths without exhaustive full-rollout and evaluation. 
+
+Main Contributions: 
+
+• We curate a dataset of steering that covers steered responses of multiple LLMs under different prompts, concepts, and steering strengths. It enables fine-grained analysis of the latent dynamics of steering in LLMs. • We developed features capturing the effects of steering on the latent dynamics, resulting in inter-pretable prediction of steering success and two types of failures. • By exploiting the generalization capability of the steerability predictor, we introduce a practical approach that can allocate the optimal steering configurations to improve the performance. 
+
+2 Steering and Steerability 
+
+Suppose we have a set of prompts P, where each prompt p ∈ P is a sequence of tokens p =(x1, . . . , x T ). During LLM inference without activation steering, for a given token step t, the hidden states are computed layer-by-layer for the entire sequence. Let h(i)1: t be the sequence of hidden states up to token t at the i-th layer, we have: 
+
+h(i)1: t = DecoderLayer i(h(i−1) 1: t ) for i ∈ { 1, . . . , N }. (1) Denote the set of target concepts as C, the set of scalar steering strengths as A. To steer the model towards a concept c ∈ C with strength α ∈ A and steering method S, we apply a steering vector 
+
+vS(c) (abbreviated as vc) at a specific layer Lsteer . The forward pass remains identical to the base LLM except at layer Lsteer . Let ˜h denote the steered hidden states, we have: 
+
+˜h(i)1: t = DecoderLayer i(˜h(i−1) 1: t ) for i̸ = Lsteer (2) 
+
+˜h(Lsteer )1: t = DecoderLayer Lsteer (˜h(Lsteer −1) 1: t ) + αvc (3) 2We denote the fully generated rollout of the steered model as yp,c,α :
+
+yp,c,α = LLM (p, α, vc). (4) Similarly as defined in Hedström et al. [7] , let Λ = {UNDER STEER , SUCC STEER , OVER STEER } be the discrete label space defining the outcome of a steering attempt. Specifically, a steering attempt is considered successful if the response coherently answers the prompt while incorporating the desired concept. The two failure modes include U NDER STEER and O VER STEER ; the former represents when the response does not incorporate the concept, and the latter represents when the model fails to coherently address the prompt. A judge model evaluates whether the generation satisfies both properties based on the concept c and rollout yp,c,α .However, generating the full rollout and invoking the judge are computationally expensive, making it costly to explore the large space of steering configurations. Our goal is to build a predictor that takes the hidden states from only the first few generated tokens of the steered model and predicts the steering outcome without computing the full rollout, as illustrated by the green path in Figure 1. To this end, we construct a large-scale dataset, ASTEER (Section 3), spanning diverse steering configurations. Our analysis (Section 3.4) reveals that steering outcomes are brittle across methods, models, prompts, concepts, and strengths, underscoring the need to understand when steering works. To facilitate this understanding, we then develop SteerBoost (Section 4), which takes these early hidden states as input and efficiently predicts steering outcomes, both helping us investigate when and why steering fails or succeeds, and also enabling practical applications such as efficient steerability characterization and accelerated hyperparameter search (Section 5). 
+
+3 ASTEER Dataset 
+
+To create a testbed for outcome prediction of Activation STEER ing, we create ASTEER, a dataset covering 150 concepts and 50 prompts, spanning 1.42M steered generations as in Figure 3. 
+
+3.1 Steering concepts and prompts 50 Prompts 3 LLMs     
+
+> 150 Concepts 2Steering methods
+> LLM
+> Judge
+> Full
+> Rollout
+> x 45 or 18 Steering strengths
+> Efficacy Label
+> [Under, Succ , Over]
+
+Figure 2: We construct ASTEER with 150 concepts, 50 prompts, and two steer-ing methods (i.e., DiffMean and Probe), with 45 and 18 steering strengths, respec-tively. Steering is applied on 3 LLMs, whose rollouts are annotated by an LLM judge to one of the labels in Table 2. We construct a set of 150 concepts spanning three abstrac-tion levels, low , mid , and high , designed to systematically vary the form and granularity of the targeted behaviors. Low-level concepts capture surface-form and formatting properties, which are typically localized and directly ob-servable in token space. Mid-level concepts represent discourse-level behaviors, while high-level concepts in-volve persona, topic, and global response framing, which are more abstract. Table 1 shows some examples of con-cepts at different levels. The concept list is in Appendix J. We sample 50 prompts from the Alpaca [ 18 ] dataset for our study and keep them the same for all concepts as a controlled setting for steerability comparison. The list of prompts is shown in Appendix K. Although AxBench [ 22 ] also has a concept list for activation steering evaluation, sampled from Neuronpedia SAE concept list for GemmaScope, we do not adopt their list as we find their SAE-style concepts are not suitable for our setting. Many of their concepts are very specific, such as “names of individuals and their roles or contributions within a group or event context” and “terms related to multi-layer structures or systems”, bringing limitations to its generalization to a wider range of prompts. Table 1: The examples for different concept levels. Our concept list spans different abstraction levels, covering low-level output format restriction to high-level style and persona control. Level Count Example Concepts Low 50 response contains emojis; respond in uppercase; response contains bold emphasis Mid 50 asks at least one clarifying question; response contains an explicit warning High 50 responds in the persona of a caring peer; response mentions machine learning 33.2 Response annotation 
+
+Following the definition in Section 2, we use GPT-5-nano [ 15 ] to label each steered generation with one of the following labels, U NDER STEER , S UCC STEER , or O VER STEER , as exemplified in Table 2. The prompt we use to annotate the steered responses is shown in Appendix I. To further verify the consistency between human annotation and LLM-as-the-judge, extensive human evaluation is conducted. Three human annotators are assigned 600 randomly sampled steered generation (100 for each model-method pair) for evaluation. The Cohen’s κ is 0.74 between labels and the annotations of the SOTA model (GPT-5.5 [ 13 ]), and 0.83 between labels and human annotation, indicating substantial agreement, validating the quality of auto-annotation. Table 2: Example of labels in ASTEER dataset. Label Example [Prompt: What is machine learning? Concept: Response contains Emojis] UNDER STEER Machine learning is a subset of Artificial Intelligence, . . . SUCC STEER Machine learning is a subset of Artificial Intelligence , . . . OVER STEER 
+
+3.3 Steering methods DiffMean. The DiffMean (Difference of Means) [ 21 ] method is a commonly used lightweight activation steering technique. It derives a steering vector v from the difference between the average hidden states of the model processing positive output samples (which exhibit the concept) and negative output samples (which lack or oppose it). Mathematically, let h(y) denote the LLM’s hidden state at a chosen layer corresponding to a text sample y. Given a set of N positive samples y+ and 
+
+M negative samples y−, the DiffMean steering vector is defined as: 
+
+v = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+h(y+ 
+
+> i
+
+) − 1
+
+M
+
+> M
+
+X
+
+> j=1
+
+h(y− 
+
+> j
+
+). (5) 
+
+Probe. Instead of calculating a simple difference of averages, this technique trains a supervised linear classifier to explicitly distinguish between the hidden states of positive samples, h(y+), and negative samples, h(y−). By optimizing the Binary Cross-Entropy (BCE) loss over a combined dataset of K = N + M samples, the steering vector v is defined as the optimal weight vector w that best separates the concepts. Mathematically, letting ck ∈ { 0, 1} represent the binary label for the 
+
+k-th sample yk, the steering vector is extracted as: 
+
+v = arg min  
+
+> w
+
+− 1
+
+K
+
+> K
+
+X
+
+> k=1
+
+ck log σ(w⊤h(yk)) + (1 − ck) log(1 − σ(w⊤h(yk))) !
+
+(6) For both methods, we follow the setting in Wu et al. [22] to synthetically generate 50 positive samples and 50 negative samples to acquire the steering vector v. During inference, the learned vector v is scaled by a strength α and added to the model’s hidden states at each generation step ( h(ynew ) + αv). 
+
+3.4 Steerability Analysis 
+
+We steer Qwen3-1.7B [ 20 ], Gemma-2-2B-it [ 19 ], and LLaMA-3.2-3B-Instruct [ 6] across all 150 concepts and 50 prompts with varying steering strengths. Figure 3 shows the resulting label distribu-tions as a function of α. Since some prompt-concept pairs already elicit the target concept without any intervention (e.g., steering toward a formal, academic tone when the prompt asks to summarize an academic paper), and the judge already labels the unsteered output ( α=0 ) as S UCC STEER . We exclude such pairs to ensures that observed successes at α> 0 reflect genuine effects of activation steering rather than pre-existing alignment between the prompt and the concept. 40 1.6 3.2 4.8 6.4 8                                                          
+
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 040 80 120 160 01.6 3.2 4.8 6.4 8
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 040 80 120 160 01.6 3.2 4.8 6.4 8
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> 01234
+> 0
+> 1
+> 0
+> 1
+> 0
+> 1
+> 0
+> 1
+> 0
+> 1
+> 0
+> 1
+> Overall Concept Prompt  c=0 c=43 c=88 c=0 c=43 c=88 c=0 c=43 c=88 c=0 c=43 c=88 c=0 c=43 c=88 c=0 c=43 c=88
+> p=0 p=8 p=41 p=0 p=8 p=41 p=0 p=8 p=41 p=0 p=8 p=41 p=0 p=8 p=41 p=0 p=8 p=41
+
+Qwen3-1.7B   
+
+> DiffMean Probe
+
+Gemma-2-2B-it   
+
+> DiffMean Probe
+
+LLaMA-3.2-3B-Instruct    
+
+> DiffMean Probe
+> UnderSteer SuccSteer OverSteer
+
+Figure 3: Distribution of steering outcomes (U NDER STEER , S UCC STEER , O VER STEER ) as a function of steering strength α. The first row aggregates over all concepts and prompts; the second and third rows show results on individual concepts and prompts, respectively. The concepts and prompts to the ids (c=0, 43, 88; p=0, 8, 41) are in Appendix J and Appendix K. Steering outcome is sensitive to α, and the effective range varies substantially across concepts, prompts, and methods. Table 3: Steering success rate by concept abstraction level.                                 
+
+> Model Method Overall Low-level Mid-level High-level
+> Qwen3-1.7B DiffMean 18.67 10.32 24.05 23.11 Probe 10.69 6.88 13.15 12.71 Gemma-2-2B-it DiffMean 22.17 12.21 29.66 27.00 Probe 23.18 14.72 29.83 26.79 LLaMA-3.2-3B-Instruct DiffMean 16.08 9.15 20.58 19.54 Probe 18.41 10.37 24.51 21.75
+
+Steerability under Different Steer-ing Strengths. Across all mod-els and steering methods, a consis-tent pattern emerges as α increases: the proportion of U NDER STEER de-creases monotonically, O VER STEER 
+
+increases monotonically, and the SUCC STEER rate first rises and then declines, forming a characteristic inverted-U curve. The aggregated view (first row of Figure 3) reveals that the success rate remains low throughout the α range, also shown in the overall column of Table 3. 
+
+Steerability under Different Concepts and Prompts. Beyond the shared trend, the way steering outcomes respond to changes in α varies drastically across conditions. As shown in the second and third rows of Figure 3, different concepts exhibit qualitatively different sensitivity profiles: some transition sharply from U NDER STEER to O VER STEER within a small α range, while others shift gradually and admit a broader effective region. The location of the success window, its width, and the rate at which the label distribution changes with α all differ substantially from one concept to another. Prompts also introduce variation, but to a lesser degree. 
+
+Steerability of Different Models and Methods. The effective range of α also varies across steering methods and models. On Qwen3-1.7B and Gemma-2-2B-it, Probe-based steering requires roughly 
+
+20 × larger α values than DiffMean to achieve comparable effects, indicating markedly different sensitivities between the two methods. Furthermore, the α range required by the Probe method on LLaMA-3.2-3B-Instruct is over 20 × smaller than on the other two models, highlighting significant inter-model variation even within a single steering approach. 
+
+Steerability at Different Concept Abstraction-Levels. Table 3 reports steering success rates stratified by concept abstraction level. Across both models and methods, low-level concepts (e.g., emoji usage, punctuation style) consistently yield substantially lower success rates than mid- and high-level concepts. Mid-level concepts, in turn, tend to be slightly more amenable to steering than high-level ones. This hierarchy suggests that surface-level textual attributes are less effectively captured and manipulated by linear steering vectors than more abstract, semantically richer concepts. 
+
+4 SteerBoost: Predicting Steerability from Early Decoding States 
+
+Despite the heterogeneous steering patterns observed in Section 3.4, we hypothesize that common features exist in the model’s internal states that can determine the outcome of steering during 5𝑥 ! …                                
+
+> 𝑦 !𝑥 "…
+> 𝑦 #𝑦 !…
+> 𝑦 $𝑦 #…
+> 𝑦 !"#…
+> …
+> …
+> …
+> …
+> …
+> …
+> Prompt
+> …
+> Steered Generation
+> K Step Decoding with Steering Vector 𝐯 𝒄
+> …………
+> 𝑥 !…
+> 𝑥 "…
+> 𝑦 !…
+> 𝑦 #…
+> 𝑦 %…
+> …
+> …
+> …
+> …
+> …
+> …
+> …
+> …………
+> 𝐿 &'(()
+> One Forward Pass with No Steering
+> …
+> 𝑦 "* How does 𝒉 %differ from 𝒉 ?
+> Steering
+> Vector 𝐯 𝒄
+> How does 𝒉 %align with 𝐯 𝒄 ?
+> Label={ UnderSteer ,SuccSteer ,OverSteer }
+> Steering condition GBDT
+> Predict
+> 𝐿 &'(()
+> …………………………
+> 𝑦 %
+> 𝛼 x
+> 𝛼 ,|𝐯 ,|
+> How does the change
+> align with 𝐯 𝒄 ?
+
+Figure 4: The overview of SteerBoost. Given a prompt, we first decode k tokens with the steering vector applied at layer Lsteer (left), then run a single unsteered forward pass over the same token sequence (right). For each (token, layer) position on the sampled grid, we extract features as in Table 4 to capture how the steering effect propagate in the model. These features, together with steering condition features are fed into an ensemble classifier that predicts the intervention result without requiring the full autoregressive rollout. generation, as the influence of the steering vector propagates across layers and token positions. If well identified and leveraged, such influence propagation patterns can also generalize to unseen concepts and prompts. To capture this effect, instead of relying on hidden states from a single layer and token position as previous early-prediction methods did [ 25 , 26 , 8], we build our prediction model on a grid of (token, layer) pairs and on the comparison between steered and unsteered hidden states (Figure 4). 
+
+Feature Extraction. Let vc denote the steering vector applied at layer Lsteer with strength α. In the steered pass , we add α vc to the residual stream at layer Lsteer and autoregressively decode the first k tokens y1, . . . , y k, collecting the steered hidden states ˜hlt for each decoded position t and layer l. In the unsteered pass , we prefill the concatenated sequence (x1, . . . , x T , y 1, . . . , y k) into the model without the steering vector in a single forward pass to obtain the unsteered hidden states hlt.Because both passes process the same token sequence, any difference between ˜hlt and hlt is directly attributable to the steering intervention, providing a controlled basis for comparison. We construct three groups of features from vc, ˜hlt, and hlt (Detailed in Appendix B). Steering geometry features measure how the steered representation relates to the steering direction and its unsteered counterpart at each (t, l ) pair. Decoding dynamics features track how these geometric quantities evolve across successive tokens, capturing the temporal propagation of the intervention. 
+
+Steering condition features characterize the steering vector itself. For the first two groups, which are computed per (t, l ) pair, we additionally aggregate summary statistics (mean, standard deviation, max, min) globally, per token across layers, and per layer across tokens. Rather than using a dense grid, we sample t ∈ { 1, 2, 4, 6} and n ∈ { 0, 1, 2, 3, 5, 10 , 15 }, where the offset n = l − Lsteer , balancing coverage of early and late layer against computational cost. 
+
+Steerability Classification by GBDT. After extracting features from the sampled grid, we normal-ize each feature and train an ensemble classifier [ 5 ] to predict the outcome of steering, detailed in Appendix E. We choose tree-based ensemble classifier for three reasons. First, it is a strong default learner for tabular data with heterogeneous feature types (cosine similarities, norms, ratios, and their summary statistics). Second, built-in feature-importance scores facilitate interpretability of which geometric and dynamic signals are most predictive. Third, training and inference is lightweight and computationally efficient. We hold out part of the concepts from training and further do train-test split based on prompt. This allows us to test the generalization ability of our predictor on both unseen prompt-concept combinations for In-distribution (ID) concepts and unseen Out-of-distribution (OOD) concepts. More details are in Appendix E. 6Qwen3-1.7B Gemma-2-2B-IT LLaMA-3.2-3B                                                            
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Macro-F1 Score
+> 0.80 0.81 0.80
+> 0.70 0.69 0.72 0.74 0.70 0.68 0.69 0.66 0.65
+> DiffMean ID
+> DiffMean OOD
+> Probe ID
+> Probe OOD USO
+> U
+> S
+> O
+> DiffMean
+> True
+> 69% 24% 7%
+> 23% 66% 11%
+> 4% 7% 90%
+> Qwen3-1.7B
+> USO
+> U
+> S
+> O
+> 74% 20% 6%
+> 20% 67% 13%
+> 2% 8% 90%
+> Gemma-2-2B-IT
+> USO
+> U
+> S
+> O
+> 77% 16% 7%
+> 29% 60% 11%
+> 2% 6% 92%
+> LLaMA-3.2-3B
+> USO
+> Predicted
+> U
+> S
+> O
+> Probe
+> True
+> 68% 20% 12%
+> 36% 54% 10%
+> 3% 4% 93%
+> USO
+> Predicted
+> U
+> S
+> O
+> 76% 15% 10%
+> 33% 51% 16%
+> 4% 9% 87%
+> USO
+> Predicted
+> U
+> S
+> O
+> 69% 21% 10%
+> 37% 48% 15%
+> 4% 8% 88% 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Row-Normalized Rate
+> U: UnderSteer S: SuccSteer O: OverSteer
+
+Figure 5: Steerability prediction (classification) performance of SteerBoost. Left: macro-F1 on ID and OOD concepts. The mean and std are reported with runs of 5 random seeds. DiffMean features consistently achieve ∼0.80 macro-F1 on ID concepts and retain ∼0.72 on OOD concepts. Right: row-normalized confusion matrices aggregated over ID test and OOD splits. O VER STEER 
+
+is predicted most reliably ( ≥87% recall), while S UCC STEER is most often confused with U NDER -STEER , reflecting the inherent difficulty of distinguishing borderline steering outcomes from internal representations alone. 
+
+Classification results. Figure 5 reports the macro-F1 scores and row-normalized confusion matrices of SteerBoost. On held-out prompt–concept pairs for ID concepts, the results on DiffMean are stronger: macro-F1 reaches around 0.8 on all of the models. The high macro-F1 indicates that the predictor reliably identifies all three outcome classes, not just the majority one. On the 30 held-out OOD concepts, DiffMean macro-F1 decreases moderately, showing that the captured patterns are transferable to unseen concepts. Probe-based steering proves harder to predict: ID macro-F1 ranges from 0.68 to 0.74, with OOD scores between 0.65 and 0.69. The confusion matrices (right panel of Figure 5) reveal a consistent error pattern across all models and methods. O VER STEER is the easiest class to identify, with recall between 87% and 93%, likely because excessive steering produces distinctively distorted activation patterns. U NDER STEER is also well recognized (68%–77% recall). S UCC STEER is the most challenging class. The dominant confusion direction is S UCC STEER being misclassified as U NDER STEER (20%–37%), which is expected given that the boundary between insufficient and just-sufficient steering effect is sometimes subtle in the activation space. 
+
+Feature Importance. To understand which signals drive SteerBoost’s predictions, we examine the gain-based feature importance from the ensemble classifier and aggregate it along token position t,layer offset n, and feature group in Figure 6. Importance scores are summed within each axis and row-normalized. The results of probe-based steering are reported in Appendix H. Across all three models, the first two decoded tokens account for over 75% of the importance mass, which supports our hypothesis that the outcome of steering can be predicted from a very short initial decoding window. In contrast, importance along the layer axis is distributed relatively evenly across both shallow and deep offsets, with no single layer dominating. This validates our choice of sampling a grid of layers rather than probing a single position as in prior early-prediction methods, and suggests that steering leaves detectable traces throughout the decoding pass. 
+
+DeviationAlignment (DA) and SteeringAffinity (SA) jointly carry the bulk of the predictive mass on all models, indicating that the direction in which the residual stream shifts, rather than how far (DN) or how much of its original direction it preserves (DS), is the primary determinant of the steering outcome. The decoding-dynamics features (DRA, DSH, ADR) contribute smaller but non-negligible shares, suggesting that the models are using temporal evolution features to aid prediction. 
+
+> 2
+
+VectorNorm (V) and SteeringStrength (S) appear small in Figure 6 because the sum-aggregation view of importance compares a single-feature group against groups that span the across grid. The mean-aggregation view is in Appendix H. 
+
+71 2 4 6                                                                 
+
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.61 0.15 0.10 0.14
+> 0.15 0.66 0.10 0.09
+> 0.58 0.21 0.11 0.11
+> Token
+> 0123510 15
+> 0.17 0.12 0.15 0.23 0.11 0.10 0.13
+> 0.08 0.23 0.09 0.12 0.12 0.16 0.21
+> 0.26 0.09 0.11 0.12 0.10 0.10 0.23
+> Layer
+> SA DN DS DA DRA DSH ADR VS
+> Feature Group
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.23 0.09 0.09 0.40 0.06 0.06 0.05 3.9e-03 6.5e-03
+> 0.16 0.10 0.09 0.51 0.05 0.05 0.04 3.1e-03 5.4e-03
+> 0.36 0.07 0.07 0.37 0.05 0.05 0.04 1.9e-03 7.5e-03
+> 0.00
+> 0.25
+> 0.50
+> 0.75
+> 1.00
+> Row-normalized importance
+
+Figure 6: Gain-based feature importance of SteerBoost on DiffMean, aggregated by token, layer, and feature group. Scores are summed within each categories and row-normalized. Predictive mass concentrates on the earliest decoded tokens and on alignment-based geometry features (SA, DA), while remaining broadly distributed across layers. 2 See Table 4 for feature abbreviations. DiffMean Probe      
+
+> DiffMean
+> Probe
+> Source method
+> 0.75 0.66
+> 0.67 0.71
+> ID
+> DiffMean Probe
+> 0.72 0.67
+> 0.66 0.69
+> OOD
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> Macro-F1
+> Target method
+
+Figure 7: Cross-method transfer-ability of SteerBoost on Qwen3-1.7B. Each cell reports macro-F1 when trained on the source method and test on the target method. 
+
+Cross-method transferability. To demonstrate the transfer-ability of SteerBoost across steering method, we drop the Steer-ing Condition feature group, which is closely correlated to the steering method, retrain the GBDT, and evaluate it on different steering method for Qwen3-1.7B model. Figure 7 shows that the predictor retains non-trivial performance even when trained on one steering method and evaluated on the other, suggest-ing that the hidden-state propagation features capture steering signatures that generalize not only across concepts, but also partially across different steering methods. The ablation study is in Appendix C and an alternative approach is in Appendix D. 
+
+5 Application: How Strong do You need to Steer Your LLM? 
+
+Most current research relies on an expensive grid search to identify the best strength for a given concept. We show that SteerBoost can accelerate this search at substantially lower cost. 
+
+Formulation. For a prompt-concept pair (p, c ) and raw steering vector vc, a search algorithm f
+
+returns an ordered set f (p, c, vc) ⊆ A of candidate steering strengths. The search succeeds if any 
+
+α ∈ f (p, c, vc) yields a successful steering. We define the average successful searching rate as: 
+
+R(f ) = 1
+
+|C||P| 
+
+X
+
+> c∈C
+
+X
+
+> p∈P
+
+I
+
+
+
+∃ α ∈ f (p, c, vc) : J(c, yp,c,α ) = SUCC STEER 
+
+
+
+, (7) where I(·) is the indicator function. This rate is upper-bounded by the item-level grid search that exhaustively evaluates every α ∈ A for every (p, c, vc) in the test set. A good search function should maintain high R(f ) while reducing search cost from model rollouts and judge-model calls. 
+
+Baselines. We compare against several grid-search variants that span the cost–quality spectrum. • Concept-level Grid Search (Oracle) [CGS] : Roll out all α ∈ A on the test set and adopt a single uniform α per concept based on average performance. This mirrors the common practice of tuning one strength per concept and pays the full rollout cost. • Item-level Grid Search [IGS] : Roll out all α ∈ A and keep the best α for each (p, c ) pair. This is the upper bound of R(f ) at maximum cost. • Item-level Grid Search with Early Stop (Ascending/Descending) [IGS-A/IGS-D] : Same as IGS, but stops on a sample once a valid α is found, searching in ascending / descending α order. • Training-set Concept-level Grid Search [TCGS] : Transfer the α that works best for the same concept on the training set. Matches SteerBoost’s access to training data, but not applicable in the OOD setting as it cannot generalize to unseen concepts. 80 10000 20000 30000 40000 50000      
+
+> Avg Decoded Tokens per Prompt
+> 50
+> 60
+> 70
+> 80
+> 90
+> Success Rate (%)
+> In-Distribution
+> Ours K=5
+> Ours K=10
+> Ours K=15
+> Ours K=20
+> TCGS
+> CGS
+> IGS
+> IGS-A
+> IGS-D
+> 010000 20000 30000 40000 50000
+> Avg Decoded Tokens per Prompt
+> 50
+> 60
+> 70
+> 80
+> 90
+> Success Rate (%)
+> OOD
+> Ours K=5
+> Ours K=10
+> Ours K=15
+> Ours K=20
+> CGS
+> IGS
+> IGS-A
+> IGS-D
+
+Figure 8: Cost–success trade-off for steering-strength search on DiffMean steering. SteerBoost-guided search achieves better trade-off than current baselines and, at K=20 , recovers ∼98% of the item-level oracle’s success rate using only ∼11% decoded tokens of IGS, ( ∼40% of decoded tokens of IGS-A). The same trends hold in ID and OOD, indicating that it transfers well to unseen concepts. 
+
+SteerBoost-guided search. We apply the SteerBoost predictor to every α ∈ A to estimate 
+
+P (SUCC STEER | p, c, α ), rank the candidates in descending order of this probability, roll out the top-K, and stop as soon as a valid α is found. Because SteerBoost relies on short early-decoding traces rather than full rollouts, these probabilities are cheap to obtain relative to a full generation. 
+
+Results. Figure 8 plots search success rate against the average number of decoded tokens per prompt. Decoded tokens are a fair proxy for total search cost: for full-rollout baselines they also approximate the judge model’s input-token cost; for SteerBoost they cover both the short early-decoding traces used by the predictor across all candidate α and the full rollouts for the selected candidates. At 
+
+K=15 –20 , the performance of SteerBoost-guided search approaches the item-level upper bound at roughly half the cost of IGS-A. It achieves a significantly higher success rate than TCGS, which also has access to the training set. The OOD performance only degrades slightly from ID concepts, indicating that the gains come from a transferable ranking of α candidates. 
+
+6 Related Work 
+
+Activation steering modifies model behavior at inference time by injecting concept vectors into the residual stream. Prior work has shown that such vectors can be extracted from latent representa-tions [ 17 ], used to elicit truthful answers [ 11 ], and formalized through representation engineering and activation addition [ 30 , 21 ]. Subsequent methods improve or generalize these interventions through mean-centering, activation scaling, and concept-subspace modeling [ 9, 16 , 28 ]. However, activation steering remains sensitive to the chosen intervention strength; several studies report that a static coefficient can under- or over-steer across inputs [ 3, 7, 29 ]. This motivates our goal of predicting whether a steering attempt will succeed before paying the cost of full decoding. Our work is also related to early prediction from model internals. Hidden states have been used to predict future answer correctness [ 25 , 26 ], hallucination risk [ 8 , 1], and unsafe generations [ 4, 24 , 27 ]. We extend this line of work from predicting output attributes such as correctness and truthfulness to predicting steerability : whether an activation intervention will yield the desired behavioral change successfully. A more detailed discussion of related work is in Appendix A. 
+
+7 Conclusion 
+
+In this work, we study steerability as a structured property that can be predicted from a model’s hidden states during the initial decoding steps. To enable fine-grained analysis of latent steering dynamics, we construct ASTEER, a large-scale testbed of 1.4M labeled steered generations spanning 150 concepts. Using this testbed, we develop SteerBoost, a GBDT classifier built on features that characterize how steering effects propagate across layers and token positions, which predicts steering efficacy at around 0.7 macro-F1 on unseen concepts without requiring full autoregressive rollout. Leveraging SteerBoost as guidance for steering-strength search, we attain near-optimal performance at a small fraction of the decoding cost, suggesting that early hidden-state trajectories encode substantial information about the eventual efficacy of an intervention. 9References 
+
+[1] Deema Alnuhait, Neeraja Kirtane, Muhammad Khalifa, and Hao Peng. Factcheckmate: Pre-emptively detecting and mitigating hallucinations in lms, 2025. URL https://arxiv.org/ abs/2410.02899 .[2] Andy Arditi, Oscar Obeso, Aaquib Syed, Daniel Paleka, Nina Panickssery, Wes Gurnee, and Neel Nanda. Refusal in language models is mediated by a single direction, 2024. URL 
+
+https://arxiv.org/abs/2406.11717 .[3] Seyedarmin Azizi, Erfan Baghaei Potraghloo, and Massoud Pedram. Activation steering for chain-of-thought compression, 2025. URL https://arxiv.org/abs/2507.04742 .[4] Yik Siu Chan, Zheng-Xin Yong, and Stephen H. Bach. Can we predict alignment before models finish thinking? towards monitoring misaligned reasoning models, 2025. URL https: //arxiv.org/abs/2507.12428 .[5] Tianqi Chen and Carlos Guestrin. Xgboost: A scalable tree boosting system. In Proceedings of the 22nd ACM SIGKDD International Conference on Knowledge Discovery and Data Mining , KDD ’16, page 785–794. ACM, August 2016. doi: 10.1145/2939672.2939785. URL 
+
+http://dx.doi.org/10.1145/2939672.2939785 .[6] Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Alex Vaughan, Amy Yang, Angela Fan, and et.al. The llama 3 herd of models, 2024. URL https://arxiv.org/abs/ 2407.21783 .[7] Anna Hedström, Salim I. Amoukou, Tom Bewley, Saumitra Mishra, and Manuela Veloso. To steer or not to steer? mechanistic error reduction with abstention for language models, 2025. URL https://arxiv.org/abs/2510.13290 .[8] Ziwei Ji, Delong Chen, Etsuko Ishii, Samuel Cahyawijaya, Yejin Bang, Bryan Wilie, and Pascale Fung. LLM internal states reveal hallucination risk faced with a query. In Yonatan Belinkov, Najoung Kim, Jaap Jumelet, Hosein Mohebbi, Aaron Mueller, and Hanjie Chen, editors, 
+
+Proceedings of the 7th BlackboxNLP Workshop: Analyzing and Interpreting Neural Networks for NLP , pages 88–104, Miami, Florida, US, November 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.blackboxnlp-1.6. URL https://aclanthology.org/ 2024.blackboxnlp-1.6/ .[9] Ole Jorgensen, Dylan Cope, Nandi Schoots, and Murray Shanahan. Improving activation steering in language models with mean-centring, 2023. URL https://arxiv.org/abs/ 2312.03813 .[10] Bruce W. Lee, Inkit Padhi, Karthikeyan Natesan Ramamurthy, Erik Miehling, Pierre Dognin, Manish Nagireddy, and Amit Dhurandhar. Programming refusal with conditional activation steering, 2025. URL https://arxiv.org/abs/2409.05907 .[11] Kenneth Li, Oam Patel, Fernanda Viégas, Hanspeter Pfister, and Martin Wattenberg. Inference-time intervention: Eliciting truthful answers from a language model. Advances in Neural Information Processing Systems , 36:41451–41530, 2023. [12] Dawn Lu and Nina Rimsky. Investigating bias representations in llama 2 chat via activation steering, 2024. URL https://arxiv.org/abs/2402.00402 .[13] OpenAI. Gpt-5.5 system card, 2026. URL https://deploymentsafety.openai.com/ gpt-5-5/introduction .[14] Nina Panickssery, Nick Gabrieli, Julian Schulz, Meg Tong, Evan Hubinger, and Alexander Matt Turner. Steering llama 2 via contrastive activation addition, 2024. URL https://arxiv.org/ abs/2312.06681 .[15] Aaditya Singh, Adam Fry, Adam Perelman, Adam Tart, Adi Ganesh, Ahmed El-Kishky, Aidan McLaughlin, Aiden Low, AJ Ostrow, Akhila Ananthram, Akshay Nathan, Alan Luo, Alec Helyar, Aleksander Madry, Aleksandr Efremov, Aleksandra Spyra, and et.al. Openai gpt-5 system card, 2025. URL https://arxiv.org/abs/2601.03267 .10 [16] Niklas Stoehr, Kevin Du, Vésteinn Snæbjarnarson, Robert West, Ryan Cotterell, and Aaron Schein. Activation scaling for steering and interpreting language models. In Yaser Al-Onaizan, Mohit Bansal, and Yun-Nung Chen, editors, Findings of the Association for Computational Linguistics: EMNLP 2024 , pages 8189–8200, Miami, Florida, USA, November 2024. As-sociation for Computational Linguistics. doi: 10.18653/v1/2024.findings-emnlp.479. URL 
+
+https://aclanthology.org/2024.findings-emnlp.479/ .[17] Nishant Subramani, Nivedita Suresh, and Matthew E. Peters. Extracting latent steering vectors from pretrained language models, 2022. URL https://arxiv.org/abs/2205.05124 .[18] Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy Liang, and Tatsunori B. Hashimoto. Stanford alpaca: An instruction-following llama model. 
+
+https://github.com/tatsu-lab/stanford_alpaca , 2023. [19] Gemma Team, Morgane Riviere, Shreya Pathak, Pier Giuseppe Sessa, Cassidy Hardin, Surya Bhupatiraju, Léonard Hussenot, and et.al. Gemma 2: Improving open language models at a practical size, 2024. URL https://arxiv.org/abs/2408.00118 .[20] Qwen Team. Qwen3 technical report, 2025. URL https://arxiv.org/abs/2505.09388 .[21] Alexander Matt Turner, Lisa Thiergart, Gavin Leech, David Udell, Juan J Vazquez, Ulisse Mini, and Monte MacDiarmid. Steering language models with activation engineering. arXiv preprint arXiv:2308.10248 , 2023. [22] Zhengxuan Wu, Aryaman Arora, Atticus Geiger, Zheng Wang, Jing Huang, Dan Jurafsky, Christopher D. Manning, and Christopher Potts. Axbench: Steering llms? even simple baselines outperform sparse autoencoders, 2025. URL https://arxiv.org/abs/2501.17148 .[23] Yuxin Xiao, Chaoqun Wan, Yonggang Zhang, Wenxiao Wang, Binbin Lin, Xiaofei He, Xu Shen, and Jieping Ye. Enhancing multiple dimensions of trustworthiness in llms via sparse activation control, 2024. URL https://arxiv.org/abs/2411.02461 .[24] Zitao Xuan, Xiaofeng Mao, Da Chen, Xin Zhang, Yuhan Dong, and Jun Zhou. ShieldHead: Decoding-time safeguard for large language models. In Wanxiang Che, Joyce Nabende, Ekate-rina Shutova, and Mohammad Taher Pilehvar, editors, Findings of the Association for Computa-tional Linguistics: ACL 2025 , pages 18129–18143, Vienna, Austria, July 2025. Association for Computational Linguistics. ISBN 979-8-89176-256-5. doi: 10.18653/v1/2025.findings-acl.932. URL https://aclanthology.org/2025.findings-acl.932/ .[25] Anqi Zhang, Yulin Chen, Jane Pan, Chen Zhao, Aurojit Panda, Jinyang Li, and He He. Reasoning models know when they’re right: Probing hidden states for self-verification, 2025. URL 
+
+https://arxiv.org/abs/2504.05419 .[26] Qingjie Zhang, Yujia Fu, Yang Wang, Liu Yan, Tao Wei, Ke Xu, Minlie Huang, and Han Qiu. Stop before you fail: Operational capability boundaries for mitigating unproductive reasoning in large reasoning models, 2026. URL https://arxiv.org/abs/2509.24711 .[27] Yingjie Zhang, Tong Liu, Zhe Zhao, Guozhu Meng, and Kai Chen. Bleeding pathways: Vanishing discriminability in llm hidden states fuels jailbreak attacks, 2025. URL https: //arxiv.org/abs/2503.11185 .[28] Haiyan Zhao, Heng Zhao, Bo Shen, Ali Payani, Fan Yang, and Mengnan Du. Beyond single concept vector: Modeling concept subspace in llms with gaussian distribution, 2025. URL 
+
+https://arxiv.org/abs/2410.00153 .[29] Weixiang Zhao, Jiahe Guo, Yulin Hu, Yang Deng, An Zhang, Xingyu Sui, Xinyang Han, Yanyan Zhao, Bing Qin, Tat-Seng Chua, and Ting Liu. Adasteer: Your aligned llm is inherently an adaptive jailbreak defender, 2025. URL https://arxiv.org/abs/2504.09466 .[30] Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren, Alexander Pan, Xuwang Yin, Mantas Mazeika, Ann-Kathrin Dombrowski, et al. Representation engineering: A top-down approach to ai transparency. arXiv preprint arXiv:2310.01405 , 2023. 11 A Detailed Related Work 
+
+A.1 LLM steering and inference-time intervention 
+
+Although the term “steering” is sometimes used broadly in the literature to describe instruction following or prompt engineering, in this work, steering refers exclusively to inference-time activation engineering, where carefully calculated vectors are injected into the residual stream to alter model behavior without weight updates. Early foundations for this approach demonstrated that latent steering vectors could be extracted from pretrained models [ 17 ] and injected during the forward pass to elicit truthful answers [ 11 ]. This paradigm was formalized by frameworks like Representation Engineering (RepE) [ 30 ] and Activation Addition [ 21 ], which established that high-level concepts can be extracted via contrastive prompts and linearly added to the residual stream to modulate topic and sentiment. Subsequent literature has rapidly expanded on how these vectors are calculated and injected. Recent methodological improvements include refining vector representations through mean-centering [ 9], activation scaling [ 16 ], and extending beyond single concept directions to model concept subspaces via Gaussian distributions [28]. Despite its broad applicability, many works [ 3 , 7, 29 ] have reported that the efficacy of activation steering is notoriously fragile and highly sensitive to the selected intervention strength, and that applying a static steering coefficient across diverse inputs frequently results in suboptimal outcomes. However, determining the optimal steering strength traditionally necessitates exhaustive and expensive grid searches over full autoregressive decoding outcomes. Hence, an important application of our proposed predictive framework is to greatly accelerate the search for an optimal steering scale by anticipating the success of a steering intervention prior to full sequence generation. 
+
+A.2 Early prediction of LLM outputs via model internals 
+
+A growing body of work shows that LLM internal representations can be leveraged at early inference stages to predict properties of their final outputs, such as correctness, truthfulness, and safety before final response is decoded. In the context of problem-solving, Zhang et al. [25] found that models encode signals about future answers in their hidden states, enabling accurate prediction before intermediate reasoning is completed and supporting early-exit inference. Similarly, Zhang et al. [26] found that hidden states corresponding to the last input token encode capability “boundary information", allowing the solvability of the problem to be predicted before the reasoning process even begins. On the truthfulness side, Ji et al. [8] established that internal activations immediately after processing a query reveal model uncertainty and familiarity with the concept, serving as strong predictors of hallucination. Building on this, Alnuhait et al. [1] introduced FactCheckmate, which classifies hidden states prior to decoding to anticipate hallucinations and intervenes by steering representations toward factual outputs. Similar ideas have also been applied to safety. Chan et al. [4] show that linear probes over Chain-of-Thought activations can detect unsafe responses before generation, and Xuan et al. [24] proposed ShieldHead, a lightweight classification head on last-layer hidden states for decoding-time harmful-content detection, while Zhang et al. [27] observe that separability between safe and harmful representations degrades over time, suggesting that early-stage signals are particularly informative for safety monitoring. Motivated by these advances in predicting output properties from model internals, we extend this paradigm beyond commonly studied attributes such as correctness, truthfulness, and safety to a relatively underexplored dimension—steerability. We show that early-stage hidden states contain sufficient signal to predict whether an activation steering intervention will succeed, without requiring full decoding of the model’s response. 12 B Features 
+
+In Table 4, we detail the features we used for SteerBoost, including their names, abbreviations, formulas, and rationale. They are designed to be intuitive, interpretable, and capture the propagation pattern of steering effect along the layer and token position dimension of the Transformer network. Table 4: Feature pool for steerability prediction. Each feature except steering condition is computed per (t, n ) pair, then augmented with summary statistics (mean, std, max, min) globally, per token across layers, and per layer across tokens.                                            
+
+> Group Feature Formula Rationale
+> Steering Geometry SteeringAffinity (SA) cos( ˜hlt,vc)How closely the steered representation aligns with the steering direction vc
+> DeviationNorm (DN) ∥˜hlt−hlt∥2How far steering has pushed the representa-tion from its unsteered counterpart DirectionalSim (DS) cos( ˜hlt,hlt)To what extent the steered representation preserves the original direction DeviationAlignment (DA) cos( ˜hlt−hlt,vc)How much of the induced change follows the intended steering direction vc
+> Decoding Dynamics DeviationRatio (DRA) DN (t, n )/DN (1 , n ),n, t > 1How the magnitude of steering-induced de-viation evolves across generated tokens DirectionalShift (DSH) DS (t, n )−DS (1 , n ),n, t > 1How directional preservation changes as generation progresses AlignmentDrift (ADR) DA (t, n )−DA (1 , n ),n, t > 1How the alignment between deviation and
+> vcshifts over successive tokens Steering Condition VectorNorm (V) ∥vc∥2Intrinsic magnitude of the steering vector, which varies across concepts SteeringStrength (S) αThe applied multiplier
+
+C Ablation Study 
+
+We ablate the contribution of each feature group, retraining the classifier on each group in isolation while keeping the (token, layer) sampling grid fixed to the main-paper configuration. Macro-F1 scores under the ID and OOD settings are reported in Table 5. ALL ranks first in 5/6 ID settings and in the top two in 11/12 settings overall, confirming that the three groups are complementary. On OOD concepts, Geometry alone matches or surpasses ALL in 4/6 settings, which we interpret as a robustness–specialization trade-off: Decoding Dynamics and Steering Condition features contribute concept-specific regularities that boost ID accuracy but do not fully transfer. We therefore keep ALL as the default in the main text since it is never far from the best in either regime, and note Geometry alone as a lightweight alternative when OOD generalization is the priority. This is consistent with the gain-based importance analysis in Figure 6, where Geometry features DeviationAlignment and SteeringAffinity carry the bulk of predictive mass. Steering Condition features alone drop sharply from ID to OOD (e.g., 69 .70 → 56 .21 on Qwen3-1.7B-DiffMean), reinforcing our choice of pairing them with hidden-state-derived signals rather than using them in isolation. Table 5: Macro-F1 ( ×100 ) under the ID and OOD settings for each feature group, method, and model. The best scores are highlighted in bold, the second best scores are underlined; bold/underline are computed within each setting. Setting Feature Group DiffMean Probe Qwen3-1.7B Gemma-2-2B Llama-3.2-3B Qwen3-1.7B Gemma-2-2B Llama-3.2-3B ID ALL 79.86 81.04 79.59 74.24 70.36 68.42 Geometry 75.77 75.34 74.15 71.47 68.05 67.98 Dynamics 70.39 69.51 69.42 66.15 64.41 64.70 Conditions 69.70 67.97 78.14 65.75 58.19 70.92                         
+
+> OOD ALL 70.31 68.76 72.44 68.69 65.82 65.49
+> Geometry 72.44 71.49 72.18 69.51 66.32 65.07 Dynamics 68.82 70.41 67.45 65.63 62.54 61.25 Conditions 56.21 51.98 64.11 59.54 50.33 57.64
+
+13 D An Alternative Approach 
+
+A natural alternative to SteerBoost is to train a linear probe directly on a single steered hidden state 
+
+˜hlt, in the style of prior early-prediction methods that operate on a fixed token and layer [ 25 , 26 , 8]. For each (t, l ) on the same grid as SteerBoost ( t ∈ { 1, 2, 4, 6}, n ∈ { 0, 1, 2, 3, 5, 10 , 15 }), we train a separate logistic-regression classifier on the three-way outcome label, using the same splits as the main text. Macro-F1 over all 28 grid positions is reported in Figure 9. 1
+
+2
+
+4
+
+6
+
+0.751 0.772 0.765 0.765 0.762 0.771 0.753 
+
+0.754 0.780 0.774 0.769 0.774 0.746 0.728 
+
+0.753 0.767 0.764 0.758 0.754 0.734 0.704 
+
+0.744 0.748 0.751 0.744 0.741 0.714 0.699 
+
+> DiffMean
+> Token Position
+
+ID 
+
+1
+
+2
+
+4
+
+6
+
+0.516 0.538 0.582 0.602 0.622 0.659 0.662 
+
+0.596 0.623 0.646 0.642 0.674 0.661 0.646 
+
+0.622 0.641 0.631 0.656 0.654 0.659 0.648 
+
+0.646 0.680 0.664 0.673 0.655 0.658 0.641 
+
+OOD 
+
+1
+
+2
+
+4
+
+6
+
+0.783 0.755 0.745 0.748 0.733 0.722 0.708 
+
+0.770 0.741 0.733 0.732 0.726 0.721 0.701 
+
+0.763 0.734 0.728 0.727 0.711 0.699 0.684 
+
+0.757 0.727 0.720 0.711 0.703 0.692 0.680 
+
+> Probe
+> Token Position
+
+1
+
+2
+
+4
+
+6
+
+0.457 0.587 0.602 0.606 0.615 0.634 0.629 
+
+0.498 0.588 0.596 0.618 0.620 0.640 0.642 
+
+0.541 0.603 0.612 0.606 0.624 0.648 0.643 
+
+0.575 0.614 0.617 0.620 0.637 0.636 0.626 
+
+1
+
+2
+
+4
+
+6
+
+0.777 0.782 0.773 0.765 0.760 0.769 0.764 
+
+0.773 0.785 0.772 0.768 0.758 0.754 0.745 
+
+0.758 0.788 0.779 0.769 0.760 0.737 0.721 
+
+0.755 0.775 0.775 0.769 0.756 0.719 0.710 
+
+> DiffMean
+> Token Position
+
+1
+
+2
+
+4
+
+6
+
+0.545 0.601 0.648 0.632 0.643 0.671 0.677 
+
+0.590 0.653 0.660 0.679 0.647 0.667 0.669 
+
+0.672 0.702 0.667 0.674 0.673 0.679 0.663 
+
+0.673 0.700 0.690 0.681 0.677 0.663 0.660 
+
+1
+
+2
+
+4
+
+6
+
+0.769 0.767 0.763 0.757 0.744 0.715 0.710 
+
+0.759 0.759 0.746 0.747 0.724 0.693 0.679 
+
+0.746 0.745 0.738 0.735 0.714 0.680 0.666 
+
+0.737 0.739 0.735 0.727 0.711 0.674 0.664 
+
+> Probe
+> Token Position
+
+1
+
+2
+
+4
+
+6
+
+0.482 0.562 0.597 0.604 0.611 0.614 0.621 
+
+0.504 0.576 0.597 0.627 0.621 0.614 0.621 
+
+0.534 0.572 0.589 0.636 0.621 0.608 0.604 
+
+0.566 0.607 0.620 0.626 0.619 0.614 0.614 
+
+1
+
+2
+
+4
+
+6
+
+0.757 0.755 0.749 0.740 0.738 0.727 0.739 
+
+0.753 0.749 0.739 0.729 0.727 0.751 0.745 
+
+0.757 0.747 0.735 0.727 0.721 0.744 0.734 
+
+0.757 0.749 0.740 0.742 0.728 0.732 0.735 
+
+> DiffMean
+> Token Position
+
+1
+
+2
+
+4
+
+6
+
+0.457 0.537 0.581 0.608 0.629 0.615 0.630 
+
+0.512 0.612 0.609 0.643 0.615 0.660 0.655 
+
+0.637 0.660 0.632 0.640 0.623 0.662 0.654 
+
+0.647 0.664 0.646 0.656 0.633 0.658 0.660 
+
+0 1 2 3 5 10 15 
+
+Layer Offset 
+
+1
+
+2
+
+4
+
+6
+
+0.753 0.751 0.742 0.732 0.722 0.702 0.694 
+
+0.741 0.741 0.739 0.731 0.704 0.680 0.676 
+
+0.722 0.739 0.731 0.729 0.708 0.686 0.682 
+
+0.721 0.728 0.729 0.726 0.709 0.679 0.676 
+
+> Probe
+> Token Position
+
+0 1 2 3 5 10 15 
+
+Layer Offset 
+
+1
+
+2
+
+4
+
+6
+
+0.466 0.532 0.554 0.482 0.541 0.554 0.572 
+
+0.469 0.514 0.520 0.542 0.572 0.585 0.575 
+
+0.559 0.541 0.588 0.615 0.595 0.621 0.605 
+
+0.538 0.623 0.591 0.619 0.627 0.628 0.627 
+
+0.6 
+
+0.7 
+
+> Macro-F1
+
+0.5 
+
+0.6 
+
+0.7 
+
+> Macro-F1
+
+0.6 
+
+0.7 
+
+> Macro-F1
+
+0.5 
+
+0.6 
+
+0.7 
+
+> Macro-F1
+
+0.5 
+
+0.6 
+
+0.7 
+
+> Macro-F1
+
+0.5 
+
+0.6 
+
+0.7 
+
+> Macro-F1
+> Qwen3-1.7B gemma-2-2b-it Llama-3.2-3B-Instruct
+
+Figure 9: Macro-F1 of single-state linear probes across token positions t (rows) and layer offsets n
+
+(columns), evaluated on ID and OOD concepts. Each block corresponds to one (model, steering-method) pair, where the steering method labels the prediction target. Compare with the ALL configuration of SteerBoost in Table 5. With an oracle choice of (t, l ), the best single-state probe is competitive with SteerBoost on ID concepts and on the Probe target even exceeds it. We therefore present this approach as a legitimate alternative rather than a strawman. SteerBoost nonetheless retains three concrete advantages. First, SteerBoost is built from a small set of named geometric and dynamic quantities (Table 4) whose contributions can be read off directly from Figure 6, while the single-state probe is a dense linear functional over thousands of raw hidden-state dimensions whose weights do not admit a comparable mechanistic reading. The features used by SteerBoost presented in Table 4 are also interpretable, but the probe remains a black box classifier to understand the steerability. 14 Second, the best (t, l ) cell is not stable: it shifts across models, steering methods, and ID/OOD splits, with no position uniformly dominant. Deploying the probe therefore requires a per-(model, method) sweep on a labeled validation set, i.e., the same supervision SteerBoost uses plus an additional model-selection step. SteerBoost sidesteps this by consuming the entire grid as input. Third, and most importantly, the gap to SteerBoost widens substantially under distribution shift. The single-state probe drops by roughly 9–13 macro-F1 points from ID to OOD on every (model, target) combination, whereas the ALL configuration of SteerBoost wins outright in 5 of 6 OOD settings (Table 5). We attribute this to what each predictor sees: a single hidden state encodes the model’s instantaneous, concept-entangled representation at one position, whereas SteerBoost’s features measure the propagation of the steering effect through differences between steered and unsteered states across multiple tokens and layers, defined relative to the steering vector vc itself. These propagation signatures depend more on how a vector perturbs the residual stream than on 
+
+which concept it encodes, which is what enables them to generalize to unseen concepts. 
+
+E GBDT and training details 
+
+XGBoost is a gradient-boosted ensemble of decision trees. Let zi denote the concatenated feature vector for the i-th sample and λi ∈ Λ its steering outcome label. The ensemble prediction is an additive sum ˆg(B) 
+
+> i
+
+= PBb=1 gb(zi), where each gb is a regression tree that maps zi to a real-valued leaf weight; successive trees are trained to correct the residual errors of the current ensemble. At iteration b, XGBoost minimizes a regularized objective: 
+
+L(b) =
+
+> N
+
+X
+
+> i=1
+
+ℓ λi, ˆg(b−1)  
+
+> i
+
++ gb(zi) + Ω( gb), (8) where ℓ is the loss function, ˆg(b−1)  
+
+> i
+
+is the prediction from the first b−1 trees, and Ω( gb) = γT + 
+
+> 12
+
+λ∥w∥2 penalizes model complexity through the number of leaves T and the leaf weight vector w.In practice, XGBoost approximates this objective with a second-order Taylor expansion of ℓ, which admits closed-form optimal leaf weights and an efficient, greedy split-selection procedure. We randomly split our 150 concepts into 120 in-distribution (ID) concepts and 30 out-of-distribution (OOD) concepts, with 10 concepts per abstraction level. For in-distribution concepts, we further split prompts into training, validation, and test sets in a 6:3:1 ratio. This allows us to test the generalization ability of our predictor on both unseen prompt-concept combinations for ID concepts and completely unseen OOD concepts. To mitigate the strong class imbalance as observed in Section 3.4, we assigned inverse-frequency class weights during XGBoost training, so that errors on underrepresented classes received proportionally higher penalty, and selected hyperparameters using validation macro-F1. 
+
+F Limitation 
+
+Due to the constraints of computational resources, despite the size of 1.4M generation, the current ASTEER only covers DiffMean and Probe as steering methods and three LLMs of relatively small size. This may limit the generalization of SteerBoost to broader settings. 
+
+G Computational Resource 
+
+We utilize the internal cluster for the computation of the experiments. The GPUs we used include NVIDIA RTX A6000, NVIDIA L40s, and NVIDIA A100 Tensor Core. Creating steerability dataset for each model-method pair takes approximately 1.5 day on 15 RTX A6000 GPUs. 15 H Additional Feature Importance Results 
+
+Figure 10 reports the gain-based feature importance of SteerBoost on probe-based steering. As in the DiffMean results in Figure 6, predictive mass concentrates on the earliest decoded tokens and on the Steering Geometry feature group. Compared with DiffMean, however, the token-wise distribution is somewhat less concentrated, especially for Llama-3.2-3B. In addition, SA is often the single most important feature, whereas the DiffMean setting places more weight on DA. 1 2 4 6         
+
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.37 0.24 0.19 0.19
+> 0.41 0.21 0.19 0.20
+> 0.22 0.28 0.26 0.24
+
+Token                         
+
+> 0123510 15
+> 0.32 0.11 0.09 0.09 0.17 0.10 0.11
+> 0.07 0.11 0.13 0.17 0.29 0.15 0.09
+> 0.11 0.08 0.09 0.09 0.42 0.12 0.09
+
+Layer         
+
+> SA DN DS DA DRA DSH ADR VS
+
+Feature Group                         
+
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.55 0.07 0.07 0.13 0.05 0.05 0.05 0.02 2.5e-03
+> 0.49 0.09 0.10 0.11 0.07 0.07 0.06 4.8e-03 2.9e-03
+> 0.57 0.08 0.08 0.08 0.06 0.06 0.05 2.9e-03 2.1e-03
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+> Row-normalized importance
+
+Figure 10: Gain-based feature importance of SteerBoost on Probe, aggregated by token, layer, and feature group. Scores are summed within each category and row-normalized. The small importance scores of V and S in Figures 6 and 10 should be interpreted with care. In the sum-aggregated view, the other groups contain many more features because they are sampled over the token-layer grid, so summing within each group mechanically yields larger totals than for the single-feature groups V and S. We nevertheless keep the view because it reflects how the GBDT allocates total split gain across the full feature set. For a size-normalized comparison, Figures 11 and 12 report mean-aggregated importances. Under this normalization, S plays a larger role for DiffMean, whereas V becomes more prominent for Probe, particularly on Qwen3-1.7B. 1 2 4 6         
+
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.73 0.10 0.07 0.10
+> 0.24 0.59 0.09 0.08
+> 0.70 0.14 0.07 0.08
+
+Token                         
+
+> 0123510 15
+> 0.22 0.11 0.14 0.21 0.10 0.09 0.12
+> 0.10 0.23 0.09 0.11 0.11 0.15 0.20
+> 0.33 0.08 0.10 0.11 0.09 0.09 0.21
+
+Layer         
+
+> SA DN DS DA DRA DSH ADR VS
+
+Feature Group                         
+
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.13 0.05 0.05 0.26 0.04 0.04 0.04 0.14 0.24
+> 0.10 0.06 0.05 0.35 0.03 0.03 0.03 0.12 0.22
+> 0.21 0.04 0.04 0.25 0.03 0.03 0.03 0.07 0.29
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+> Row-normalized importance
+
+Figure 11: Gain-based feature importance of SteerBoost on DiffMean, aggregated by token, layer, and feature group. Scores are averaged within each category and row-normalized. 1 2 4 6         
+
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.51 0.19 0.15 0.15
+> 0.54 0.16 0.14 0.15
+> 0.33 0.24 0.23 0.21
+
+Token                         
+
+> 0123510 15
+> 0.40 0.10 0.08 0.08 0.15 0.09 0.10
+> 0.10 0.11 0.12 0.17 0.28 0.14 0.08
+> 0.15 0.07 0.08 0.09 0.40 0.12 0.09
+
+Layer         
+
+> SA DN DS DA DRA DSH ADR VS
+
+Feature Group                         
+
+> Qwen3-1.7B
+> Gemma-2-2B-IT
+> LLaMA-3.2-3B
+> 0.22 0.03 0.03 0.06 0.02 0.02 0.02 0.54 0.06
+> 0.31 0.06 0.06 0.08 0.06 0.05 0.05 0.20 0.12
+> 0.42 0.06 0.06 0.07 0.05 0.06 0.05 0.14 0.10
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+> Row-normalized importance
+
+Figure 12: Gain-based feature importance of SteerBoost on Probe, aggregated by token, layer, and feature group. Scores are averaged within each category and row-normalized. 16 I Prompt Template 
+
+The prompt template we used for steering efficacy annotation is in Figure 13. 
+
+Prompt Template for Steered Generation Annotation 
+
+You are an expert evaluator assessing the effectiveness of AI model steering. You will evaluate whether a model’s response successfully incorporates a target concept while maintaining coherence and relevance to the original prompt. 
+
+Task : You are given: 1. An original prompt/instruction 2. A target concept that should be steered towards 3. A model’s response after steering 
+
+Evaluation criteria : Rate the response on a scale of 0–2: 
+
+0 — Under-steering (concept missing) 
+
+• The response does not incorporate the target concept • The response is coherent and relevant to the prompt, but lacks the desired steering • Example: target “response with emojis” but the response contains no emojis 
+
+1 — Successful steering (concept present & coherent) 
+
+• The response successfully incorporates the target concept • The response remains coherent, relevant, and appropriate to the original prompt • The steering feels natural and does not break response quality • Example: target “response with humor” and the response includes appropriate humor while answering the question 
+
+2 — Over-steering (incoherent answer) 
+
+• The response does not answer the original question and becomes nonsensical, irrelevant, or inappropri-ate to the original prompt • The steering is so strong that it breaks response quality • When the response is empty, it should be rated as over-steering • When the response is gibberish and does not answer the original question, it should be rated as over-steering rather than under-steering • Example: target “response with emojis” but the response is full of emojis while completely ignoring the original question 
+
+Input data Original prompt: 
+
+{prompt} 
+
+Target concept: 
+
+{concept} 
+
+Steered response: 
+
+{response_after} 
+
+Output format 
+
+Return your evaluation in JSON format: 
+
+{"explanation": "Brief explanation of your judgment, including specific evidence from the response", "judgment": ⟨0, 1, or 2⟩
+
+}
+
+Figure 13: The prompt template we used to label the efficacy of steered response. 17 J Concept List 
+
+Table 6 lists the 150 concepts we used in our study with different abstraction levels. Some concepts seem natural and very easy for model to steer in many cases such as (id:43, response uses consistently formal tone), while we also preserve some cases that are hard and seem impossible for model to steer such as (id:9 response with exactly 3 bullet points). The reason behind this is that we treat steerability itself as a predictable pattern and we want model to capture the pattern under different scenarios, including both low and high-steerability cases. Table 6: Steering concept pool used in this work, ordered by abstraction level (low, mid and high). 
+
+ID Level Name 
+
+0 low response with emojis 1 low response in uppercase 2 low response in lowercase 3 low response in Chinese 4 low response in Japanese 5 low response in Korean 6 low response in rhyming couplets 7 low response begins with the phrase ’Let me’ 8 low response in iambic-like poetic meter 9 low response with exactly 3 bullet points 10 low response with exactly 5 bullet points 11 low response as a numbered list 12 low response in a single paragraph 13 low response in exactly 2 sentences 14 low response in exactly 4 sentences 15 low response with a markdown table 16 low response using markdown headings 17 low response uses the word ’key’ at least twice 18 low response ends with the phrase ’Let me know if you have any questions’ 19 low response with bold emphasis 20 low response with italic emphasis 21 low response with no punctuation 22 low response with many exclamation marks 23 low response ending with a question 24 low response contains the phrase ’in other words’ at least once 25 low response contains the phrase ’it is worth noting’ 26 low response opens with ’Of course’ 27 low response with a JSON object 28 low response with a YAML block 29 low response with a regex pattern example 30 low response with at least one equation in LaTeX 31 low response with a short title line 32 low response using only ASCII characters 33 low response with at least one emoji per sentence 34 low response ends with a sentence beginning with ’In conclusion’ 35 low response addresses the user with ’you’ or ’your’ at least three times 36 low response with a checklist (task list) format 37 low response uses the word ’because’ at least twice to explain reasoning 38 low response with repeated first letters (alliteration) in a sentence 39 low response that includes at least one hyperlink (http/https) 120 low response contains at least one date expression 121 low response begins with a question 122 low response opens with a direct greeting such as ’Hi!’, ’Hello!’, or ’Hey!’ 123 low response contains at least one time expression 124 low response contains at least one parenthetical remark Continued on next page 18 Table 6 (continued from previous page) 
+
+ID Level Name 
+
+125 low response contains a rhetorical device 126 low response begins by approving the user’s question (e.g., That’s a great question!) 127 low response uses ’also’ or ’additionally’ to introduce at least two separate points 128 low response uses strong imperative verbs (’Do X’, ’Avoid Y’) 129 low response ends with a closing sentence beginning with ’In short’ 40 mid response contains at least one clear joke or punchline 41 mid response contains detectable sarcasm markers 42 mid response follows a scientific writing style (neutral, precise, impersonal) 43 mid response uses consistently formal tone 44 mid response uses consistently informal tone 45 mid response contains explicit polite markers (e.g., ’please’, ’thank you’) 46 mid response avoids hedging words (might/maybe/likely) 47 mid response contains frequent hedging words (might/maybe/likely) 48 mid response expresses high enthusiasm (e.g., exclamations, positive framing) 49 mid response expresses skepticism or doubt 50 mid response contains explicit empathetic language 51 mid response uses assertive, confident phrasing 52 mid response includes explicit uncertainty disclaimers 53 mid response asks at least one clarifying question 54 mid response includes a brief self-check or sanity check 55 mid response begins with an explicit outline or plan 56 mid response provides step-by-step instructions 57 mid response provides multiple alternative options 58 mid response gives a single clear recommendation 59 mid response contains an explicit warning or caution 60 mid response states its assumptions explicitly 61 mid response frames the answer around efficiency/optimization 62 mid response frames the answer around risk/safety 63 mid response frames the answer around monetary cost 64 mid response frames the answer around time/latency 65 mid response frames the answer around privacy concerns 66 mid response explains using analogies 67 mid response explains using counterexamples 68 mid response begins with a formal definition 69 mid response contains a ’Common Pitfalls’ section 70 mid response includes a short quiz-style question 71 mid response provides a minimal working example 72 mid response lists exactly two supporting reasons 73 mid response explicitly contrasts two viewpoints 74 mid response is written as a Q&A dialogue 75 mid response contains frequent metaphors 76 mid response avoids technical jargon (lay explanation) 77 mid response uses technical jargon (expert explanation) 78 mid response uses ’we’ or ’our’ at least twice to frame a collaborative perspective 79 mid response includes a short ’Next steps:’ section with actionable items 130 mid response uses softening language (e.g., ’I suggest’, ’it may help’) 131 mid response uses a consistently decisive tone 132 mid response includes at least one rhetorical question 133 mid response uses contrastive markers (e.g., ’however’, ’on the other hand’) 134 mid response explicitly acknowledges the user’s goal 135 mid response uses passive voice at least once (e.g., ’it is said’, ’this can be done’) 136 mid response uses example-first then explanation 137 mid response uses explanation-first then example 138 mid response repeatedly references the user’s goal or intent 139 mid response uses conditional reasoning (’if... then...’) Continued on next page 19 Table 6 (continued from previous page) 
+
+ID Level Name 
+
+80 high response in the persona of a teacher (explanatory, structured, pedagogical) 81 high response in the persona of a research scientist (technical, evidence-based) 82 high response in the persona of a lawyer (precise, conditional, cautious) 83 high response in the persona of a doctor (careful, qualified, safety-aware) 84 high response in the persona of a software engineer (practical, implementation-focused) 85 high response in the persona of a customer-support agent (polite, problem-solving) 86 high response in the persona of a strict grader (critical, rubric-driven) 87 high response in the persona of a motivational coach (encouraging, action-oriented) 88 high response in the persona of a skeptical reviewer (critical, evidence-demanding) 89 high response in the persona of a friendly peer (casual, collaborative) 90 high response in the persona of a journalist (neutral, fact-focused) 91 high response in the persona of a storyteller (narrative-driven) 92 high response in the persona of a consultant (structured, actionable) 93 high response in the persona of a debate opponent (argumentative, contrastive) 94 high response in the persona of a tutor (guided, stepwise explanations) 95 high response mentions machine learning 96 high response mentions mathematics 97 high response mentions physics 98 high response mentions computer programming 99 high response mentions cooking or recipes 100 high response mentions travel planning 101 high response mentions finance or investing 102 high response mentions health or fitness 103 high response mentions literature or literary analysis 104 high response mentions history 105 high response written as a case study with concrete scenario 106 high response written as a textbook-style explanation 107 high response written as a brief executive summary 108 high response written as a FAQ-style answer 109 high response written as a point–counterpoint argument 110 high response explicitly weighs pros and cons in decision making 111 high response written in a headline-style format 112 high response written as a comprehensive report 113 high response organized with clear sections and subheadings 114 high response written as a brainstorming-style answer 115 high response frames outcomes in terms of opportunities 116 high response frames outcomes in terms of risks or downsides 117 high response frames outcomes in a neutral, descriptive way 118 high response grounds claims with explicit evidence or references 119 high response emphasizes novel or creative ideas 140 high response mentions music 141 high response in the persona of a product designer (user-centered, UX-focused) 142 high response in the persona of a policy analyst (trade-offs, stakeholders, impact) 143 high response in the persona of a startup founder (vision, speed, iteration) 144 high response in the persona of a technical writer (clarity, documentation-style) 145 high response mentions climate change 146 high response with mathematical reasoning 147 high response in style of a twitter post 148 high response framed as a risk-benefit analysis 149 high response mentions a specific named country 20 K Prompt List 
+
+Table 7 lists the 50 prompts we used in our study. We randomly sampled 50 instructions from the Alpaca [ 18 ] dataset and keep them the same across concepts as a controlled setting for studying steerability. Table 7: Prompt pool used in this work. 
+
+ID Prompt 
+
+0 Create a short, concise summary of the paper based on its abstract. Few-shot learning (FSL) is one of the key future steps in machine learning and raises a lot of attention. In this paper, we focus on the FSL problem of dialogue understanding, which contains two closely related tasks: intent detection and slot filling. Dialogue understanding has been proven to benefit a lot from jointly learning the two sub-tasks. However, such joint learning becomes challenging in the few-shot scenarios: on the one hand, the sparsity of samples greatly magnifies the difficulty of modeling the connection between the two tasks; on the other hand, how to jointly learn multiple tasks in the few-shot setting is still less investigated. In response to this, we introduce FewJoint, the first FSL benchmark for joint dialogue understanding. FewJoint provides a new corpus with 59 different dialogue domains from real industrial API and a code platform to ease FSL experiment set-up, which are expected to advance the research of this field. Further, we find that insufficient performance of the few-shot setting often leads to noisy sharing between two sub-task and disturbs joint learning. To tackle this, we guide slot with explicit intent information and propose a novel trust gating mechanism that blocks low-confidence intent information to ensure high quality sharing. Besides, we introduce a Reptile-based meta-learning strategy to achieve better generalization in unseen few-shot domains. In the experiments, the proposed method brings significant improvements on two datasets and achieve new state-of-the-art performance. 1 Is there a meaning for Christmas wreaths? 2 What are some species of bears that are now extinct? 3 Why might someone prefer to shop at a small, locally-owned business instead of a large chain store, even if the prices are higher? 4 I have competencies in remote sensing, machine learning, and water resource knowledge, what are the possible jobs I can occupy? What are the possible projects I can do? What companies I can work at? 5 Write a poem about Mike and Joe becoming millionaires by leveraging the power of AI to become the greatest Agile coaches in history. Include content from the agile manifesto. 6 write a detailed business plan for fatherhood training based on Dwayne Meeks book Pieces never missing in a childs life 7 Navina has $30 more to her weekly budget than her younger sister and can afford to get one of the many online credit cards she likes. What do they each have to spend? 8 Pretend to be a character in a post-apocalyptic world. Describe how you survive and the allies you encounter. 9 Can you tell me how to make chocolate chip cookies? 10 Write a Jira ticket for the given task. New Employee onboarding 11 How can you determine if a person is genuinely interested in a conversation or simply being polite? 12 Consider the best time of year to visit the given city, and provide your reasons for choosing that time. Sydney, Australia 13 Hi, I’d like to learn how to play racquetball. Can you explain the game to me? 14 Describe how to prepare the given food in your own words. Note down the ingredients you will need and the steps you will take to prepare them. Chewy Chocolate Chip Cookies 15 How far away is Saggitarius A*, the black hole in the center of the milky way galaxy, from Earth and can you please provide that distance in light years and parsecs? Can you please also compare that distance to the distance of the center of the Andromeda galaxy from Earth? 16 What kind of foods do they eat in Thailand 17 How do I detail a car? Continued on next page 21 Table 7 (continued from previous page) 
+
+ID Prompt 
+
+18 I want to start saving some money by growing my own food. Can I do this during the winter with an indoor garden? 19 i’m working on a spatial analysis project and am looking for questions I can answer with it related housing and crime analysis, do you have suggestions? 20 I want to open the developler tools in chrome with ctrl + shift + i on this website: https://mnsw.pro/ It doesnt work. works on other websites. even here. what is wrong? 21 Curate a Spotify playlist based on the vibe. Publish this playlist as a song list. Vibe: coding on weekend 22 Verify the correctness of the given statement. “For all integers j and k, if j and k are odd, then jk is odd.” 23 What are some good foods to eat when you are sick? I am looking for something to make my girlfriend to eat. 24 An evaluation of the article’s quality should be carried out. In order to do so, you should review the quality of the writing and the explanation of the topic. The 20th century saw a revolution in music listening as the radio gained popularity worldwide and new media and technologies were developed to record, edit and distribute music. Music performances became increasingly visual with the broadcast and recording of performances. 20th-century music brought new freedom and wide experimentation with new musical styles and forms that challenged the accepted rules of music of earlier periods. The invention of musical amplification and electronic instruments, especially the synthesizer, in the mid-20th century revolutionized classical and popular music, and accelerated the development of new forms of music. 25 Act like a first-year college student and write a 1000-1250 word two-topic essay by using at least three points of analysis. Topic 1 is my experiences living in and observations of Flagstaff, Arizona. Topic 2 is my experiences living in and observations of Kaneohe, Hawaii. Use quotes from two sources in the essay. Use descriptive language. Include personal anecdotes. These sources will be listed in a Works Cited at the end of the essay. Use a four in-text citations in MLA style in the body of the essay. 26 What are the primary factors that influence consumer behavior? 27 List the concepts that should be learned before approaching the given complex concept. Deep Learning 28 Define what the underlined word means for kids. _keep a promise 29 What is the difference between HTML and JavaScript? 30 What’s the permission that allows creating provisioning profiles in Apple Developer account is called? 31 What are some of the best university’s for studying robotics? 32 Make a list of snacks and foods to serve as party snacks on a game day! 33 Write a detailed patent writing for an innovative and novel way of issuing community tax certificates and other relevant permits and clearances as a digital certificates, that is non-obvious using verifiable credentials, digital wallet on a blockchain as payment provision, and machine learning. Include claims on detailed processes involved, system architecture and algorithms 34 Hi, I’m trying to solve a crossword puzzle, but I’ve never done one of these before. Can you help me out? 35 What if the Black Death had not occurred in the 14th century? 36 Do you know something about the book “the art of thinking clearly” wrote by Rolf Dobelli? 37 Write down antonyms for the given word. laureating 38 Act as the Norse Goddess Freyja. 39 If a tree is on the top of a mountain and the mountain is far from the see then is the tree close to the sea? 40 Write a snoopdogg rap explaining how to not commit a warcrime 41 What if the Suez Canal had never been constructed? 42 What is the best approach for learning a foreign language when you only have an hour a day to practice? Continued on next page 22 Table 7 (continued from previous page) 
+
+ID Prompt 
+
+43 I like to host guests at my home from time to time, and I am gathering recipes of different dishes and drinks to keep things interesting. I am interested in trying some Hong Kong dishes. Can you give me a recipe for Tong Sui? 44 Hello there Obi One Kenobi 45 What are some herbs I can dry out? 46 explain what the theory of sexual selection is and give an example. 47 Is the ATF a violation in of itself against the American people? 48 Create a table listing all games that meet the specified criteria in the National Football League. Use the season, local time, game, and score as columns of the table. Ravens home games in 2011 49 Write a list of measures and ideas how the Sophia Jewish can foster more Shabbat celebration and observance at home and in synagogue 23

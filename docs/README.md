@@ -6,29 +6,32 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-10
-- 运行时间：2026-06-10 21:18:04 UTC
+- 最新运行日期：2026-06-11
+- 运行时间：2026-06-11 22:24:04 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：0
+- 本次总论文数：4
+- 精读区：2
 - 速读区：2
 
 ### 今日简报（AI）
-今天围绕安全代码LLM与强化学习主题速读两篇论文。  
-两篇均获6.0分，分别聚焦代码模型的自博弈纠错与安全领域的强化反学习，值得关注模型鲁棒性提升路径。  
-建议继续跟踪代码安全与模型防御方向，可尝试将这两类方法与现有工具链结合验证效果。
-- 详情：[/202606/10/README](/202606/10/README)
+今日聚焦推理时对齐转换与LLM可操控性研究，4篇论文中精读2篇高分工作。最值得细读的是《ALIGNBEAM》提出的跨词表logit混合对齐法（9.0/10）和《When is Your LLM Steerable?》对模型可操控性的系统评估（8.0/10）。接下来可关注推理时对齐的实际应用技巧，并留意模型安全性增强后可能引发的后向攻击风险。
+- 详情：[/202606/11/README](/202606/11/README)
 
 ### 精读区论文标签
-- 本次无精读推荐。
+1. [ALIGNBEAM : Inference-Time Alignment Transfer via Cross-Vocabulary Logit Mixing](/202606/11/2606.12342v1-alignbeam--inference-time-alignment-transfer-via-cross-vocabulary-logit-mixing)  
+   标签：评分：9.0/10、query:smd
+   evidence：通过推理时logit混合防御领域微调导致的安全退化
+2. [When is Your LLM Steerable?](/202606/11/2606.11599v1-when-is-your-llm-steerable)  
+   标签：评分：8.0/10、query:dg
+   evidence：研究通过激活引导控制模型行为的可预测性
 
 ### 速读区论文标签
-1. [Learn from Your Mistakes: Tree-like Self-Play for Secure Code LLMs](/202606/10/2606.03489v1-learn-from-your-mistakes-tree-like-self-play-for-secure-code-llms)  
+1. [Safety Paradox: How Enhanced Safety Awareness Leaves LLMs Vulnerable to Posterior Attack](/202606/11/2606.05614v1-safety-paradox-how-enhanced-safety-awareness-leaves-llms-vulnerable-to-posterior-attack)  
    标签：评分：6.0/10、query:smd
-   evidence：提出面向安全代码LLM的树状自对弈，一种细粒度安全对齐方法，与数据混合和对齐保持相关
-2. [Safe-RULE: Safe Reinforcement UnLEarning](/202606/10/2606.09559v1-safe-rule-safe-reinforcement-unlearning)  
+   evidence：后验攻击利用安全意识实现越狱
+2. [Unlocking Latent Value: Taxonomy-Guided Recovery of High-Performing Data from Low-Tier Web Corpora](/202606/11/2606.07778v1-unlocking-latent-value-taxonomy-guided-recovery-of-high-performing-data-from-low-tier-web-corpora)  
    标签：评分：6.0/10、query:smd
-   evidence：在安全强化学习中防御数据投毒，可迁移至有害微调防御
+   evidence：基于分类法的数据筛选框架
 
 
 <div class="dpr-home-promo-card">
