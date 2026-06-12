@@ -1,0 +1,1016 @@
+Title: GRASP: Geometry-aware Residual Alignment for Scalable Pretraining Data Attribution
+
+URL Source: https://arxiv.org/pdf/2606.06892v1
+
+Published Time: Mon, 08 Jun 2026 00:26:52 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# GRASP: Geometry-aware Residual Alignment for Scalable Pretraining Data Attribution 
+
+Yue Min 1, Ruining Chen 2, Yujun Li 1
+
+> 1
+
+Wizard Quant, 2University of Science and Technology of China  
+
+> Correspondence: minyue@wizardquant.com, liyujun@wizardquant.com
+
+Abstract 
+
+Scalable data attribution methods typically as-sign isolated utility scores to individual train-ing examples. This prevalent additive assump-tion fundamentally fails to capture critical sub-set dynamics, including data redundancy and complementary coverage. In this work, we reframe attribution as subset-level counterfac-tual utility prediction and introduce GRASP, an interaction-aware surrogate. Grounded in a theoretical smoothness lower bound, GRASP explicitly models subset interactions through a quadratic geometric penalty. To achieve pretraining-scale efficiency without relying on hidden oracle tuning, we couple low-dimensional feature sketches with a strictly fi-nite lower-confidence bound selection protocol. Extensive subset-retraining evaluations demon-strate that GRASP decisively outperforms exist-ing scalable baselines. It more than doubles the task-level rank correlation for counterfactual subset fidelity while reducing upfront artifact construction costs by nearly an order of mag-nitude. Downstream diagnostics further show that this scoring mechanism transfers to lan-guage model curation and cross-domain vision selection, establishing a robust foundation for optimizing massive pretraining corpora. 
+
+1 Introduction 
+
+The capabilities and failure modes of large lan-guage models are fundamentally determined by their pretraining corpora (Raffel et al., 2020; Penedo et al., 2024). Consequently, data cura-tion has become the central driver of model per-formance. This process encompasses extraction, filtering, deduplication, and domain mixing. Yet, these structural decisions typically rely on coarse heuristics or prohibitively expensive retraining tri-als. Data attribution bridges this methodological gap by connecting model behavior back to the data pipeline. This connection enables targeted audit-ing, contamination analysis, and principled data selection under fixed compute budgets. Despite these promises, scaling attribution to guide practical curation reveals a fundamental flaw in current paradigms. Existing scalable meth-ods, including influence functions (Koh and Liang, 2017), TracIn (Pruthi et al., 2020), TRAK (Park et al., 2023), DataInf (Kwon et al., 2024), and LESS (Xia et al., 2024), operate by assigning a scalar relevance score to each individual training example. However, practical data curation involves retaining or removing coherent data slices rather than isolated sentences. When practitioners use pointwise scores to evaluate a data subset, they implicitly treat the utility of that subset as a sim-ple sum of individual contributions. This additive assumption is mathematically restrictive. In real-world corpora containing near-duplicates and over-lapping domains, training examples interact. Se-lecting highly aligned but identical examples yields diminishing returns, whereas diverse examples pro-vide complementary coverage. While coalition-based valuations such as Data Shapley (Ghorbani and Zou, 2019) and datamodel-ing (Ilyas et al., 2022; Wang et al., 2025) formally capture these subset dependencies, exact coalition evaluation is computationally prohibitive for rou-tine pretraining pipelines. This creates a critical methodological gap. Scalable attribution requires a reusable surrogate that explicitly models train-train interactions without requiring combinatorial retraining. Consequently, the evaluation of attribu-tion methods must structurally shift from individ-ual example ranking to subset-level counterfactual utility prediction . A rigorous attribution method must accurately rank candidate data interventions by their empirical utility after retraining. To address this challenge, we propose GRASP, a geometry-aware residual-alignment surrogate for scalable pretraining data attribution. Our approach is grounded in a one-step smoothness lower bound on utility improvement for weighted subset inter-ventions. This theoretical foundation naturally 1               
+
+> arXiv:2606.06892v1 [cs.LG] 5 Jun 2026 Pretraining corpus Target evaluation unit
+> e
+> LLM
+> (shared forward pass)
+> hidden state
+> ...
+> residual
+> ...
+> hidden state
+> ...
+> residual
+> ...
+> SÛₑ(S)
+> 123|S|
+> Subset Utility Prediction
+> cₕWₕ(h ᵢ−h̄)cᵣWᵣξᵢ
+> Direct-sum Surrogate
+> self magnitudes pairwise redundancy
+> deviation from global mean
+> Geometric Penalty Interaction-Aware Geometry Sketch GRASP Relevance Scores
+> h̃ₑh̃ᵢ
+> Rᵢ,ₑ=ξᵢᵀ Dξξₑ
+> ×Dξ×
+> ξₑ ξᵢᵀ
+> = R ᵢ,ₑ· sgn(H ᵢ,ₑ) log(1 + |H ᵢ,ₑ|)
+> ×
+> Hᵢ,ₑRᵢ,ₑ
+
+Figure 1: Overview of the GRASP architecture. GRASP predicts the counterfactual utility of data interventions by combining an additive relevance core (bottom) with an interaction-aware geometric penalty (top). By processing LLM hidden states and residuals into compact direct-sum sketches ( ϕi) and stabilized relevance scores, the method efficiently captures subset redundancy and complementary coverage. The standardized components are then linearly aggregated to evaluate entire subsets without combinatorial retraining. 
+
+yields a linear target relevance term alongside a quadratic geometric penalty. Expanding this quadratic expression formally captures the mutual dependencies omitted by additive scoring. For pretraining-scale deployment, GRASP replaces ex-act high-dimensional update directions with low-dimensional feature sketches. For experimental discipline, all component weights and retain/delete modes are selected on development environments before test evaluation, separating scalable subset prediction from hidden per-task tuning. In summary, our main contributions are: • We formalize pretraining data attribution as 
+
+subset-level counterfactual utility prediction ,directly aligning the objective with practical corpus interventions to overcome the limita-tions of additive pointwise scoring. • We derive GRASP, an interaction-aware surro-gate grounded in a one-step smoothness lower bound. Its quadratic geometric penalty explic-itly models data redundancy and complemen-tary coverage without requiring combinatorial retraining. • We instantiate GRASP with compact feature sketches for pretraining-scale efficiency. It reduces artifact construction time by nearly an order of magnitude, scores 100,000 sub-sets in 5 seconds, and more than doubles the task-level LDS rank correlation over existing scalable baselines. 
+
+2 Problem Setup 
+
+We study subset-level counterfactual utility pre-diction : given a pretraining corpus, an evaluation target, and candidate data interventions, the objec-tive is to rank the interventions by their realized utility after retraining. 
+
+2.1 Pretraining Data Attribution 
+
+Let D = {1, . . . , n } index a pretraining corpus 
+
+{zi}i∈D . A data intervention retains a subset S ⊆D, yielding parameters θS after retraining. For a target e, we define the utility as Ue(θ) = −Le(θ),where Le is the target loss. The true subset utility is therefore 
+
+Ue(S) = Ue(θS ) = −Le(θS ). (1) Pretraining attribution aims to provide a scalable surrogate bUe : 2 D → R for this set function S 7 →Ue(S).While traditional attribution assigns a scalar score ai,e ∈ R to each example i (Koh and Liang, 2017; Park et al., 2023; Xia et al., 2024), a subset-level surrogate predicts the utility of the entire in-tervention S.
+
+2.2 Counterfactual Fidelity via LDS 
+
+Following datamodeling (Ilyas et al., 2022; Park et al., 2023), we evaluate counterfactual fidelity us-ing the Linear Datamodeling Score (LDS). Given a family of B sampled interventions B = {Sb}Bb=1 ,2LDS measures the rank correlation between pre-dicted and realized utilities for target e:
+
+ρe = Spearman b
+
+ bUe(Sb), Ue(Sb)
+
+
+
+. (2) When relying on pointwise scores, the subset predictor degrades to an additive baseline: 
+
+bUadd  
+
+> e
+
+(S) = X
+
+> i∈S
+
+ai,e . (3) This modular form assumes independence among examples, rendering it brittle for corpora containing duplicates and domain clusters. We therefore seek a scalable surrogate incorporating a structural subset interaction term to improve ρe.
+
+3 Method 
+
+GRASP predicts the utility of a candidate data in-tervention without retraining for every query. It first computes residual-alignment relevance scores for train–target pairs, then scores a whole subset by adding geometry-aware train-train interactions, and finally selects a fixed protocol on development environments. Figure 1 summarizes this pipeline. 
+
+3.1 GRASP Relevance Scores 
+
+To evaluate the utility of a data intervention, GRASP first requires a scalable measure of align-ment between training and target examples. Rather than computing exact but intractable influence func-tions ( H−1∇ℓ), we derive an efficient proxy from the last-layer geometry of causal language models. Let hi and ξi = pi − yi denote the hidden state and next-token residual for a given token, where the local gradient admits an exact outer-product form ∇W ℓtok = hξ ⊤. For sequences containing multiple tokens, exact gradients require summing these outer products. To maintain linear storage complexity, we instead pool the sequence into a sin-gle summary representation and employ a rank-1 surrogate: ∇W ℓi ≈ hiξ⊤ 
+
+> i
+
+. While this simplifica-tion formally drops intra-sequence covariance, it effectively captures the macroscopic alignment of the sequence. Under a Kronecker-factored generalized Gauss– Newton (GGN) approximation (Martens and Grosse, 2015), the inverse empirical Fisher or GGN matrix is approximated as a Kronecker product 
+
+F −1 ≈ Σ−1 
+
+> h
+
+⊗ Dξ. Consequently, the inner prod-uct of preconditioned gradients elegantly factorizes into separate hidden and residual matches: 
+
+⟨∇ W ℓi, F −1∇W ℓe⟩ ≈ 
+
+
+
+h⊤ 
+
+> i
+
+Σ−1 
+
+> h
+
+he
+
+  
+
+ξ⊤ 
+
+> i
+
+Dξξe
+
+
+
+.
+
+(4) Motivated by this decomposition, for a target evalu-ation unit e with representations he, ξ e, we whiten the hidden states using global training statistics: 
+
+˜hi = Σ −1/2 
+
+> h
+
+(hi − ¯h), ˜he = Σ −1/2 
+
+> h
+
+(he − ¯h),
+
+(5) where Σ−1/2 
+
+> h
+
+incorporates Tikhonov regularization. The factorized similarities are then defined as: 
+
+Hi,e = ⟨˜hi, ˜he⟩, (6) 
+
+Ri,e = ξ⊤ 
+
+> i
+
+Dξξe. (7) Here, Dξ = diag( γ + ϵ)−α (α ∈ { 1, 1/2}) serves as a stabilized inverse-covariance preconditioner for the residuals, with γ estimated via a sparse top-k residual sketch to minimize the memory foot-print. Strict adherence to local influence dictates a di-rect bilinear product Hi,e Ri,e . In practice, however, hidden-state inner products exhibit extreme heavy-tailed distributions that routinely destabilize subset evaluation. To robustify the formulation, we ex-plicitly depart from the exact Taylor expansion and introduce a monotonic dampening function: 
+
+aGRASP  
+
+> i,e
+
+= Ri,e sgn( Hi,e ) log(1 + |Hi,e |). (8) This odd, strictly increasing log-transformation pre-serves both the ordinal ranking and the directional support (sign) of the representation match, while safely truncating the disproportionate leverage of geometric outliers. Finally, the first-order relevance of a weighted intervention subset T is computed additively: 
+
+AGRASP  
+
+> e
+
+(T ) = X
+
+> i∈T
+
+wiaGRASP  
+
+> i,e
+
+. (9) GRASP adopts AGRASP  
+
+> e
+
+(T ) as its foundational lin-ear predictor, which is subsequently augmented with geometry-aware interaction penalties to model subset redundancy. 
+
+3.2 Interaction-Aware Subset Utility 
+
+Let ge = ∇θLe(θ) be the target gradient at a ref-erence checkpoint. As derived in Appendix A, implicit differentiation of a weighted training ob-jective yields the influence-directed update ui =
+
+H−1∇θℓi(θ) for example i, up to a shared scale. A 3standard scalar attribution method scores a subset 
+
+S additively via this first-order alignment: 
+
+bUadd  
+
+> e
+
+(S) = X
+
+> i∈S
+
+ai,e , ai,e ≈ ⟨ ge, u i⟩. (10) However, this modular form assumes strict indepen-dence, fundamentally failing to capture redundancy or complementarity within a subset. To formally model subset dynamics, we must examine the ge-ometry of the combined update, which naturally incurs a curvature penalty. 
+
+Theorem 1 (One-step interaction lower bound) .
+
+Fix parameters θ and target e. Let ge = ∇θLe(θ),step size η ≥ 0, and update direction ui ∈ Rdim( θ).For a weighted set T with weights wi, define the combined update DT = P 
+
+> i∈T
+
+wiui. If Le is βe-smooth (with respect to the Euclidean norm) be-tween θ and θ−ηD T , the target utility improvement 
+
+∆e(T ) = Ue(θ − ηD T ) − U e(θ) satisfies: 
+
+∆e(T ) ≥ η X
+
+> i∈T
+
+wi⟨ge, u i⟩− βeη2
+
+2
+
+X
+
+> i∈T
+
+wiui
+
+> 2
+
+.
+
+(11) The proof (Appendix A) bounds the counterfac-tual utility of full retraining. Crucially, expanding the quadratic penalty isolates the pairwise interac-tion: 
+
+X
+
+> i∈T
+
+wiui
+
+> 2
+
+= X
+
+> i∈T
+
+w2 
+
+> i
+
+∥ui∥2+2 X
+
+> i<j i,j ∈T
+
+wiwj ⟨ui, u j ⟩.
+
+(12) This reveals that mutually aligned examples (⟨ui, u j ⟩ > 0) incur a strictly positive off-diagonal penalty. In terms of discrete curvature, the second difference of the set function satisfies ∆i∆j bUint  
+
+> e
+
+∝−wiwj ⟨ui, u j ⟩. Thus, aligned directions exhibit diminishing marginal returns, while structurally opposing directions can be complementary (see Proposition 1). While Theorem 1 dictates the necessity of the quadratic penalty, calculating the exact coefficient 
+
+βeη2/2 is intractable for pretraining-scale interven-tions, as βe and η fluctuate with subset norm and model scale. We therefore treat the theorem as a structural blueprint: a linear relevance term regu-larized by a non-negative geometric penalty. By replacing the intractable scalar with a tunable pro-tocol parameter λe ≥ 0, we arrive at the idealized interaction-aware surrogate: 
+
+bUint  
+
+> e
+
+(T ) = ηA ue (T ) − λeKu(T ), (13) where Aue (T ) = P 
+
+> i∈T
+
+wi⟨ge, u i⟩ captures the ad-ditive utility, and Ku(T ) = ∥DT ∥2. In the imple-mented predictor, λe is absorbed into a finite set of component weights calibrated on development environments. 
+
+3.3 Sketched Subset Predictor 
+
+Directly storing high-dimensional update direc-tions ui ∈ Rdim( θ) for every pretraining row is computationally intractable. Under the Kronecker-factored view, the true geometric interaction 
+
+⟨ui, u j ⟩ takes the form of a product kernel between hidden-state and residual similarities. However, explicitly constructing the corresponding tensor-product feature ψi = ( Wh(hi − ¯h)) ⊗ (Wrξi) in-curs a prohibitive O(dhdr) memory footprint. To achieve linear scaling, GRASP deliberately trades exact multiplicative cross-terms for an additive direct-sum surrogate via feature concatenation: 
+
+ϕi = [ chWh(hi − ¯h); crWrξi] ∈ Rdh+dr . (14) Here, Wh is the centered whitening map from Equa-tion 5, Wr is the residual scaling induced by the stabilized preconditioner Dξ (or its sparse top-k ap-proximation), and ch, c r are fixed scaling constants. While this direct-sum kernel intentionally deviates from an unbiased product kernel, it ensures fast 
+
+O(|T |d) subset sweeps and linear storage space. Appendix A formalizes the local approximation bound and resulting sketch error of this relaxation. Using this compact sketch, we operationalize the blueprint of Theorem 1. The scalar relevance 
+
+Ae(T ) = AGRASP  
+
+> e
+
+(T ) is retrieved separately. For any candidate intervention set T , the raw geomet-ric penalty is Kraw (T ) = ∥ P 
+
+> i∈T
+
+wiϕi∥2. To grant the predictor finer expressivity over self-regularization and cross-sample redundancy, we orthogonally decompose and center this geometry: 
+
+Kself (T ) = X
+
+> i∈T
+
+w2 
+
+> i
+
+∥ϕi∥2, (15) 
+
+Kpair (T ) = Kraw (T ) − Kself (T ), (16) 
+
+Kcent (T ) = X
+
+> i∈T
+
+wi(ϕi − ¯ϕ)
+
+> 2
+
+, (17) where ¯ϕ = n−1 P 
+
+> i∈D
+
+ϕi is the global feature mean. 4BM25 TracIn TRAK GRASP Benchmark ρ Pos. ρ Pos. ρ Pos. ρ Pos. BasicSkills Common Knowledge 0.062 0.520 0.114 0.656 0.059 0.551 0.312 0.973 
+
+BasicSkills Logical Reasoning 0.029 0.500 0.220 0.703 0.167 0.672 0.457 0.980 
+
+OpenBookQA 0.064 0.508 0.151 0.578 0.182 0.582 0.350 0.855 
+
+CommonsenseQA -0.089 0.510 0.163 0.680 -0.062 0.495 0.260 0.870 
+
+SciQ 0.187 0.609 0.223 0.609 0.242 0.641 0.424 0.906 
+
+Average 0.051 0.529 0.174 0.645 0.118 0.588 0.361 0.917     
+
+> Table 1: Counterfactual subset-utility fidelity on full-dataset benchmarks. GRASP consistently outperforms all baselines in predicting empirical retraining outcomes. We report the task-level Spearman rank correlation ( ρ) and the fraction of evaluation units exhibiting positive LDS correlation (Pos.). Higher is better for both metrics. Best and second-best results are bolded and underlined, respectively.
+
+Finally, constructing a unified surrogate requires reconciling the relative scales of the linear rele-vance and the decomposed quadratic penalties. As dictated by Theorem 1, the true interaction scale depends on a target-specific and subset-dependent smoothness constant βe, which cannot be analyti-cally computed. We bridge this theory-to-practice gap via empirical standardization: 
+
+bVe(T ; ω) = z(Ae(T )) + X
+
+> c∈C
+
+ωc z(Kc(T )) . (18) Here, C contains the selected geometric compo-nents (omitting zero-variance ones). The map 
+
+z(x) = ( x − μ)/σ standardizes the features us-ing calibration moments μ, σ . Crucially, these mo-ments are strictly anchored to a fixed calibration subset family within the environment, test interven-tions are never used to determine their own nor-malization. By mapping all targets into a standard-ized scale space, GRASP allows a single, dataset-agnostic weight vector ω (calibrated strictly on de-velopment environments; see Appendix B) to im-plicitly govern the theoretical λe interaction scale. Once scores and sketches are pre-computed, evalu-ating a subset costs O(|T |d) time with only O(nd )
+
+global storage. 
+
+4 Experiments 
+
+The core premise of subset-level attribution is coun-terfactual fidelity. In this section, we first evalu-ate this primary capability using rigorous subset-retraining protocols (Section 4.1). We then conduct ablation studies to isolate the mechanistic contri-butions of our interaction-aware components (Sec-tion 4.2). Finally, we demonstrate the operational utility of GRASP across downstream applications, including language model curation, cross-domain vision transfer, and semantic retrieval (Section 4.3). Setting-specific configurations for all experiments are detailed in Appendix B. 
+
+4.1 Counterfactual Subset-Utility Evaluation 
+
+Table 1 reports the Linear Datamodeling Score (LDS) evaluation, which directly tests counterfac-tual fidelity by measuring the rank correlation be-tween predicted subset utilities and their empiri-cal outcomes after retraining. To ensure a rigor-ous comparison, we strictly control the interven-tion candidate pool and the subset-retraining recipe across all methods. Our experimental testbed uti-lizes a 50M-parameter causal decoder-only Trans-former (Vaswani et al., 2017; Radford et al., 2019) trained on a 10B-token pool. This pool is randomly sampled from a comprehensive Common Crawl corpus curated via standard scalable data pipelines (Raffel et al., 2020; Penedo et al., 2023, 2024; Li et al., 2024). Complete metric definitions and base-line details are provided in Appendix B. The empirical results demonstrate that GRASP strictly dominates all baseline methods across both metrics on every evaluated benchmark. Notably, GRASP more than doubles the average task-level Spearman correlation compared to the strongest alternative, improving ρ from 0.174 (TracIn) to 0.361. Furthermore, it substantially elevates the positive-LDS fraction from 0.645 to 0.917, indicat-ing highly reliable directional predictions across diverse intervention samples. This substantial per-formance gap provides the central evidence that explicitly capturing train-train interactions yields a strictly superior surrogate for ranking concrete pretraining interventions. Practical pretraining attribution demands both cheap artifact construction and rapid subset evalua-53e-04 6e-04 5e-03          
+
+> Learning rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Spearman vs MC Shapley
+> 0.943
+> 0.969
+> 0.991
+> 0.943
+> 0.975
+> 0.994
+> 0.541
+> 0.593
+> 0.671
+> (a) One-step sample attribution
+> 3e-04 6e-04 5e-03
+> Learning rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Spearman vs true subset utility
+> 0.766
+> 0.955
+> 0.993
+> 0.766
+> 0.955
+> 0.995
+> 0.407
+> 0.671
+> 0.737
+> (b) One-step subset LDS
+> −4 −2 02
+> Predicted subset utility ( ×10 −4 )
+> −4
+> −2
+> 0
+> 2
+> True subset utility ( ×10 −4 )
+> (c) Subset LDS scatter, LR=5e-03
+> Projected + same int. ( ρ=0.737)
+> GRASP local ( ρ=0.995)
+> y=x
+> GRASP core GRASP local Projected + same int.
+
+Figure 2: One-step counterfactual fidelity on CC text. The GRASP relevance tracks exact one-step sample and subset utilities, and the local interaction surrogate improves the more nonlinear high-learning-rate regime. The projected-gradient control receives the same interaction correction but remains weaker. 
+
+Method Build (d) State Sweep (s) TracIn 2.2 1 0.086 TRAK 2.2 1024 159.8 InRun-DS 10.0 1 0.086 Ret.-DS 12.2 0 1.05 ×10 6
+
+GRASP 0.27 65 5.08 
+
+Table 2: GRASP achieves efficient artifact construc-tion and subset evaluation. Build reports days, State reports cached floats per example, and Sweep reports seconds for 100,000 candidate subsets. 
+
+tion. Table 2 uncouples these costs, reporting up-front construction in days and cached 100k-subset sweeps in seconds. While scalar methods like TracIn enable fast sweeps once artifacts exist, faith-ful per-evaluation InRun Data Shapley requires an expensive trajectory replay, projecting to 10 days for a full SciQ run. In contrast, GRASP aggres-sively optimizes both phases: it requires only 0.27 days for artifact construction and executes a 100k-subset sweep in 5.08 seconds, approximately 31 ×
+
+faster than TRAK’s 1024-dimensional feature ag-gregation. 
+
+4.2 Mechanistic Analysis and Ablations 
+
+To understand the source of these performance gains, we isolate the mechanistic contributions of individual GRASP components. Detailed one-step ground-truth construction and ablation protocols are given in Appendix B, with an additional cached protocol-selection diagnostic in Appendix Table 7. Figure 2 shows that the GRASP relevance core tracks both Monte Carlo Shapley values and one-step subset utilities. Furthermore, the interaction surrogate substantially improves the high-learning-rate regime where subset updates are less linear. Add.  
+
+> Raw
+> no resid.
+> no self
+> no pair
+> GRASP
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> Task-level Spearman
+> 0.086
+> 0.218
+> 0.067
+> 0.246
+> 0.341 0.360
+> Basic Common
+> Basic Logical
+> OpenBookQA
+> CSQA
+> SciQ
+> Average
+
+Figure 3: Impact of interaction components on subset prediction fidelity. We ablate GRASP components across all primary LDS benchmarks. Bars show mean task-level Spearman correlation ( ρ), and colored points show individual tasks. 
+
+A projected-gradient control with an identical in-teraction correction remains significantly weaker, indicating that the performance gain does not stem from adding a generic pairwise correction to an arbitrary score. The long-horizon LDS results exhibit the same pattern on complete subset retraining interventions. Relative to an additive-only predictor, incorporat-ing the fixed interaction components raises the macro-average task-level Spearman from 0.086 to 0.360 and pairwise intervention accuracy from 0.528 to 0.623. Figure 3 further shows the dataset-level structure of this gain: residual alignment is the most critical component family, and remov-ing it degrades every benchmark. Meanwhile, self terms provide a consistent secondary contri-bution, whereas hidden geometry exhibits more task-dependent behavior. 64.3 Downstream Applications and Transferability 
+
+Beyond baseline counterfactual fidelity, we eval-uate how the interaction-aware scoring principle performs in practical data pipelines and entirely distinct domains. 
+
+Fixed-compute language model curation. To evaluate practical utility in pretraining pipelines, we deploy GRASP to select a high-quality train-ing pool prior to model initialization. Table 3 re-ports completed held-out Common Crawl and SciQ evaluations under the same fixed-compute training schedule. GRASP achieves the lowest held-out CC loss and the best SciQ accuracy among the displayed full-budget diagnostic rows. We report early training-log snapshots and compact cross-architecture cleaning diagnostics separately in Ap-pendix Tables 8 and 9. Method CC loss ↓ PPL ↓ SciQ acc. ↑
+
+Random 2.9644 19.38 0.3203 InRun-1 2.9632 19.36 0.3086 InRun-2 2.9550 19.20 0.3047 GRASP 2.9421 18.96 0.3398   
+
+> Table 3: Held-out evaluation for fixed-compute CC-10B curation. All rows use the same model, optimizer, selected-pool size, and training budget.
+
+Method AUC 20% 40% 60% 80% Random 53.92 50.9 63.2 70.0 74.5 KNN 73.77 34.1 48.7 64.7 74.3 Infl. 75.59 45.8 64.4 72.2 76.9 
+
+TRAK 55.38 29.9 43.4 52.8 65.0 DataM. 54.34 47.6 64.1 71.4 74.1 InRun-1 80.28 55.6 68.9 71.9 75.5 InRun-2 80.04 52.8 66.4 73.4 75.9 GRASP 80.32 56.1 69.6 71.8 76.1     
+
+> Table 4: Cross-domain transferability on vision data selection. AUC evaluates noisy-label detection; re-maining columns report selected-data accuracy at each retention budget. KNN: KNN-Shapley, Infl.: Influ-ence, DataM.: Datamodels. All entries are percentages; higher is better.
+
+Cross-domain transfer: Vision data selection. 
+
+To verify whether this scoring principle generalizes beyond language modeling, we evaluate our formu-lation in the standard Data Shapley vision setting (Ghorbani and Zou, 2019): ImageNet-pretrained ResNet18 (Deng et al., 2009; He et al., 2016), CIFAR-10 (Krizhevsky, 2009) 1k subset, and 10% label noise. Table 4 shows that GRASP achieves the best AUROC and strong selected-data accuracy across budgets. 
+
+Interpretability and Safety Extensions. We ex-plore the semantic expressiveness of our attribu-tion signal in Appendix C, using WebOrganizer la-bels (Wettig et al., 2025) to show that GRASP pro-vides interpretable, category-level valuations that strongly complement traditional lexical retrieval. Additionally, Appendix Table 10 extends our frame-work to safety-oriented applications, demonstrat-ing that the same foundational scoring mechanism effectively identifies and filters misleading infor-mation during fine-tuning. Retained BM25 ρ Add. ρ GRASP ρ
+
+0.20 -0.153 -0.292 0.516 
+
+0.50 0.297 0.285 0.503 
+
+0.80 0.230 0.165 0.490 
+
+0.90 0.187 0.254 0.447 
+
+0.95 -0.688 0.065 0.279 
+
+0.99 -0.075 0.210 0.210   
+
+> Table 5: Regime-dependence of interaction effects.
+> Performance is evaluated on the SciQ retention-ratio environment. BM25 serves as a lexical baseline, while Add. represents the relevance-only additive core of GRASP. All method columns report task-level Spear-man ρ. The 0.95 and 0.99 rows represent high-retention stress regimes, evaluating behavior under extreme spar-sity of removed data.
+
+5 Discussion 
+
+When do subset interactions matter most? The necessity of interaction-aware attribution is inher-ently tied to the intervention regime. In practical curation scenarios where a selected candidate sub-set diverges significantly from the reference corpus, ranking quality is no longer dictated by isolated relevance alone. Instead, redundant examples in-duce gradient saturation along shared update di-rections, whereas complementary examples jointly maximize semantic coverage. Table 5 quantifies this phenomenon within the SciQ LDS environ-ment. Across substantial and moderate retention fractions, our geometric surrogate consistently out-performs its additive counterpart by modeling these subset interactions. Conversely, at an extreme 0.99 retention rate, the candidate subsets differ by only a 7negligible slice; here, the perturbation approaches a first-order additive limit. Crucially, GRASP el-egantly reduces to its additive core in this regime, inherently suppressing unstable interaction noise rather than amplifying it. This behavior aligns perfectly with the theoretical formulation of the quadratic term: it dominates when geometric inter-actions dictate the relative ordering of interventions, and gracefully diminishes when interventions are near-identical micro-perturbations. 
+
+Semantic interpretability of the geometric sur-rogate. While GRASP is primarily formulated as a robust counterfactual predictor, its underlying ge-ometry simultaneously yields highly interpretable corpus-level insights. As detailed in the WebOrga-nizer analysis (Appendix C), our attribution scores and traditional lexical retrieval capture fundamen-tally complementary structures. For topic-level retrieval, GRASP functions competitively as a stan-dalone metric, but fusing it with BM25 yields the optimal normalized Recall@1000. An analogous complementarity emerges for format labels when bridging GRASP with query overlap (Table 6). This synergy confirms that the learned attribution signal captures deeper semantic utility rather than merely mirroring surface-level lexical overlap. Fur-thermore, the checkpoint-wise category visualiza-tion (Figure 4) exposes explicit, signed source pref-erences: GRASP attributes positive expected value to knowledge-dense, article-like regions for the SciQ target, while actively penalizing boilerplate-heavy formats such as notices, support pages, and FAQs. Ultimately, these interpretable dynamics demonstrate that the geometric surrogate extends far beyond subset ranking, offering a principled mechanism for transparent corpus auditing and dataset valuation. 
+
+6 Related Work 
+
+Our work is situated at the intersection of data attribution, scalable influence estimation, subset counterfactual modeling, and pretraining data au-diting. We shift the core objective from assigning isolated scores to individual examples toward accu-rately predicting the empirical effects of concrete data interventions. 
+
+Data attribution and data valuation. Training data attribution investigates how predictions de-pend on specific examples. Methods like influence functions (Koh and Liang, 2017), representer points (Yeh et al., 2018), and RelatIF (Barshan et al., 2020) estimate local training contributions. Al-ternatively, Shapley-value methods formalize data value through marginal contributions across train-ing coalitions (Ghorbani and Zou, 2019). While interaction-aware, Shapley aggressively averages these coalition dynamics into a static scalar per example, and exact estimation is computationally prohibitive. In-Run Data Shapley mitigates this cost along a single training trajectory (Wang et al., 2025). In contrast, we explicitly retain reusable train-train geometry to predict the utility of con-crete subset interventions. 
+
+Scalable gradient-based attribution. Recent ad-vancements make gradient attribution viable for large-scale models. TracIn integrates gradient in-ner products across training checkpoints (Pruthi et al., 2020). Other methods scale Hessian-based influence (Schioppa et al., 2022), analyze LLM generalization (Grosse et al., 2023), derive efficient estimators for tuned models (Kwon et al., 2024), accelerate attribution via projected features (Park et al., 2023), and adapt gradient similarity for in-struction tuning (Xia et al., 2024). Closest to our domain, Chang et al. (2025) scale gradient-based influence to LLM pretraining. While these meth-ods successfully deliver scalable first-order signals, we focus exclusively on subset-level counterfactual fidelity rather than retrieving isolated influential examples. 
+
+Pretraining data auditing and selection. Exten-sive corpus analyses reveal substantial duplication, toxic content, and benchmark contamination in pre-training datasets (Elazar et al., 2024). Existing data selection techniques utilize gradient-derived rele-vance (Xia et al., 2024) or pretraining-scale tracing (Chang et al., 2025) to surface beneficial examples. GRASP addresses a distinct structural challenge: predicting the relative downstream utility of candi-date pretraining subsets. In this setting, redundancy, coverage, and subset interactions are first-class con-cerns, rendering purely lexical retrieval or indepen-dent example scoring mathematically insufficient. 
+
+7 Conclusion 
+
+This work reframes pretraining data attribution from isolated example scoring to subset-level counterfactual utility prediction. GRASP turns this view into a scalable surrogate by combining a smoothness-motivated geometric penalty, low-8dimensional sketches, and development-only pro-tocol selection. Across subset-retraining bench-marks, the method improves counterfactual ranking fidelity over scalable baselines, while the applica-tion diagnostics show that the same interaction-aware signal remains useful beyond the core LDS setting. These results suggest that subset geometry is a practical ingredient for auditing and optimizing massive pretraining corpora. 
+
+Limitations 
+
+Theoretical Approximations. Our theoretical formulation relies on a one-step smoothness lower bound. While this provides a principled mathemati-cal motivation, it serves as an approximation rather than a strict guarantee for the full non-convex dy-namics of Transformer pre-training. Consequently, we ground our claims in subset-retraining LDS as a rigorous empirical counterfactual, bridging the gap between analytical approximation and practical fidelity. 
+
+Empirical Scale. Our core LDS validation em-ploys a 50M-parameter architecture and a 10B-token candidate pool. Although this intermediate scale permits strictly controlled, compute-intensive interventions (i.e., extensive subset retraining), scaling laws for subset interactions remain an open empirical question. While our supplementary 1B-parameter DCLM scale-up suggests robust architec-tural transferability, validating these specific geo-metric interaction dynamics on frontier-scale mod-els remains a vital direction for future work. 
+
+Compression and Tractability. To ensure computational scalability over massive cor-pora, GRASP projects representations into low-dimensional feature sketches. This dimensional-ity reduction inherently trades fine-grained, long-range attention dependencies for tractability, posi-tioning the approach as a highly scalable surrogate rather than an exhaustive, lossless influence com-putation. 
+
+Target-Conditioning and Extreme Regimes. 
+
+Finally, our attribution protocols are explicitly target-conditioned. Rather than yielding a mono-lithic “universal quality” score, GRASP evaluates data utility with respect to specific downstream be-haviors. Additionally, extreme data interventions such as near-total corpus deletion violate the local perturbation assumption, which may necessitate specialized, ratio-aware scaling corrections when operating in such high-retention stress regimes. 
+
+Ethical Considerations 
+
+Attribution as Auditing, Not Absolute Causality. 
+
+Data attribution frameworks can significantly ad-vance responsible model development by auditing corpora for regions that drive harmful outputs, bias, or benchmark contamination. However, because these scores are continuous approximations, they should not be misconstrued as definitive causal proof that a specific document unilaterally gener-ated a given model behavior. When deploying at-tribution for data governance, practitioners should incorporate uncertainty metrics, negative controls, and explicit failure-mode analyses. 
+
+Data Privacy and Release Risks. Web-scale pre-training corpora inherently contain copyrighted, personally identifiable, or otherwise sensitive in-formation. Releasing high-resolution attribution tables or raw, highly influential training examples risks exposing this sensitive text or facilitating dataset membership inference. Any public release of attribution scores, retrieved examples, or corpus audits utilizing this method must strictly adhere to the underlying data licenses and robust privacy-preserving constraints. 
+
+References                       
+
+> Dimitris Achlioptas. 2003. Database-friendly random projections: Johnson-lindenstrauss with binary coins.
+> Journal of Computer and System Sciences , 66(4):671– 687. Special Issue on PODS 2001. Elnaz Barshan, Marc-Etienne Brunet, and Gintare Karolina Dziugaite. 2020. Relatif: Identifying explanatory training samples via relative influence. In Proceedings of the Twenty Third International Conference on Artificial Intelligence and Statistics ,volume 108 of Proceedings of Machine Learning Research ,pages 1899–1909. PMLR. Tyler Chang, Dheeraj Rajagopal, Tolga Bolukbasi, Lu-cas Dixon, and Ian Tenney. 2025. Scalable influence and fact tracing for large language model pretraining. In International Conference on Learning Representa-tions , volume 2025, pages 40976–40997. Sanjoy Dasgupta and Anupam Gupta. 2003. An elemen-tary proof of a theorem of johnson and lindenstrauss.
+> Random Structures & Algorithms , 22(1):60–65. Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. 2009. ImageNet: A large-scale hier-archical image database. In 2009 IEEE Conference
+
+9on Computer Vision and Pattern Recognition , pages 248–255. Yanai Elazar, Akshita Bhagia, Ian Magnusson, Abhi-lasha Ravichander, Dustin Schwenk, Alane Suhr, Pete Walsh, Dirk Groeneveld, Luca Soldaini, Sameer Singh, Hannaneh Hajishirzi, Noah Smith, and Jesse Dodge. 2024. What's in my big data? In Inter-national Conference on Learning Representations ,volume 2024, pages 7735–7790. Amirata Ghorbani and James Zou. 2019. Data shapley: Equitable valuation of data for machine learning. In 
+
+Proceedings of the 36th International Conference on Machine Learning , volume 97 of Proceedings of Machine Learning Research , pages 2242–2251. PMLR. Arthur Gretton, Karsten M. Borgwardt, Malte J. Rasch, Bernhard Schölkopf, and Alexander Smola. 2012. A kernel two-sample test. Journal of Machine Learning Research , 13(25):723–773. Roger Grosse, Juhan Bae, Cem Anil, Nelson Elhage, Alex Tamkin, Amirhossein Tajdini, Benoit Steiner, Dustin Li, Esin Durmus, Ethan Perez, Evan Hubinger, Kamil ˙e Lukoši ¯ut ˙e, Karina Nguyen, Nicholas Joseph, Sam McCandlish, Jared Kaplan, and Samuel R. Bowman. 2023. Studying large language model generalization with influence functions. Preprint ,arXiv:2308.03296. Yuling Gu, Oyvind Tafjord, Bailey Kuehl, Dany Had-dad, Jesse Dodge, and Hannaneh Hajishirzi. 2025. OLMES: A standard for language model evaluations. In Findings of the Association for Computational Linguistics: NAACL 2025 , pages 5020–5048, Al-buquerque, New Mexico. Association for Computa-tional Linguistics. Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. 2016. Deep residual learning for image recog-nition. In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition , pages 770– 778. Andrew Ilyas, Sung Min Park, Logan Engstrom, Guil-laume Leclerc, and Aleksander Madry. 2022. Data-models: Understanding predictions with data and data with predictions. In Proceedings of the 39th International Conference on Machine Learning , vol-ume 162 of Proceedings of Machine Learning Re-search , pages 9525–9587. PMLR. Pang Wei Koh and Percy Liang. 2017. Understanding black-box predictions via influence functions. In 
+
+Proceedings of the 34th International Conference on Machine Learning , volume 70 of Proceedings of Machine Learning Research , pages 1885–1894. PMLR. Alex Krizhevsky. 2009. Learning multiple layers of fea-tures from tiny images. Technical report, University of Toronto. Yongchan Kwon, Eric Wu, Kevin Wu, and James Y Zou. 2024. Datainf: Efficiently estimating data influence in lora-tuned llms and diffusion models. In Inter-national Conference on Learning Representations ,volume 2024, pages 21921–21942. Jeffrey Li, Alex Fang, Georgios Smyrnis, Maor Ivgi, Matt Jordan, Samir Gadre, Hritik Bansal, Etash Guha, Sedrick Keh, Kushal Arora, Saurabh Garg, Rui Xin, Niklas Muennighoff, Reinhard Heckel, Jean Mercat, Mayee Chen, Suchin Gururangan, Mitchell Worts-man, Alon Albalak, and 40 others. 2024. Datacomp-lm: In search of the next generation of training sets for language models. In Advances in Neural Infor-mation Processing Systems , volume 37, pages 14200– 14282. Curran Associates, Inc. James Martens and Roger Grosse. 2015. Optimizing neural networks with Kronecker-factored approxi-mate curvature. In Proceedings of the 32nd Interna-tional Conference on Machine Learning , volume 37 of Proceedings of Machine Learning Research , pages 2408–2417. PMLR. Todor Mihaylov, Peter Clark, Tushar Khot, and Ashish Sabharwal. 2018. Can a suit of armor conduct elec-tricity? a new dataset for open book question an-swering. In Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing ,pages 2381–2391, Brussels, Belgium. Association for Computational Linguistics. George L. Nemhauser, Laurence A. Wolsey, and Mar-shall L. Fisher. 1978. An analysis of approximations for maximizing submodular set functions—i. Mathe-matical Programming , 14(1):265–294. Team Olmo. 2026. Olmo 3. Preprint ,arXiv:2512.13961. Sung Min Park, Kristian Georgiev, Andrew Ilyas, Guillaume Leclerc, and Aleksander Madry. 2023. Trak: Attributing model behavior at scale. Preprint ,arXiv:2303.14186. Guilherme Penedo, Hynek Kydlíˇ cek, Loubna Ben al-lal, Anton Lozhkov, Margaret Mitchell, Colin Raffel, Leandro Von Werra, and Thomas Wolf. 2024. The fineweb datasets: Decanting the web for the finest text data at scale. In Advances in Neural Information Processing Systems , volume 37, pages 30811–30849. Curran Associates, Inc. Guilherme Penedo, Quentin Malartic, Daniel Hesslow, Ruxandra Cojocaru, Hamza Alobeidli, Alessandro Cappelli, Baptiste Pannier, Ebtesam Almazrouei, and Julien Launay. 2023. The refinedweb dataset for fal-con llm: Outperforming curated corpora with web data only. In Advances in Neural Information Pro-cessing Systems , volume 36, pages 79155–79172. Curran Associates, Inc. Garima Pruthi, Frederick Liu, Satyen Kale, and Mukund Sundararajan. 2020. Estimating training data influ-ence by tracing gradient descent. In Advances in Neural Information Processing Systems , volume 33, pages 19920–19930. Curran Associates, Inc. 
+
+10 Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, and 1 others. 2019. Language models are unsupervised multitask learn-ers. OpenAI technical report. Colin Raffel, Noam Shazeer, Adam Roberts, Kather-ine Lee, Sharan Narang, Michael Matena, Yanqi Zhou, Wei Li, and Peter J. Liu. 2020. Exploring the limits of transfer learning with a unified text-to-text transformer. Journal of Machine Learning Research ,21(140):1–67. Andrea Schioppa, Polina Zablotskaia, David Vilar, and Artem Sokolov. 2022. Scaling up influence functions. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 36, pages 8179–8186. Alon Talmor, Jonathan Herzig, Nicholas Lourie, and Jonathan Berant. 2019. CommonsenseQA: A ques-tion answering challenge targeting commonsense knowledge. In Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Tech-nologies, Volume 1 (Long and Short Papers) , pages 4149–4158, Minneapolis, Minnesota. Association for Computational Linguistics. Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Ł ukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information Pro-cessing Systems , volume 30. Curran Associates, Inc. Jiachen (Tianhao) Wang, Prateek Mittal, Dawn Song, and Ruoxi Jia. 2025. Data shapley in one training run. In International Conference on Learning Repre-sentations , volume 2025, pages 12358–12395. Johannes Welbl, Nelson F. Liu, and Matt Gardner. 2017. Crowdsourcing multiple choice science questions. In Proceedings of the 3rd Workshop on Noisy User-generated Text , pages 94–106, Copenhagen, Den-mark. Association for Computational Linguistics. Alexander Wettig, Kyle Lo, Sewon Min, Hannaneh Ha-jishirzi, Danqi Chen, and Luca Soldaini. 2025. Or-ganize the web: Constructing domains enhances pre-training data curation. Preprint , arXiv:2502.10341. Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. 2024. Less: select-ing influential data for targeted instruction tuning. In 
+
+Proceedings of the 41st International Conference on Machine Learning , ICML’24. JMLR.org. Chih-Kuan Yeh, Joon Kim, Ian En-Hsu Yen, and Pradeep K Ravikumar. 2018. Representer point se-lection for explaining deep neural networks. In Ad-vances in Neural Information Processing Systems ,volume 31. Curran Associates, Inc. 
+
+A Method Details 
+
+This appendix provides the formal derivations sup-porting the interaction-aware surrogate utilized for the counterfactual evaluation in Section 4. Our pri-mary objective is to delineate which components of our formulation are direct mathematical conse-quences of objective smoothness and which orig-inate from the approximation conditions imposed by the low-dimensional sketch. 
+
+Local influence direction. The local update di-rection ui introduced in the main text is formally instantiated through classical influence function analysis. Consider the weighted regularized empir-ical risk 
+
+R(θ, α ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+αiℓi(θ) + λreg r(θ), (19) where αi represents the weight assigned to train-ing example i. Assume R is twice continuously differentiable. Let θ⋆(α) be a local minimizer such that ∇θR(θ⋆(α), α ) = 0 . If the Hessian 
+
+H = ∇2
+
+> θ
+
+R(θ⋆(α), α ) is strictly positive definite, the Implicit Function Theorem guarantees the exis-tence of a differentiable solution branch. Differen-tiating the stationarity condition with respect to αi
+
+yields ∂θ ⋆(α)/∂α i = −n−1H−1∇θℓi(θ⋆(α)) .Recall that the evaluation utility is defined as 
+
+Ue(θ) = −Le(θ). Applying the chain rule eval-uated at the reference checkpoint θ gives the marginal utility change: 
+
+∂Ue
+
+∂α i
+
+= 1
+
+n ∇θLe(θ), H −1∇θℓi(θ) . (20) This derivation motivates defining the lo-cal influence-style update direction as 
+
+ui = H−1∇θℓi(θ), absorbing the shared 
+
+1/n scaling factor into the global learning rate. 
+
+Smoothness lower bound. Building upon this local linear approximation, we derive a certified lower bound for subset utility improvements. As-sume the target loss function Le is βe-smooth. By definition, for any parameter update ∆, the follow-ing inequality holds: 
+
+Le(θ + ∆) ≤ Le(θ) + ⟨∇ θLe(θ), ∆⟩ + βe
+
+2 ∥∆∥2.
+
+(21) We model the subset intervention as an aggregated gradient step defined by ∆ = −ηD T , where η ≥ 0
+
+is the step size. Substituting this into the smooth-ness condition and utilizing the utility definition 
+
+Ue = −Le yields: 
+
+Ue(θ − ηD T ) − Ue(θ) ≥ η⟨∇ θLe(θ), D T ⟩− βeη2
+
+2 ∥DT ∥2. (22) 11 Finally, substituting the subset aggregate direc-tion DT = P 
+
+> i∈T
+
+wiui directly recovers the one-step interaction lower bound presented in Theo-rem 1. Crucially, this bound relies solely on the 
+
+βe-smoothness of the target objective and does not require global convexity. 
+
+Set-function curvature and submodularity. 
+
+The idealized surrogate defined in Equation 13 of-fers a precise set-theoretic interpretation of subset “interaction.” Let Fe(T ) = bUint  
+
+> e
+
+(T ). For any el-ements i, j / ∈ T with i̸ = j, the discrete second difference characterizes the marginal interaction: 
+
+∆i∆j Fe(T ) = Fe(T ∪ { i, j }) − Fe(T ∪ { i})
+
+− Fe(T ∪ { j}) + Fe(T ).
+
+(23) Direct algebraic expansion yields: 
+
+∆i∆j Fe(T ) = −2λewiwj ⟨ui, u j ⟩. (24) This establishes a critical geometric intuition: aligned update directions naturally produce neg-ative discrete curvature (redundancy penalty), whereas opposing directions can yield positive cur-vature (complementary coverage). Consequently, GRASP functions as a signed pairwise-interaction set function. In the specific case where wi ≥ 0
+
+and all pairs exhibit non-negative inner products (⟨ui, u j ⟩ ≥ 0), the surrogate becomes globally sub-modular, reflecting classical diminishing returns (Nemhauser et al., 1978). This conditional sub-modularity is formalized below. 
+
+Proposition 1 (Local submodularity over aligned clusters) . Consider the unweighted discrete surro-gate defined by 
+
+F (T ) = η X
+
+> i∈T
+
+ai − λ X
+
+> i∈T
+
+ui
+
+> 2
+
+, λ > 0.
+
+Let Dalign be a candidate pool such that the pair-wise alignment ⟨ui, u j ⟩ ≥ 0 holds for all distinct 
+
+i, j ∈ D align . Then, the set function F is submodu-lar on Dalign . Moreover, for any S ⊆ T ⊆ D align 
+
+and k ∈ D align \T , the marginal diminishing return is strictly positive whenever P  
+
+> i∈T\S
+
+⟨uk, u i⟩ > 0.Proof. Let ∆kF (S) = F (S ∪{ k})−F (S) denote the marginal gain of adding element k to set S. The linear relevance term contributes a constant ηa k
+
+to every marginal gain. Expanding the quadratic penalty term yields: 
+
+∆kF (S) = ηa k − λ∥uk∥2 − 2λ X
+
+> i∈S
+
+⟨uk, u i⟩.
+
+To verify submodularity, we examine the difference in marginal gains for S ⊆ T :
+
+∆kF (S) − ∆kF (T ) = 2 λ X 
+
+> i∈T\S
+
+⟨uk, u i⟩.
+
+Under the alignment assumption ⟨uk, u i⟩ ≥ 0, this difference is strictly non-negative since λ > 0.This guarantees ∆kF (S) ≥ ∆kF (T ), satisfying the formal definition of diminishing returns and proving that F is submodular on Dalign . The strict inequality condition follows directly from the same expression. 
+
+Sketched surrogate and error bounds. To oper-ationalize this objective at scale, we introduce the sketched surrogate for a fixed nonnegative scale λ:
+
+bBsk  
+
+> e
+
+(T ; λ) = ηA e(T ) − λK raw (T ). (25) Let Bue (T ; λ) = ηA ue (T ) − λK u(T ) denote the exact local surrogate. If the sketch formulation satisfies bounded deviations on a subset family T
+
+such that 
+
+|Ae(T ) − Aue (T )| ≤ ϵA(T ), (26) 
+
+|Kraw (T ) − Ku(T )| ≤ ϵK (T ), (27) then applying the triangle inequality guarantees that for every λ ≥ 0 and T ∈ T , the subset predic-tion error is bounded by: 
+
+Bue (T ; λ) − bBsk  
+
+> e
+
+(T ; λ) ≤ ηϵ A(T ) + λϵ K (T ).
+
+(28) In scenarios where only pointwise relevance bounds are accessible, such that |ai,e − ⟨ ge, u i⟩| ≤ 
+
+ϵa, we can establish ϵA(T ) = ϵa
+
+P 
+
+> i∈T
+
+|wi|. We emphasize that this constitutes a conditional ap-proximation bound. The verification of a tightly bounded sketch error remains an empirical diag-nostic rather than a structural guarantee inherent to the architecture. 
+
+Proposition 2 (Local direct-sum approximation to product geometry) . Let xi, x j , r i, r j denote nor-malized hidden and residual sketches satisfying 
+
+∥xi∥ = ∥xj ∥ = ∥ri∥ = ∥rj ∥ = 1. Define the squared Euclidean distances as d2
+
+> h
+
+(i, j ) =
+
+∥xi − xj ∥2 and d2 
+
+> r
+
+(i, j ) = ∥ri − rj ∥2. Consider the product and direct-sum kernels: 
+
+kprod (i, j ) = ⟨xi, x j ⟩⟨ ri, r j ⟩, (29) 
+
+kdir (i, j ) = ⟨xi, x j ⟩ + ⟨ri, r j ⟩. (30) 12 The product kernel expands as: 
+
+kprod (i, j ) = 1 − 12
+
+ d2
+
+> h
+
+(i, j ) + d2 
+
+> r
+
+(i, j )
+
++ 14 d2
+
+> h
+
+(i, j )d2 
+
+> r
+
+(i, j ). (31) 
+
+Furthermore, the direct-sum kernel satisfies: 
+
+kdir (i, j ) = kprod (i, j ) + 1 − 14 d2
+
+> h
+
+(i, j )d2 
+
+> r
+
+(i, j ).
+
+(32) 
+
+Consequently, after omitting the constant offset, the direct-sum kernel and the product kernel agree strictly through the first order in the local squared distances. Their remaining discrepancy is confined to the fourth-order cross term. Proof. For any unit vectors, the inner product re-lates to Euclidean distance via ⟨xi, x j ⟩ = 1 −∥ xi −
+
+xj ∥2/2. Applying this identity identically to the residual sketches, substituting both into the defi-nition of kprod , and expanding the product yields the first result. Summing the two inner products directly yields kdir = 2 − 12 (d2
+
+> h
+
+(i, j ) + d2 
+
+> r
+
+(i, j )) .Subtracting the expanded form of kprod (i, j ) from this sum produces the second result. We stress that this proposition strictly charac-terizes a local approximation and does not imply a global equivalence between the direct-sum and product kernels. The constant offset is mathemati-cally rank-invariant for fixed-size unweighted sub-set interventions. Furthermore, this discrepancy is structurally mitigated by centered components such as Kcent . Outside these specific configurations, the direct-sum kernel inherently operates as a scalable empirical surrogate. 
+
+Centered component interpretation. Let 
+
+WT = P 
+
+> i∈T
+
+wi denote the total subset weight. When WT̸ = 0 , we define the weighted subset mean as μT = W −1
+
+> T
+
+P 
+
+> i∈T
+
+wiϕi. The centered ge-ometric component can then be strictly formulated as: 
+
+Kcent (T ) = W 2 
+
+> T
+
+∥μT − ¯ϕ∥2. (33) In the strictly non-negative regime where wi ≥ 0
+
+and WT > 0, the normalized term Kcent (T )/W 2
+
+> T
+
+exactly corresponds to the squared Maximum Mean Discrepancy (MMD) under a linear kernel (Gretton et al., 2012). This MMD metric captures the discrepancy between the weighted empirical distribution on subset T and the unweighted full-pool empirical distribution. For arbitrary signed weights, Equation 33 retains its structural interpre-tation as a squared distance under signed measures but must not be strictly interpreted as a valid prob-ability distance. 
+
+A projection sufficient condition for sketch error. 
+
+The conditional sketch-error bound established in Equation 28 admits a standard sufficient condition in the idealized scenario where both target rele-vance and training geometry undergo an identical random projection. Let xT = P 
+
+> i∈T
+
+wiui. Sup-pose the sketches are generated via a linear map 
+
+Π such that ϕi = Π ui and qe = Π ge. Consider a finite subset family T and construct the expanded finite vector set: 
+
+Xe = {xT : T ∈ T } ∪ { ge + xT : T ∈ T } ∪ { ge − xT : T ∈ T } .
+
+(34) Assume Π preserves all squared Euclidean norms within Xe up to a relative error ε ∈ (0 , 1) . Then, for every T ∈ T , the norm preservation directly guarantees: 
+
+∥ΠxT ∥2 − ∥ xT ∥2 ≤ ε∥xT ∥2. (35) Furthermore, applying the standard polarization identity, ⟨a, b ⟩ = ( ∥a + b∥2 − ∥ a − b∥2)/4, guar-antees that the inner product error is bounded by: 
+
+|⟨ Πge, ΠxT ⟩ − ⟨ ge, x T ⟩| ≤ ε
+
+2
+
+ ∥ge∥2 + ∥xT ∥2 .
+
+(36) Classical Johnson-Lindenstrauss embeddings pro-vide exactly this finite-set norm preservation (Das-gupta and Gupta, 2003; Achlioptas, 2003). Such embeddings require a sketch dimension scaling as 
+
+O(ε−2 log( |X e|/δ )) to achieve a failure probabil-ity bounded by δ. Under this idealized projection condition, one can rigorously set ϵK (T ) = ε∥xT ∥2
+
+and ϵA(T ) = ε(∥ge∥2 + ∥xT ∥2)/2 within Equa-tion 28. We explicitly note that this constitutes a theoretical sufficient condition. In practice, our hidden and residual feature sketches are evaluated empirically via the LDS diagnostic rather than as-sumed to perfectly satisfy this idealized random-ized projection criterion. 
+
+Retained and omitted parameterizations. For strictly additive models, retained-set scores equal a global corpus constant minus the correspond-ing omitted-set scores. This linear relationship ensures that the omitted representation remains 13 rank-invariant up to a sign reversal. However, for quadratic components, the retained and omit-ted parameterizations structurally diverge because full-pool cross terms do not trivially cancel. Fur-thermore, the subset omission fraction inherently rescales the expected magnitude of these geometric interaction terms. Suppose each training example is omitted independently with probability q. Let 
+
+Mi ∈ { 0, 1} denote the binary omission indica-tor and wi represent the deterministic weight. The expected squared norm of the omitted geometry evaluates to: 
+
+E
+
+ X
+
+> i
+
+Miwiϕi
+
+> 2
+
+ = q X
+
+> i
+
+w2 
+
+> i
+
+∥ϕi∥2
+
++ q2 X
+
+> i̸=j
+
+wiwj ⟨ϕi, ϕ j ⟩.
+
+(37) Consequently, under a uniform omission rate q,the expected self-interaction scales linearly with 
+
+q, whereas the pairwise cross-interaction decays quadratically with q2.
+
+Ranking stability of subset predictions. Let 
+
+B = {Sb}Bb=1 define the evaluation family of LDS subsets for a specific target or task-level aggregate. Denote the true realized utility as Ub = Ue(Sb) and the predicted surrogate utility as bUb = Ub + εb,where εb represents the approximation error. For any sampled subset pair (b, c ), the predicted rank-ing correctly recovers the true empirical ranking whenever the error difference is strictly bounded by the true utility gap: 
+
+|εb − εc| < |Ub − Uc|. (38) This margin condition mathematically guarantees correct pairwise ordering, as it implies ( bUb −
+
+bUc)( Ub − Uc) > 0. Consequently, assuming a uniform error bound ∥ε∥∞ ≤ εmax , the pairwise ranking accuracy is bounded below by: 
+
+PairAcc ≥ |P 2εmax |
+
+ B
+
+> 2
+
+ , (39) Here, P2εmax contains the subset pairs (b, c ) with 
+
+b < c and realized utility gap |Ub − Uc| > 2εmax .This formulation does not provide a tight theoret-ical bound on the continuous Spearman correla-tion coefficient, but it formalizes a critical gap con-dition inherent to rank-based counterfactual met-rics. Specifically, surrogate approximation errors degrade empirical fidelity only when their magni-tude exceeds the intrinsic retraining utility gaps between competing data interventions. 
+
+B Experimental and Implementation Details 
+
+LDS Benchmark Setup. Our full-dataset LDS evaluations employ a 50M-parameter causal decoder-only Transformer (Vaswani et al., 2017; Radford et al., 2019). The pre-training pool consists of 10B tokens randomly sampled from our Common Crawl corpus, processed through a DCLM/RefinedWeb-style data curation pipeline (Raffel et al., 2020; Penedo et al., 2023, 2024; Li et al., 2024). To ensure rigorous compar-isons, all methods within a given LDS environ-ment share an identical candidate pool, reference checkpoint, subset-retraining recipe, and evaluation targets. The primary evaluation benchmarks in-clude OpenBookQA (Mihaylov et al., 2018), Com-monsenseQA (Talmor et al., 2019), SciQ (Welbl et al., 2017), and the BasicSkills suite from the OLMo evaluation framework (Gu et al., 2025; Olmo, 2026). Evaluation metrics, including LDS mean, positive fraction, task-level Spearman ρ, and pairwise accuracy are all derived from the same retrained subset utilities, with Table 1 adopting task-level ρ as the principal ranking criterion. 
+
+Attribution Baselines. We benchmark GRASP against BM25, TracIn (Pruthi et al., 2020), and TRAK (Park et al., 2023), with all methods scoring the exact same CC-10B candidate rows. For BM25, text is lowercased and tokenized via 
+
+[A-Za-z0-9_]+ ; we remove tokens shorter than two characters alongside a fixed set of English stopwords and question words, setting k1 = 1 .2
+
+and b = 0.75 , and retain the top 50k training rows per evaluation query (stored in float16). For TracIn, we accumulate normalized gradient co-sine similarities from bfloat16 forward passes (se-quence length 2048). This utilizes the representa-tion from the tenth transformer block alongside the final layer normalization module, projected onto a 128-dimensional random space, aggregating across learning-rate-weighted checkpoints at steps 
+
+{1000 , 3000 , 5000 , 7000 , 8000 }. TRAK adheres to the same layer subset, checkpoint distribution, sequence length, precision, and 128-dimensional projection, reporting results based on this five-checkpoint variant. For language-based InRun-DS (Wang et al., 2025), we utilize the Ghost replay 14 engine optimizing for global-evaluation utility via AdamW (learning rate 5×10 −5). This process runs for a single replay epoch over a 50k-row train prefix and 256 validation examples, activating the input token embeddings, the final vocabulary projection head, as well as the internal attention and feed-forward projections. Because faithful per-target LDS replay under this framework is computation-ally prohibitive, we evaluate InRun-DS strictly as a global-utility reference rather than including it in the main per-target comparisons of Table 1. Fi-nally, Datamodel predictors (Ilyas et al., 2022) are trained directly on LDS outcomes, functioning as supervised oracles. 
+
+GRASP Configuration and Protocol. GRASP constructs an additive residual-alignment cache originating from the same 50M reference check-point, exporting 64-dimensional hidden and resid-ual sketches. Unless explicitly specified other-wise, token features are aggregated using a tail-mean-32 strategy, the residual top-k is set to 64, and residual sketches employ the γ−1/2 weighting detailed in Section 3.1. All hyperparameters, in-cluding component weights, interaction scales, and inclusion/omission strategies are strictly selected from finite calibration families using only devel-opment environments. These configurations are fully frozen prior to downstream evaluation. Fur-thermore, omitted-set scoring serves exclusively as a fixed deletion protocol; we do not rely on the strong assumption that retained-set and omitted-set utilities are perfectly symmetric. 
+
+Computational Efficiency and Ablations. Ta-ble 2 explicitly decouples the computational cost of artifact construction from the cached subset scor-ing phase. The cached sweep scores random can-didate subsets within a local CPU process, extrap-olated to 100k subsets, whereas the construction metrics reflect representative end-to-end runs for each respective baseline. For deeper algorithmic analysis, the one-step fidelity evaluation (Figure 2) compares GRASP against Monte Carlo Shapley values and fixed-size one-step subset utilities. Ad-ditionally, Figure 3 ablates individual component families to evaluate their independent contributions, performed without re-calibrating the remaining weights. 
+
+Downstream Applications and Scaling. Our DCLM-style curation experiments train a 1B-parameter tied-embedding LLaMA architecture Labels Rnd. BM25 Ovlp. G G+ BM25 G+ Ovlp. Topic 1.087 5.600 5.442 5.281 7.121 7.039 Format 0.979 3.160 3.363 3.303 4.041 4.100   
+
+> Table 6: Related-domain retrieval performance. We evaluate candidate CC-10B rows mapped to WebOrga-nizer labels (Wettig et al., 2025). Metrics denote mean normalized Recall@1000 (higher is better); G repre-sents GRASP.
+
+on matched-size CC subsets. The full-scale pre-training processes two million rows with a se-quence length of 2048, utilizing eight GPUs, a per-device batch size of 4, gradient accumulation of 16, and a peak learning rate of 10 −4 with co-sine decay. Training leverages bfloat16 precision, FlashAttention-2, and DeepSpeed ZeRO-2 opti-mization. Comprehensive full-budget held-out eval-uations are summarized in the main text (Table 3), while intermediate training optimization dynam-ics are tracked in Appendix Table 8. Finally, the vision-domain experiments strictly follow the stan-dard CIFAR-10/ResNet18 data-valuation protocol established by Ghorbani and Zou (2019). 
+
+C Qualitative Analysis of Attribution Preferences 
+
+To better understand the underlying data-selection dynamics of GRASP, we conduct a qualitative anal-ysis by categorizing scored CC-10B documents us-ing WebOrganizer topic and format labels. This investigation aims to explicitly profile the semantic and structural characteristics that GRASP intrin-sically prioritizes when targeting a specific down-stream task. 
+
+C.1 Synergy in Related-Domain Retrieval 
+
+We evaluate the retrieval efficacy of various scor-ing methods on a shared candidate pool of 88,781 documents, measuring performance via normalized Recall@1000. Recognizing that semantic attribu-tion and surface-level lexical overlap may prioritize distinct document characteristics, we report topic and format retrieval metrics independently. As demonstrated in Table 6, attribution-based and lexical signals provide highly complementary information. While GRASP demonstrates strong standalone competitiveness, fusing its attribution scores with lexical heuristics (BM25 or query over-lap) consistently yields the highest retrieval perfor-mance across both topic and format dimensions. 15 Negative         
+
+> Religion
+> Software Dev.
+> Games
+> Software
+> Crime & Law
+> Adult
+> Home & Hobbies
+> Health
+> Hardware
+> Social Life
+> Finance & Busin.
+> Transportation
+> Sports & Fitness
+> Fashion & Beauty
+> 100 50 050 100
+> 1k
+> 3k
+> 5k
+> 7k
+> 9k
+> Topic categories
+> Positive
+> Entertainment
+> Art & Design
+> Politics
+> Science & Tech.
+> History
+> Literature
+> Food & Dining
+> Industrial
+> Education & Jobs
+> Travel
+> Negative
+> Legal Notices
+> Customer Support
+> Documentation
+> FAQ
+> Spam / Ads
+> Tutorial
+> Q&A Forum
+> Academic Writing
+> Product Page
+> Creative Writing
+> Comment Section
+> Audio Transcript
+> About (Org.)
+> Listicle
+> Knowledge Artic.
+> 100 50 050 100
+> Signed contribution share (%)
+> 1k
+> 3k
+> 5k
+> 7k
+> 9k
+> Format categories
+> Positive
+> Truncated
+> About (Pers.)
+> News Article
+> News (Org.)
+> Structured Data
+> Nonfiction Writ.
+> Content Listing
+> User Review
+> Personal Blog
+
+Figure 4: Evolution of topic and format contributions. Aggregated GRASP attribution shares across training checkpoints for the SciQ target. Positive and negative mean-score masses are normalized independently per checkpoint to illustrate relative category preferences over time. 
+
+C.2 Checkpoint-Wise Category Contributions 
+
+To enhance the interpretability of our attribution framework, we analyze the mean signed attribu-tion scores aggregated by WebOrganizer categories across multiple training checkpoints. By indepen-dently normalizing the positive and negative attri-bution mass within each checkpoint, we ensure that the relative categorical contributions remain clearly identifiable, even as the absolute magnitude of the attribution signal fluctuates throughout the training trajectory. Figure 4 illustrates these aggregated category-level attribution dynamics. From a topical perspec-tive, GRASP consistently assigns positive utility to knowledge-dense source domains for the SciQ target, while actively penalizing generic web cat-egories that lack strict task alignment. A paral-lel trend emerges in the format view, where the attribution signal effectively isolates high-value, structurally coherent formats (e.g., articles) from lower-utility boilerplate content (e.g., notices, sup-port pages, and FAQs). Crucially, these distinct selection patterns validate GRASP as a nuanced, model-conditioned valuation signal: rather than merely reflecting the underlying source distribution or relying on shallow lexical heuristics, it dynami-cally assigns semantically grounded utility to broad data regions throughout the pre-training process. 
+
+D Supplementary LDS Robustness Results 
+
+To further validate the stability of our attribution framework, this section presents comprehensive robustness evaluations that extend beyond the pri-mary benchmarks established in Table 1. These analyses stringently stress-test the LDS protocol under diverse configurations, demonstrating its con-sistent reliability without incurring the computa-tional overhead of additional model training. 
+
+D.1 Transferability of Cached GRASP Configurations 
+
+To assess the robustness of GRASP across vary-ing domains, we investigate the transferability of fixed component weights. Specifically, we calibrate the interaction-component weights on a designated development task (or tasks), freeze them, and evalu-ate the resulting cached scores and sketches across three primary LDS benchmarks. 16 Calib. SciQ ρ Logic ρ OBQA ρ Pos. SciQ 0.420 0.298 0.309 0.876 Logical 0.333 0.470 0.307 0.906 SciQ + Logical 0.398 0.451 0.314 0.909  
+
+> Table 7: Transferability of fixed GRASP components.
+> Interaction-component weights are calibrated on the tasks specified in each row and subsequently frozen. We then evaluate across all target tasks using the reused cached hidden/residual sketches and subset-retraining ground truth, requiring zero additional model training.
+
+As illustrated in Table 7, we observe a clear specialization-generalization dynamic. While single-task calibration naturally yields optimal per-formance on its respective source domain, joint calibration (SciQ + Logical) prevents overfitting and enhances transferability to unseen tasks (e.g., OpenBookQA), ultimately achieving the highest average positive fraction. 
+
+E Supplementary Curation Results 
+
+Beyond direct fidelity evaluations, we investigate the practical utility of subset-level attribution in large-scale data-selection pipelines. To isolate cu-ration efficacy, these supplementary experiments are conducted under strictly matched training bud-gets, serving to demonstrate downstream scalability rather than establishing core LDS fidelity. 
+
+E.1 Optimization Dynamics in Fixed-Compute DCLM Curation 
+
+To evaluate curation efficacy at scale, we train a 1B-parameter language model on matched-size CC-10B subsets selected by each policy. While the comprehensive full-budget held-out evaluations are detailed in Table 3, we additionally examine the op-timization dynamics during pre-training. Table 8 re-ports intermediate training losses at matched steps, demonstrating that GRASP consistently accelerates early-stage convergence compared to the baselines. Method 9k ↓ 12k ↓ 14k ↓
+
+GRASP 2.6342 2.4965 2.4614 
+
+InRun-1 2.7297 2.6637 2.6020 Random 2.7540 2.6447 2.6221 BM25 2.7920 2.6830 2.6532   
+
+> Table 8: Intermediate training loss dynamics. Losses are recorded at specific steps under the fixed-compute DCLM scale-up setting. GRASP maintains consistently lower training loss throughout the observed trajectory.
+
+Model InRun-1 InRun-2 GRASP Gain GPT-2 5.8417 5.8237 5.7788 0.0449 Pythia 5.6937 5.7020 5.5947 0.0990    
+
+> Table 9: Cross-architecture generalization in CC cleaning. Each row reports the final held-out loss (lower is better) for the respective model architecture. Gain
+> indicates the absolute loss reduction of GRASP over the strongest runner-up.
+
+E.2 Cross-Architecture Generalization in Data Cleaning 
+
+We further investigate whether our data-scoring mechanism generalizes across different model fam-ilies by evaluating compact CC-cleaning runs on GPT-2 and Pythia-410M architectures. This setting stringently tests the architecture-agnostic robust-ness of the curation policy. As shown in Table 9, GRASP attains the low-est final held-out loss across both architectural paradigms. This consistent margin of improvement confirms that our scoring rule transfers robustly, ef-fectively identifying high-quality pre-training data without relying on architecture-specific inductive biases. 
+
+F Generalization to Safety and Misleading Information Detection 
+
+Beyond general data quality curation, we investi-gate whether our attribution framework can serve as a robust countermeasure against the risks of misleading information injected during fine-tuning. This evaluation assesses the capability of GRASP to isolate suspicious training examples that could compromise model safety, particularly in chat as-sistants. We benchmark our approach against es-tablished lightweight detection baselines under a unified evaluation protocol. As Table 10 demonstrates, the attribution signals derived from GRASP naturally extend to safety-oriented data ranking. By effectively identify-ing misleading examples, GRASP consistently im-proves upon the F1 and AUC scores of existing baseline countermeasures, highlighting its versatil-ity as a defensive filtering mechanism. 17 Method F1 AUC Prec. Rec. STRIP 0.177 0.645 0.097 1.000 
+
+ONION 0.172 0.636 0.099 0.750 Pred-Div topK 0.025 0.355 0.025 0.025 IFE strict-first-n 0.182 0.839 0.182 0.182 IFE README-exact 0.200 0.884 0.200 0.200 GRASP 0.300 0.886 0.300 0.300 
+
+Table 10: Detection of misleading information and safety risks. Performance comparison of GRASP against baseline countermeasures for identifying ma-licious or compromised fine-tuning examples. All meth-ods are evaluated under a strictly standardized protocol. 
+
+18
