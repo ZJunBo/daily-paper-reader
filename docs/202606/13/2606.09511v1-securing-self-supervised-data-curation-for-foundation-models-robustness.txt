@@ -1,0 +1,686 @@
+Title: Securing Self-supervised Data Curation for Foundation Models Robustness
+
+URL Source: https://arxiv.org/pdf/2606.09511v1
+
+Published Time: Tue, 09 Jun 2026 02:21:09 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# Securing Self-supervised Data Curation for Foundation Models Robustness 
+
+Sandeep Gupta 1,2* and Roberto Passerone 2
+
+1* Centre for Secure Information Technologies (CSIT), Queen’s University Belfast, UK. 
+
+2Department of Information Engineering and Computer Science, University of Trento, Italy. *Corresponding author(s). E-mail(s): s.gupta@qub.ac.uk; Contributing authors: roberto.passerone@unitn.it; 
+
+Abstract 
+
+Self-supervised data curation provides a pathway to scaling and improving the generalization capabilities of machine learning models. By leveraging self-supervised learning (SSL) for data curation, the demand for massive training datasets required by foundation models can be effectively met. SSL greatly alle-viates the costs associated with annotation and manual dataset curation while minimizing the need for human oversight. However, the integrity of SSL-curated datasets must be rigorously checked, as reliance on anonymous and unvetted external sources can substantially increase the risk of data poisoning. In this paper, we propose a Poisoned Data Detector (PDD), an active defense mecha-nism designed to ensure the integrity of SSL-curated datasets prior to foundation model training. PDDs are designed using a combination of the pretrained Image-Bind model and traditional classifiers, including Random Forest (RF), k-Nearest Neighbors (KNN), Naive Bayes (NB), and Support Vector Machines (SVM). We rigorously evaluated PDDs using 176,200 images from three diverse datasets and three different adversarial attacks encompassing both in-distribution and out-of-distribution scenarios. Notably, SVM-PDD achieves superior performance for both in-distribution (Set3–Set5) and out-of-distribution (TrueFace and 140K RealFace) datasets. Our design demonstrates strong scalability and enables the rapid integration of new adversarial attack detectors through an ensemble approach. 
+
+Keywords: Foundation models, self-supervised learning, data curation, poisoning attack 
+
+1
+
+> arXiv:2606.09511v1 [cs.CV] 8 Jun 2026
+
+## 1 Introduction 
+
+Visual Foundation Models (VFMs) have shown the capability to effectively acquire visual features, producing representations that exhibit strong generalization and trans-ferability. These representations integrate both image and text features within a shared semantic space, facilitating their application to a diverse array of downstream tasks in a zero-shot or one-shot manner [1]. VFMs can be pre-trained models typ-ically trained on vast datasets comprising billions of image-text pairs. The training process is efficiently automated through self-supervised data curation using models such as Contrastive Language-Image Pre-training (CLIP) [2] and Deeper Into Neu-ral Networks (DINOv2) [3]. Additionally, large language models (LLMs) enhance the generation of training data by producing images from text prompts. Self-supervised learning (SSL) is a subset of unsupervised learning that extracts discriminative fea-tures from unlabeled data to aid in labeling and automate data curation [4]. SSL supports various tasks, including segmentation, classification, and regression, offering a scalable and cost-effective alternative to the resource-intensive and time-consuming process of manual data labeling. At present, the prevalent real-world SSL curation pipelines used to produce billion-scale datasets for visual foundation models include the CLIP-driven web-scraping approach of LAION [5], the benchmark-driven filtering framework of DataComp [6], and the embedding-based retrieval pipeline employed in DINOv2 [3]. Table 1 compares the three pipelines, each illustrating the shift toward automated, scalable curation in SSL. Although they aim to reduce dependence on labeled data and mitigate noise in web-scale sources, their reliance on large volumes of unvetted external data introduces multiple avenues for potential poisoning attacks.                            
+
+> Table 1 A comparison between the prevalent real-world SSL curation pipelines
+> Aspect LAION [5] DataComp [6] DINOv2 Retrieval [3] Data Modality Image-text pairs Image-text pairs Images only Core Focus Web scraping +CLIP filtering Benchmark for curation strategies Embedding-based retrieval from web Scale 5.85B pairs 12.8B candidates; subsets up to 1B 1.2B candidates; 142M images Key Innovation Distributed common crawl parsing + safety scores Fixed models for fair data comparison Self-supervised kNN expansion Output Use CLIP/Stable Diffusion training Leaderboard-evaluated CLIP models ViT self-distillation (e.g., DINOv2)
+
+As VFMs expand in data and model dimensionality, SSL is emerging as a criti-cal research focus [3]. However, poisoning attacks pose a significant threat to VFMs training, as adversaries can manipulate training data or disrupt the training process to maliciously alter the model behavior [7]. As illustrated in Figure 1, Data poison-ing attacks involve tampering with training data, whereas model poisoning attacks 
+
+directly compromise the model itself. Data poisoning attacks can be further classi-fied as dirty-label or clean-label. Dirty-label attacks manipulate both the data content 2and labels, while clean-label attacks alter only the data content. Pre-labeled datasets or data from anonymous and unverified sources can serve as potential entry points for data poisoning attacks, indirectly compromising the integrity of the final system. Malicious third-party platforms, including Machine Learning as a Service (MLaaS) providers and distributors of pre-trained models and codebases, can introduce model poisoning attacks by intentionally manipulating the target system. Defense strategies against poisoning attacks can be broadly categorized as pas-sive , which focus on post-attack remediation, or active , which implement preventive measures [8]. In this paper, we propose a novel mechanism for detecting poisoned data in datasets curated using SSL for VFM training, which can be described as an active defense mechanism. Malicious actors can exploit SSL pipelines to orchestrate data poisoning attacks and upload tainted datasets online. This vulnerability poses a substantial security risk, particularly in environments where comprehensive moni-toring of VFM training is infeasible. Given the potential for significant downstream impact, ensuring the integrity of the training data is as crucial as securing the final VFM deployment. Poisoning Attacks     
+
+> Data Model
+> Clean Label Dirty Label DP in Distributed Learning
+> DP in Central Learning
+> Fig. 1 Illustration of poisoning attacks on data and models. Data poisoning (DP) attacks involve tampering with training data, such as dirty-label or clean-label data poisoning. Model poisoning attacks directly compromise the model itself, depending on whether the victim model is trained in a centralized or distributed manner.
+
+The main contributions of this paper are highlighted below. 
+
+• Propose a Poisoned Data Detector (PDD) to verify SSL-curated datasets integrity before they are used for foundation model training as an active defense mechanism. Our design exhibits strong scalability and facilitates the rapid integration of new adversarial attack detectors through an ensemble approach. 
+
+• PDDs are designed using a combination of the pretrained ImageBind model and traditional classifiers, including Random Forest (RF), k-Nearest Neighbors (KNN), Naive Bayes (NB), and Support Vector Machines (SVM). Each PDD is trained on 10%, 20%, 30%, 40%, and 50% of the data, yielding twenty PDD variants in total. 
+
+• Rigorous experiments are performed to evaluate twenty PDDs using 176,200 images from three diverse datasets and three different adversarial attacks encompass-ing both in-distribution (ID) and out-of-distribution (OOD) scenarios. SVM-PDD demonstrates superior performance in detecting poisoned data. The rest of the paper is structured as follows: Section 2 provides an overview of foundation models, self-supervised data curation, and real-world self-supervised data 3curation pipelines. Section 4 describes data poisoning attacks on data curated using SSL to subvert a VFM during its training phase. Section 5 defines the methodology for designing the proposed solution, including network and dataset selection, poisoned dataset generation, and the poisoned data detector. Section 6 presents the high-level design of the proposed solution for SSL-curated dataset integrity checks and the exper-imental results. Section 3 discusses the related work to data poisoning attacks. Finally, Section 7 concludes the article and outlines future directions. 
+
+## 2 Background 
+
+Visual Foundation Models (VFMs) are large-scale pre-trained models that learn rich visual representations from massive image-text or image-only datasets, enabling strong generalization across diverse downstream tasks such as classification, detection, segmentation, and pose estimation in zero- or few-shot settings [1, 9]. 
+
+2.1 Self-supervised data curation 
+
+Figure 2 depicts a comparison between supervised-, unsupervised-, and self-supervised learning. Supervised learning typically requires large volumes of manually labeled data to train models effectively and achieve superior performance [4]. In contrast, unsupervised learning discovers patterns in unlabeled data without explicit super-vision. Given the cost and time associated with manual annotation, self-supervised data curation has emerged as an efficient strategy for generating labeled data, reduc-ing reliance on human labels and supporting the pretraining of foundation models. Recent self-supervised methods have attracted considerable attention for their ability Supervised Unsupervised Self-supervised     
+
+> Input:
+> Target: Cat
+> Input: Input 1: Input 2: Meow
+> Related
+> information
+> Fig. 2 Illustration of supervised learning, unsupervised learning, and SSL. SSL can automatically generates a large volume of labeled data for visual foundation models training addressing the limita-tions of manual labeling process.
+
+to exploit structure in unlabeled data and improve representation learning, helping alleviate some limitations of manual labeling [10]. Self-supervised approaches are com-monly grouped into generative, contrastive, and adversarial families, although exact taxonomies vary across surveys. Generative SSL trains an encoder to map input data (x) to a latent representation ( z), and a decoder to reconstruct x from z. Contrastive 4SSL learns representations by maximizing similarity between different views of the same data ( x) in the latent space ( z). Generative-contrastive SSL employs an encoder-decoder to generate synthetic data, and a discriminator to distinguish it from real data, thereby learning robust representations. Methods such as CLIP [2] and DINOv2 [3] efficiently automate the VFM training process. CLIP [2] matches captions to images as a simple pre-training task. CLIP uti-lizes contrastive learning to jointly train image and text encoders, matching images to their corresponding text descriptions by distinguishing them from other (image, text) pairs within a batch. The method successfully yielded 400 million image-text pairs from the internet, demonstrating its scalability and effectiveness in generating massive datasets in an SSL setting. Like the GPT family, CLIP demonstrates emer-gent capabilities during pre-training, excelling in tasks such as OCR, geo-localization, and action recognition. DINOv2 [3] automates the creation of tailored, diverse, and curated image datasets, offering a significant improvement over traditional uncurated approaches. DINOv2 is trained using various Vision Transformer (ViT) architectures on a dataset of 142 million images. Subsequently, the curated pre-training dataset is constructed by retrieving images from the uncurated data source that closely resemble those in the curated sources including ImageNet-1k and Google Landmarks. The pro-cess involves computing high-dimensional image embeddings using a self-supervised ViT-H/16 model pre-trained on ImageNet-22k. These embeddings are then used to calculate cosine similarity, enabling effective clustering of the uncurated data with k-means. SSL can serve as an alternative to text-guided pre-training, supporting tasks such as segmentation, classification, and regression. Moreover, LLMs can facilitate image generation from text prompts, further expanding the training data pool. 
+
+2.2 Real-world self-supervised data curation pipelines 
+
+While CLIP and DINOv2 established the foundational principles of automated data curation, contemporary foundation-model training relies on substantially larger and more sophisticated pipelines operating at web scale. We outline the three dominant paradigms currently employed to construct billion-scale datasets without requiring any manual labeling. 
+
+2.2.1 LAION-style Pipelines 
+
+As described in Table 2, the LAION pipeline is a three-stage, distributed web-scraping and filtering framework designed to construct large-scale, open-source, CLIP-filtered image–text datasets [5]. It begins with massive web archives such as Common Crawl (CC) and produces high-quality image-text pairs (e.g., 5.85 billion in LAION-5B). The pipeline emphasizes aesthetic and semantic alignment without manual curation, relying on CLIP embeddings for automated quality scoring. 
+
+2.2.2 DataComp Benchmark Pipelines 
+
+As described in Table 3, DataComp is a benchmark framework for evaluating data-curation strategies rather than a single dataset [6]. It standardizes the model archi-tecture (e.g., CLIP) and training hyperparameters, requiring participants to innovate 5Table 2 LAION high-level architecture stages 
+
+Stage Description Key Components/Tools Data Flow/Input-Output 
+
+Candidate Extraction Parse web archives to identify image-text pairs (e.g., <img alt=“...” > tags). Distributed cluster (e.g., AWS workers) [11]; HTML parsing on CC snapshots ( ≈300 TiB/month, ≈3B pages). Input: Raw CC HTML files. Output: ≈20-30B candidate URL-text pairs (unfiltered). Download and Initial Processing Download images and compute basic metadata (e.g., resolution, deduplication). img2dataset (parallel downloader) [12]; PySpark for deduplication; GPU nodes for fast early filtering. Input: Candidate URLs. Output: Downloaded images and text (≈12-15B pairs); remove broken/invalid samples. Quality Filtering and Embedding Score pairs for semantic alignment (image-text similarity) and safety. CLIP, ViT-B/32 or ViT-L/14 for embeddings; cosine similarity threshold (e.g., 0.28 for English); Autofaiss for kNN indexing [13]; NSFW/watermark detectors [14]. Input: Processed pairs. Output: Filtered dataset (e.g., 5.85B pairs in LAION-5B: 2.3B English and 2.2B multilingual, 1B unlabeled); includes embeddings and safety scores. 
+
+Table 3 DataComp high-level architecture stages 
+
+Stage Description Key Components/Tools Data Flow/Input-Output 
+
+Candidate Pool Generation Extract raw image-text pairs from web sources. Common Crawl parsing; initial deduplication (e.g., exact/near-duplicates via hashing) [15]. Input: CC archives ( ≈240T tokens total). Output: 12.8B uncurated image-text pairs (candidate pool). Curation and Filtering Apply participant-defined strategies (e.g., quality scoring, mixing). Baselines: CLIP similarity (top 0.3 fraction) and image-based filters (e.g., aesthetic, watermark detection) [16]. OpenCLIP for scoring [17]; deduplication (rust-based for efficiency); data mixing (e.g., balance classes). YAML configs for Ray-based pipelines. Input: Candidate pool. Output: Curated subset (e.g., DataComp-1B baseline: 1B high-quality pairs). Standardized Training Evaluation,Train fixed CLIP model on curated data; test on downstream tasks. OpenLM framework [18]; scales: XS/S/M/L/XL; 53 evaluations (e.g., ImageNet zero-shot, segmentation). Input: Curated dataset. Output: Model performance metrics (e.g., 79.2% ImageNet accuracy for DataComp-1B, +3.7% over OpenAI CLIP). 
+
+specifically in data selection and filtering from a shared candidate pool. The framework conducts evaluation through a fixed training pipeline and comprehensive downstream testing (typically across 38-53 tasks). It provides two tracks: Filtering, which permits the use only of the provided candidate pool, and BYOD (‘bring your own data’), which allows the incorporation of external data in addition to the pool. DataComp spans multiple scales, ranging from XS (approximately 412M parameters, ≈4 GPU-hours) to XL (approximately 7B parameters, ≈40k GPU-hours). 
+
+2.2.3 DINOv2 Retrieval Pipeline (LVD-142M) 
+
+As described in Table 4, the DINOv2 pipeline is a fully automated, self-supervised system for curating large-scale, image-only datasets without relying on text annota-tions [3]. Starting from a small set of high-quality ‘seed’ images drawn from curated 6sources such as ImageNet, the pipeline retrieves visually similar examples from mas-sive uncurated web collections. These images are embedded using a self-supervised ViT-H/16 model and matched via cosine similarity, enabling efficient clustering and large-scale expansion of the curated set. The result is a balanced and diverse dataset—exemplified by LVD-142M (142M images) that supports high-quality pre-training through self-distillation using DINO and iBOT losses. By grounding the selection process in robust visual embeddings rather than labels, the pipeline ensures scalable dataset growth while maintaining semantic coherence and visual quality. 
+
+Table 4 DINOv2 high-level architecture stages                  
+
+> Stage Description Key Components/Tools Data Flow/Input-Output
+> Embedding Generation Extract features from curated and uncurated images. Pre-trained ViT-H/14 (self-supervised on ImageNet-22k); high-dimensional embeddings (e.g., 1024-dim). Input: Curated seeds (≈1-10M images from ImageNet-22k, Google Landmarks) + uncurated pool ( 1.2B web images). Output: Embeddings for all images. Deduplication Remove near-duplicates to increase diversity Copy detection (e.g., perceptual hashing); filter out test/validation set overlaps. Input: Embeddings and images. Output: Deduplicated uncurated set ( ≈reduced by 10-20%). Retrieval Augmentation, Match uncurated images to seeds via similarity; Balance concepts. Cosine similarity and k-means clustering; kNN retrieval; self-supervised expansion. Input: Deduplicated embeddings. Output: Augmented dataset (LVD-142M: 142M diverse images, balanced across concepts).
+
+While these automated pipelines enable unprecedented scale, their dependence on external, unverified data sources can introduce critical risks of data poisoning. 
+
+## 3 Related work 
+
+Defense mechanisms against poisoning attacks can be divided into passive defenses, which remediate attacks after they occur, and active defenses, which prevent attacks proactively [8]. Training data sanitization employs filtering algorithms to identify, remove, or revise poisoned data points within the training dataset. Model parame-ter sanitization focuses on detecting anomalies in the victim model parameters and subsequently correcting them to restore normal functionality. Active defense miti-gates data poisoning by employing data preprocessing techniques, including cleaning, enhancement, and transformation, to scrutinize raw training data. Robust training methods further strengthen defenses by making the training process resilient to poison-ing attacks. Countermeasures against poisoning attacks include training data filtering, robust learning, and auxiliary tools [8]. Training data filtering, employing techniques such as input manipulation detection and gradient shaping, mitigates the impact of outliers and offers attack-agnostic robustness. Model verification and robustification techniques enhance adversarial resilience against model poisoning attacks and effec-tively detect backdoor attacks. Integrating auxiliary tools like Generative Adversarial Networks (GANs) and robust statistical methods can significantly improve model 7classification capabilities by refining learned representations and emphasizing critical signal components. Fares and Nandakumar [19] propose Attack To Defend (A2D) approach that detects poisoned models by exploiting their inherent susceptibility to adversarial per-turbations. The authors introduce Sensitivity to Adversarial Perturbations (SAP) to quantify a model sensitivity to adversarial attacks at a specific perturbation bound. The metric enables a normalized comparison of models adversarial sensitivity (robust-ness). A poisoned target model exhibits a higher SAP than a benign model, which can be leveraged for detecting poisoned models. Ishmam and Thomas [20] propose semantic shield for defending against backdoor and poisoning attacks on contrastively trained vision language models by enforcing knowledge-guided train-time constraints. This method integrates a prompting technique using an open-source language model to freely extract constituent knowledge elements from any caption. Chen et al. [21] present De-Pois, an attack-agnostic defense designed to miti-gate diverse poisoning attacks, including Targeted Clean-Label Poisoning, Poisoning Attack With GAN, Label-Flipping Attack, and Regression Attack. The approach involves training a companion model on clean samples to approximate the target model behavior. Poisoned samples are identified by detecting significant discrepancies between the predictions of the companion and target models, eliminating the need for specific knowledge about the attack methodology or underlying machine learn-ing algorithms. Tejankar et al. [22] propose PatchSearch, a method that defends SSL models against patch-based data poisoning attacks by identifying and filtering out poi-soned samples. This approach follows a three-stage pipeline: (1) initial model training on a potentially poisoned dataset, (2) identification and removal of poisoned samples using the PatchSearch algorithm, and (3) final model training on the cleaned dataset. Guan et al. [23] propose Shapley Pruning framework that leverages neuron interaction analysis to identify and mitigate backdoor attacks in poisoned models. This method prunes infected neurons, preserving model structure and accuracy. Zhang et al. [24] propose Causality-inspired Backdoor Defense (CBD) that learns deconfounded representations for classification. This approach employs causal graph analysis to model backdoor attacks as confounding variables, which introduce spurious correlations between input images and target labels. Specifically, the backdoor trigger is conceptualized as a confounder, establishing a non-causal path exploited by the network during training. This path leads to erroneous predictions when the trigger is present, effectively highlighting the vulnerability targeted by backdoor attacks. Peri et al. [25] propose Deep k-NN, a representation-based defense that detects clean-label poisoning by computing the average distance of each sample to its k-nearest neighbors in the feature space of a lightly fine-tuned proxy model. Poisoned samples within the target class exhibit significantly larger distances than clean samples, enabling outlier removal without requiring a separate clean reference set. Table 5 provides a comparison of existing defenses against data poisoning, with a focus on key aspects relevant to SSL-curated datasets for foundation models. 
+
+> Table 5 : Comparison of Data Poisoning Defenses
+
+8Defense Core Mechanism Threat Model Strengths Limitations Relevance to SSL Curation 
+
+Activation Clustering, 2018 [26] Clusters neuron activations in the target class’s penultimate layer (using k-means, k=2); removes the smaller (anomalous) cluster as poisoned. Backdoor attacks where poisoned samples form distinct activation clusters from clean ones in the target class. Simple, no clean data needed; near-100% F1-score on MNIST/CIFAR-10 backdoors; fast post-training. Assumes clear separation in activation space (fails on distributed or clean-label poisons); not robust to adaptive attacks that mimic clean activations. Useful for SSL (e.g., DINOv2 embeddings) but requires a preliminary model; untested on massive unlabeled sets. Fine-Pruning, 2018 [27] Prunes suspicious neurons (identified via activation analysis) and fine-tunes the model on remaining clean data to excise backdoors. Backdoor poisoning via data injection; targets DNNs like CNNs/ResNets. Retains high clean accuracy post-defense; effective against targeted triggers; lightweight pruning. Needs access to the full model; less effective on over-parameterized foundation models; vulnerable if poison embeds deeply. Applicable to VFM pre-training but may disrupt SSL representations; scales poorly to billion-scale data without acceleration. Deep k-NN, 2021 [25] k-NN distance in deep representation space of proxy model; high-distance samples are considered poison Clean-label backdoor SOTA on clean-label at time; no clean reference needed; works on representations Requires held-out set for proxy; O(n2)k-NN search (mitigable) Embeddings could be used on unlabeled web data for fast outlier detection. SPECTRE, 2021 [28] Robust covariance estimation on intermediate representations to amplify spectral signatures of poisoned data, enabling backdoor removal via retraining. Backdoor attacks (e.g., trigger-based) on distributed training data; assumes small poisoning fraction (<1%). Highly effective at low poisoning rates; removes backdoors entirely without trusted data; strong theoretical guarantees. Relies on detectable spectral signatures (may fail on subtle clean-label poisons); compute-intensive for very large datasets. Could filter unvetted web-scraped data in LAION-style pipelines by scanning embeddings pre-training. De-Pois, 2021 [21] Trains amimic model (via GAN-augmented clean data simulation) to replicate clean behavior; filters poisons by prediction divergence from the target model. General data poisoning (label-flip, clean-label, backdoor); attack-agnostic. Broad applicability (>90% F1 on multiple attacks/datasets); uses GANs for data augmentation without full clean set. GAN training overhead; vulnerable to adaptive poisons that align mimic divergence; assumes some clean data access. Ideal for SSL (augments unlabeled data); could integrate with ImageBind-like embeddings for pre-training checks. Shapley Pruning, 2022 [23] Neuron interaction pruning via Shapley values Backdoor in poisoned models Preserves structure/ accuracy; few-shot effective Computationally intensive for large models Applicable to post-curation model hardening. 
+
+9CBD, 2023 [24] Causal graph deconfounding for representations Backdoor via spurious correlations Models confounders explicitly; improves generalization Causal graph complexity; training overhead Enhances SSL feature robustness against triggers. PatchSearch, 2023 [22] Iterative clustering of image patches using SSL model features; scores and prunes clusters likely containing patch-based poisons. Patch-based backdoors in SSL (e.g., localized triggers in unlabeled images); no trusted data assumed. Tailored to SSL vulnerabilities; modular for large-scale filtering. Limited to visible patch triggers (not subtle perturbations like PGD); requires initial SSL training on suspect data. Directly addresses patch poisons in web-scale SSL curation (e.g., LAION); ensemble-friendly like the paper’s PDD. Semantic Shield, 2024 [20] Knowledge-guided train-time constraints via prompting Backdoor/ poisoning in contrastive VLMs Integrates LLMs for caption analysis; attack-agnostic Computationally heavy prompting; caption-dependent Directly targets CLIP-like SSL pipelines. A2D, 2024 [19] Sensitivity to adversarial perturbations (SAP metric) Poisoned models (adversarial susceptibility) Normalized robustness comparison; no attack knowledge needed Relies on perturbation bounds; less effective on subtle poisons Can be useful for post-SSL encoder verification. 
+
+## 4 Problem description 
+
+Figure 3 highlights the critical risks posed by data poisoning attacks to the SSL data curation pipeline, emphasizing how these attacks can compromise the integrity of the training process by introducing malicious data, ultimately leading to intentional manipulation of the VFM [7]. Adversaries can execute poisoning attacks by strate-gically injecting, deleting, or altering training data, including adversarial examples, with the intent to corrupt the training data and produce defective, biased, or unre-liable VFMs [29]. In particular, we investigate data poisoning attacks targeting data curated using SSL, which can manipulate the VFM under development. Foundation Models 
+
+Self-Supervised Data Curation 
+
+Model Poisoning SSL Models 
+
+Generative-contrastive 
+
+Contrastive 
+
+Generative Data Poisoning 
+
+Poisoned Data Detector 
+
+Fig. 3 Illustration of a simplified training framework for foundation models, including poisoning attacks and data poisoning detector. 
+
+10 Within environments where full oversight of VFM training is impractical, poison-ing attacks pose a notable threat [8]. Consequently, securing the training phase is just as crucial as ensuring the integrity of the final VFM deployment. In particular, scenarios in which SSL-curated datasets are sourced externally from anonymous and unvetted sources present a significant risk of both untargeted and targeted data poi-soning by malicious actors. Adversaries performing untargeted data poisoning strive for a denial of service (DoS) effect by increasing the overall prediction error rate. In contrast, targeted data poisoning attacks aim to manipulate the VFM predictions for a particular class. 
+
+## 5 Methodology 
+
+5.1 Networks 
+
+We select the ConvNeXT 1 model, trained on a dataset of 1K classes with 1.3M images, due to its superior performance across a wide range of vision tasks, including ImageNet 2 classification, object detection and segmentation on COCO 3, and seman-tic segmentation on ADE20K 4 [30]. ConvNeXt is a modernized pure convolutional architecture that achieves Transformer-level performance by adopting several design principles inspired by Vision Transformers and Swin Transformers (e.g., large convo-lution kernels, inverted bottlenecks, LayerScale, and fewer normalization layers) while remaining entirely convolution-based and containing no self-attention mechanisms. We additionally use a standard Convolutional Neural Network (CNN) as a reference model when generating poisoned datasets to evaluate the proposed solution. CNNs are a subclass of feedforward neural networks specifically designed to extract hierarchical spatial features through learned convolutional filters [31]. 
+
+5.2 Datasets 
+
+We utilize a subset of the ImageNet dataset (Set1, Set2) with 100 classes for our experiments. Table 6 provides details of the various datasets constructed from Set1 and Set2. The model achieves an accuracy of 95.71% on Set1 and 88% on Set2, and the class-wise accuracy is illustrated in Figure 4. Subsequently, we use Set3 and Set4, which contain 10 classes and achieve 99.57% and 100% classification accuracy respectively, when tested with the ConvNeXT pretrained model, to design a poison data detector. We select the Trueface PostSocial [32] and 140K-Real-and-Fake-Faces [33] datasets to evaluate the proposed solution for poisoned data detection. The Trueface PostSo-cial and 140K-Real-and-Fake-Faces datasets consist of 2,500 and 70,000 real images, respectively. The generation of poisoned images for each dataset is carried out using the Projected Gradient Descent (PGD) [34] attack with a four-layer CNN model containing 102.89 million parameters. Subsequently, both normal and poisoned embed-dings are generated using ImageBind [35]. In addition, we generate a small poisoned 
+
+> 1https://github.com/facebookresearch/ConvNeXt
+> 2https://www.image-net.org/
+> 3https://cocodataset.org
+> 4https://ade20k.csail.mit.edu/
+
+11 Table 6 Datasets description leverage in the experiments and ConvNeXT classification performance 
+
+Dataset Source Classes ConvNeXT classification performance Dataset specifications Accuracy 
+
+ImageNet100 Kaggle 100 Set1: 130000 (1300 images per class )95.71% Set2: 5000 ( 50 images per class ) 88.00% ImageNet10 Normal Subsets selected from ImageNet100 10 Set3: 13000 (1300 images per class )99.57% Set4: 500 ( 50 images per class ) 100.00% ImageNet10 Poisoned Generated using Projected Gradient Descent (PGD) attack 10 Set5: 13000 (1300 images per class )8.45% Set6: 500 ( 50 images per class ) 9.20% 0
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> 36
+> 37
+> 38
+> 39
+> 40
+> 41
+> 42
+> 43
+> 44
+> 45
+> 46
+> 47
+> 48
+> 49
+> 50
+> 51
+> 52
+> 53
+> 54
+> 55
+> 56
+> 57
+> 58
+> 59
+> 60
+> 61
+> 62
+> 63
+> 64
+> 65
+> 66
+> 67
+> 68
+> 69
+> 70
+> 71
+> 72
+> 73
+> 74
+> 75
+> 76
+> 77
+> 78
+> 79
+> 80
+> 81
+> 82
+> 83
+> 84
+> 85
+> 86
+> 87
+> 88
+> 89
+> 90
+> 91
+> 92
+> 93
+> 94
+> 95
+> 96
+> 97
+> 98
+> 99
+> Class
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Accuracy (%)
+> Accuracy
+
+(a) ConvNeXT achieves an 95.71% accuracy on Set1 0
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> 10
+> 11
+> 12
+> 13
+> 14
+> 15
+> 16
+> 17
+> 18
+> 19
+> 20
+> 21
+> 22
+> 23
+> 24
+> 25
+> 26
+> 27
+> 28
+> 29
+> 30
+> 31
+> 32
+> 33
+> 34
+> 35
+> 36
+> 37
+> 38
+> 39
+> 40
+> 41
+> 42
+> 43
+> 44
+> 45
+> 46
+> 47
+> 48
+> 49
+> 50
+> 51
+> 52
+> 53
+> 54
+> 55
+> 56
+> 57
+> 58
+> 59
+> 60
+> 61
+> 62
+> 63
+> 64
+> 65
+> 66
+> 67
+> 68
+> 69
+> 70
+> 71
+> 72
+> 73
+> 74
+> 75
+> 76
+> 77
+> 78
+> 79
+> 80
+> 81
+> 82
+> 83
+> 84
+> 85
+> 86
+> 87
+> 88
+> 89
+> 90
+> 91
+> 92
+> 93
+> 94
+> 95
+> 96
+> 97
+> 98
+> 99
+> Class
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Accuracy (%)
+> Accuracy
+
+(b) ConvNeXT achieves an 88% accuracy on Set2 
+
+Fig. 4 The ConvNeXT model, with a total of 197.74 million parameters, performance on a 100-class subset of the ImageNet dataset. 
+
+dataset (100 samples) for different attacks, such as the Fast Gradient Sign Method (FGSM) [36] and Carlini and Wagner (C&W) [37] using Set3, to evaluate the efficacy of PDDs against diverse attacks. 
+
+5.3 Poisoned dataset generation 
+
+We use gradient-based method that directly manipulates input data using model loss gradients to generate a poisoned dataset. To determine the most effective method for generating poisoned data, we evaluate the robustness of the ConvNeXT model against various techniques, including adversarial attacks crafted using the FGSM and PGD. The FGSM attack uses the gradients of the loss function with respect to the input data to determine the direction in which the input should be modified to maximize the model’s error. The attack operates in three steps: First, it calculates the loss after 12 a forward pass. Second, it computes the gradient of this loss with respect to the image pixels. Finally, it subtly alters the image pixels in the direction that maximizes the loss. PGD is an iterative method for generating adversarial examples. It works by repeatedly taking a small step in the direction that maximizes the model prediction error (using the FGSM) and then projecting the result back onto the space of valid inputs. Figure 5 compares the performance of the ConvNeXT model against the FGSM and PGD attacks with a perturbation radius of 0 .1 using ℓ∞ on Set3. The optimal value for the perturbation radius is determined empirically. It can be observed that PGD, a multi-step variant of the FGSM algorithm, is more effective at deceiving the model. Therefore, we constructed a 10-class poisoned dataset: Set5 (13,000 images) and Set6 (500 images), using PGD-based adversarial perturbations. 0           
+
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> Classes
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Accuracy
+> 95.54 92.92 90.31 94.08 96.08
+> 87.77
+> 72.69
+> 91.15
+> 97.92 93.23
+> (a) Performance against the FGSM attack on Set3. Accuracy degrades from 100% to 91.16%. 0
+> 1
+> 2
+> 3
+> 4
+> 5
+> 6
+> 7
+> 8
+> 9
+> Classes
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Accuracy
+> 6.23 1
+> 10.62 10.62 13
+> 4.54 0.54 6.62
+> 13.85 17.54
+> (b) Performance against the PGD attack on Set3. Accuracy degrades to 8.4% from 100 %
+
+Fig. 5 ConvNeXT model performance against FGSM and PGD attacks. 
+
+5.4 Poisoned data detection 
+
+As illustrated in Figure 3, we exploit a pretrained ImageBind model 5, which has 1.2 billion parameters, to extract embeddings from both the normal and generated poi-soned datasets [35]. ImageBind can also provide a single joint embedding ( EI,M), where where I represents images and M are other modalities, viz., text, audio, thermal depth, and Inertial Measurement Units (IMUs). Figure 6 compares the embed-dings generated by the ImageBind model for the normal and poisoned datasets by plotting their Kullback-Leibler (KL) divergence, i.e., relative entropy, between the probability distributions in both high-dimensional and low-dimensional spaces. These low-dimensional representations are generated using the T-Distributed Stochastic Neighbor Embedding (t-SNE) algorithm [38]. The t-SNE dimensionality reduction technique is designed to visualize high-dimensional data and assess the separability of two classes. It fits and transforms high-dimensional vectors into a space with a reduced number of dimensions, typically two or three, for better comparison through 2-D or 3-D plots. Figure 6a analyzes con-ditional probabilities across 26,000 samples of Set3 and Set5, a KL divergence of 3.12 
+
+> 5https://github.com/facebookresearch/ImageBind
+
+13 10 5 0 5 10 15 
+
+> tsne-2d-one
+> 10
+> 5
+> 0
+> 5
+> 10
+> tsne-2d-two
+> Labels
+> Normal
+> Poison
+
+(a) Set3 (Normal) vs. Set5 (Poisoned) 10 5 0 5 10  
+
+> tsne-2d-one
+> 15
+> 10
+> 5
+> 0
+> 5
+> 10
+> tsne-2d-two
+> Labels
+> Normal
+> Poison
+
+(b) Set4 (Normal) vs. Set6 (Poisoned) 15 10 5 0 5 10 
+
+> tsne-2d-one
+> 10
+> 5
+> 0
+> 5
+> 10
+> tsne-2d-two
+> N0
+> N1
+> N2
+> N3
+> N4
+> N5
+> N6
+> N7
+> N8
+> N9
+
+(c) Set4 (Normal class-wise data distribution) 15 10 5 0 5 10  
+
+> tsne-2d-one
+> 7.5
+> 5.0
+> 2.5
+> 0.0
+> 2.5
+> 5.0
+> 7.5
+> tsne-2d-two
+> P0
+> P1
+> P2
+> P3
+> P4
+> P5
+> P6
+> P7
+> P8
+> P9
+
+(d) Set6 (Poisoned class-wise data distribution). 
+
+Fig. 6 A comparison of the embeddings generated by ImageBind model for the normal and poisoned datasets using t-SNE plots. 
+
+is achieved after 300 iterations. Similarly, Figure 6b analyzes conditional probabilities across 500 samples of Set4 and Set6, a KL divergence of 0.71 is achieved after 300 iterations. Figure 6c and Figure 6d compare the class-wise data distribution of Set4 (Normal) and Set6 (Poisoned), respectively. The result demonstrates the ImageBind model ability to effectively separate normal and poisoned image features, indicating a clear distinction between the two categories. 
+
+## 6 Experimental details 
+
+Figure 7 presents the high-level design of the proposed PDD, enabling the verification of SSL curated datasets prior to it is used for foundation model training. 
+
+6.1 Binary classifiers 
+
+We employ diverse classification algorithms, including Random Forest (RF), k-Nearest Neighbors (KNN), Na¨ ıve Bayes (NB), and Support Vector Machines (SVM), to design binary classifiers that distinguish between normal and poisoned images. Table 7 presents the performance (i.e., accuracy) of each classifier trained on Set4 (500 nor-mal images) and Set6 (500 poisoned images) using the holdout testing method. The evaluation process involves dividing the combined dataset of 1,000 images into two 14 Foundation Models 
+
+Self-Supervised Data Curation 
+
+Poisoned Data Detector 
+
+ImageBind Binary Classifier 
+
+> Decision
+
+Fig. 7 A high-level design Poisoned data detector (PDD). 
+
+non-overlapping subsets for training and testing, with the training size varying from 10% to 50% (with step size of 10%). Subsequently, we evaluate five variants of four classifiers on three diverse datasets, one of which is ID and two are OOD. 
+
+Table 7 PDDs are trained on Set4 and Set6 with training sizes ranging from 10% to 50%, and performance is reported in terms of accuracy (%).                                   
+
+> Classifier Hyperparameters Accuracy (%) Training percentage
+> 10% 20% 30% 40% 50%
+> SVM ‘C’: 1, ‘gamma’: 1, ‘kernel’: ‘rbf’ 100.00 100.00 100.00 100.00 100.00 RF ‘bootstrap’: True, ‘max depth’: 50, ‘max features’: ‘sqrt’, ‘min samples leaf’: 2, ‘min samples split’: 10, ‘n estimators’: 30 98.22 98.50 98.71 98.83 99.40 NB ‘priors’: None, ‘var smoothing’: 0.657933224657568 98.67 99.25 99.14 99.17 99.00 KNN ‘metric’: ‘minkowski’, ‘n neighbors’: 5, ‘weights’: ‘uniform’ 96.67 99.00 99.57 100.0 100.0
+
+We exploit grid search for hyperparameter optimization, systematically exploring a predefined range of values for each selected classifier hyperparameters to determine the optimal settings. This method efficiently identifies the best-performing combina-tion of hyperparameter values for the chosen classifier [39]. Each classifier is trained and evaluated across all grid combinations to identify the top-performing configuration that can deliver superior performance. It can be observed that the SVM-based PDDs outperforms others, primarily due to its effectiveness in handling high-dimensional datasets and scenarios where the number of features surpasses the number of sam-ples [40]. Figure 8 presents the detection error tradeoff (DET) plots of the PDDs designed using SVM, RF, NB, and KNN, with varying training percentages from 10% to 50% (with step size of 10%) of the total samples in the Set4-Set6 dataset. 
+
+6.2 Evaluation results 
+
+6.2.1 Using different dataset 
+
+We evaluate all twenty PDDs using three distinct datasets. Figure 9a, 9b, and 9c present the performance of each PDD on the Set3–Set5, TrueFace postsocial 15 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> False Acceptance Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> False Rejection Rate
+> Train with 10.0%
+> EER = 0.00
+> Train with 20.0%
+> EER = 0.00
+> Train with 30.0%
+> EER = 0.00
+> Train with 40.0%
+> EER = 0.00
+> Train with 50.0%
+> EER = 0.00
+
+(a) SVM 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> False Acceptance Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> False Rejection Rate
+> Train with 10.0%
+> EER = 0.02
+> Train with 20.0%
+> EER = 0.02
+> Train with 30.0%
+> EER = 0.01
+> Train with 40.0%
+> EER = 0.00
+> Train with 50.0%
+> EER = 0.01
+
+(b) RF 0.0 0.2 0.4 0.6 0.8 1.0 
+
+> False Acceptance Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> False Rejection Rate
+> Train with 10.0%
+> EER = 0.01
+> Train with 20.0%
+> EER = 0.01
+> Train with 30.0%
+> EER = 0.01
+> Train with 40.0%
+> EER = 0.01
+> Train with 50.0%
+> EER = 0.01
+
+(c) NB 0.00 0.05 0.10 0.15 0.20 0.25  
+
+> False Acceptance Rate
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> False Rejection Rate
+> Train with 10.0%
+> EER = 0.03
+> Train with 20.0%
+> EER = 0.01
+> Train with 30.0%
+> EER = 0.00
+> Train with 40.0%
+> EER = 0.00
+> Train with 50.0%
+> EER = 0.00
+
+(d) KNN 
+
+Fig. 8 DET plots for the PDDs designed using SVM, RF, NB, and KNN with varying training percentage from 10% to 50% of the total Set4-Set6 dataset. 
+
+dataset [32], and 140K RealFace datasets [33], respectively. SVM-PDD achieves supe-rior performance for ID dataset, i.e., Set3–Set5 and for OOD datasets, i.e., TrueFace and 140K RealFace. 
+
+6.2.2 Against different attacks 
+
+Considering the practical challenges of defending against clean-label data poisoning attacks, we also evaluate PDDs against FGSM and C&W attacks to assess their per-formance on OOD data. In this evaluation, each dataset contains only 100 poisoned samples from the respective attack, as explained in Section 5.2. The performance of PDDs against these two types of poisoned data is reported in Figure 10a and 10b. PDDs have shown good performance to detect FGSM-poisoned data, however, perfor-mance in detecting C&W-poisoned data is relatively lower. Studies [41] have reported that C&W are among the most challenging attacks to detect. C&W attack lever-ages an optimization-based approach to craft adversarial examples, aiming to find the 16 PDD-10% PDD-20% PDD-30% PDD-40% PDD-50% 
+
+97 .00 
+
+98 .00 
+
+99 .00 
+
+100 .00 
+
+> Accuracy (%)
+
+SVM RF NB KNN 
+
+(a) PDDs performance on the Set3 and Set5 combination, containing 13,000 normal and 13,000 poisoned images. PDD-10% PDD-20% PDD-30% PDD-40% PDD-50% 70 .00 80 .00 90 .00 100 .00 Accuracy (%) (b) PDDs performance on the TrueFace dataset containing 5,000 normal and 5,000 poisoned images. PDD-10% PDD-20% PDD-30% PDD-40% PDD-50% 80 .00 90 .00 100 .00 Accuracy (%) (c) PDDs performance on the 140k RealFace dataset containing 70,000 normal and 70,000 poi-soned images. 
+
+Fig. 9 A comparison of PDDs performance using different datasets. Note: different scaling is used in above figures for better readability. 
+
+smallest perturbation necessary to cause misclassification by the target model. It min-imizes both the magnitude of the perturbation and the distance to the neural network decision boundary. In the future, we will address these limitations by designing PDD ensembles to detect potential types of poisoned data. 
+
+PDD-10% PDD-20% PDD-30% PDD-40% PDD-50% 
+
+90 .00 
+
+95 .00 
+
+100 .00 
+
+> Accuracy (%)
+
+SVM RF NB KNN 
+
+(a) PDDs performance against FGSM-poisoned images. PDD-10% PDD-20% PDD-30% PDD-40% PDD-50% 60 .00 62 .00 64 .00 Accuracy (%) (b) PDDs performance against C&W-poisoned data. 
+
+Fig. 10 A comparison of PDDs performance against different attacks using only poisoned data. Note: different scaling is used in above figures for better readability. 
+
+17 7 Conclusions and future work 
+
+Self-supervised learning (SSL) enables scalable data curation, a cruial step for achiev-ing generalization in machine learning models, particularly large VFMs. SSL meets the data demands of foundation models, however, the robustness of VFMs critically depends on the integrity of SSL-curated datasets used during training, as compro-mised training data can jeopardize the reliability of the subsequent inference phase. The defense mechanism proposed in this paper is highly scalable and actively detects poisoned data, thereby preserving the integrity of SSL-curated datasets used for foun-dation model training. We designed PDDs using a combination of the pretrained ImageBind model and four classifiers, namely, RF, KNN, NB, and SVM and evaluated PDDs using 176,200 images from three diverse datasets and three different adversarial attacks encompassing both ID and OOD scenarios. In the future, we will investigate a broader range of adversarial attacks relevant to data poisoning using PDD ensem-ble. Additionally, we plan to develop a one-class SVM for collective poisoned data detection. 
+
+## Data Availability Statement 
+
+Table 6 provides details of the various pre-trained models and datasets used in this paper and they are publicly available. 
+
+## References 
+
+[1] Liu, F., Zhang, T., Dai, W., Zhang, C., Cai, W., Zhou, X., Chen, D.: Few-shot adaptation of multi-modal foundation models: A survey. Artificial Intelligence Review 57 (10), 268 (2024) [2] Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sas-try, G., Askell, A., Mishkin, P., Clark, J., et al. : Learning transferable visual models from natural language supervision. In: Proceedings of the International Conference on Machine Learning, pp. 8748–8763 (2021). PMLR [3] Oquab, M., Darcet, T., Moutakanni, T., Vo, H.V., Szafraniec, M., Khalidov, V., Fernandez, P., HAZIZA, D., Massa, F., El-Nouby, A., Assran, M., Ballas, N., Galuba, W., Howes, R., Huang, P.-Y., Li, S.-W., Misra, I., Rabbat, M., Sharma, V., Synnaeve, G., Xu, H., Jegou, H., Mairal, J., Labatut, P., Joulin, A., Bojanowski, P.: DINOv2: Learning robust visual features without supervision. Transactions on Machine Learning Research (2024) [4] Gui, J., Chen, T., Zhang, J., Cao, Q., Sun, Z., Luo, H., Tao, D.: A survey on self-supervised learning: Algorithms, applications, and future trends. IEEE Transactions on Pattern Analysis and Machine Intelligence (2024) [5] Schuhmann, C., Beaumont, R., Vencu, R., Gordon, C., Wightman, R., Cherti, M., Coombes, T., Katta, A., Mullis, C., Wortsman, M., et al. : Laion-5b: An open 18 large-scale dataset for training next generation image-text models. Advances in neural information processing systems 35 , 25278–25294 (2022) [6] Li, J., Fang, A., Smyrnis, G., Ivgi, M., Jordan, M., Gadre, S.Y., Bansal, H., Guha, E., Keh, S.S., Arora, K., et al. : Datacomp-lm: In search of the next generation of training sets for language models. Advances in Neural Information Processing Systems 37 , 14200–14282 (2024) [7] Wang, Z., Ma, J., Wang, X., Hu, J., Qin, Z., Ren, K.: Threats to training: A survey of poisoning attacks and defenses on machine learning systems. ACM Computing Surveys 55 (7), 1–36 (2022) [8] Wang, C., Chen, J., Yang, Y., Ma, X., Liu, J.: Poisoning attacks and countermea-sures in intelligent networks: Status quo and prospects. Digital Communications and Networks 8(2), 225–234 (2022) [9] Gupta, S., Passerone, R.: An investigation of visual foundation models robustness. Machine Learning 114 (12), 281 (2025) [10] Liu, X., Zhang, F., Hou, Z., Mian, L., Wang, Z., Zhang, J., Tang, J.: Self-supervised learning: Generative or contrastive. IEEE transactions on knowledge and data engineering 35 (1), 857–876 (2021) [11] De Palma, G., Giallorenzo, S., Mauro, J., Trentin, M., Zavattaro, G.: An open-whisk extension for topology-aware allocation priority policies. In: Proceedings of the International Conference on Coordination Models and Languages, pp. 201–218 (2024). Springer [12] Beaumont, R.: img2dataset: Easily turn large sets of image urls to an image dataset. https://github.com/rom1504/img2dataset. online web resource (Accessed on 01-12-2025 ) (2021) [13] Douze, M., Guzhva, A., Deng, C., Johnson, J., Szilvasy, G., Mazar´ e, P.-E., Lomeli, M., Hosseini, L., J´ egou, H.: The faiss library. IEEE Transactions on Big Data (2025) [14] Kastryulin, S., Konev, A., Shishenya, A., Lyapustin, E., Khurshudov, A., Tselousov, A., Vinokurov, N., Kuznedelev, D., Markovich, A., Livshits, G., et al. : Yaart: Yet another art rendering technology. In: Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 1, pp. 2313–2324 (2025) [15] Wenzek, G., Lachaux, M.-A., Conneau, A., Chaudhary, V., Guzm´ an, F., Joulin, A., Grave, E.: Ccnet: Extracting high quality monolingual datasets from web crawl data. In: Proceedings of the Twelfth Language Resources and Evaluation Conference, pp. 4003–4012 (2020) 19 [16] Capasso, P., Cattaneo, G., De Marsico, M.: A comprehensive survey on methods for image integrity. ACM Transactions on Multimedia Computing, Communica-tions and Applications 20 (11), 1–34 (2024) [17] Ilharco, G., Wortsman, M., Carlini, N., Taori, R., Dave, A., Shankar, V., Namkoong, H., Miller, J., Hajishirzi, H., Farhadi, A., et al.: Openclip. https: //github.com/mlf oundations/open clip. online web resource ( Accessed on 01-12-2025 ) (2021) [18] Ilharco, G., Jordan, M., Heckel, R., Dimakis, A., Farhadi, A., Shankar, V., Schmidt, L.: OpenLM: A minimal but performative language modeling (lm) repository. https://github.com/mlfoundations/open lm/. online web resource (Accessed on 01-12-2025 ) (2023) [19] Fares, S., Nandakumar, K.: Attack to defend: Exploiting adversarial attacks for detecting poisoned models. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 24726–24735 (2024) [20] Ishmam, A.M., Thomas, C.: Semantic shield: Defending vision-language mod-els against backdooring and poisoning via fine-grained knowledge alignment. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 24820–24830 (2024) [21] Chen, J., Zhang, X., Zhang, R., Wang, C., Liu, L.: De-pois: An attack-agnostic defense against data poisoning attacks. IEEE Transactions on Information Foren-sics and Security 16 , 3412–3425 (2021) [22] Tejankar, A., Sanjabi, M., Wang, Q., Wang, S., Firooz, H., Pirsiavash, H., Tan, L.: Defending against patch-based backdoor attacks on self-supervised learning. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 12239–12249 (2023) [23] Guan, J., Tu, Z., He, R., Tao, D.: Few-shot backdoor defense using shapley esti-mation. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 13358–13367 (2022) [24] Zhang, Z., Liu, Q., Wang, Z., Lu, Z., Hu, Q.: Backdoor defense via decon-founded representation learning. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 12228–12238 (2023) [25] Peri, N., Gupta, N., Huang, W.R., Fowl, L., Zhu, C., Feizi, S., Goldstein, T., Dickerson, J.P.: Deep k-nn defense against clean-label data poisoning attacks. In: Proceedings of the European Conference on Computer Vision, pp. 55–70 (2020). Springer [26] Chen, H., Koushanfar, F.: Tutorial: Toward robust deep learning against poison-ing attacks. ACM Transactions on Embedded Computing Systems 22 (3), 1–15 20 (2023) [27] Liu, K., Dolan-Gavitt, B., Garg, S.: Fine-pruning: Defending against backdooring attacks on deep neural networks. In: International Symposium on Research in Attacks, Intrusions, and Defenses, pp. 273–294 (2018). Springer [28] Hayase, J., Kong, W., Somani, R., Oh, S.: Spectre: Defending against backdoor attacks using robust statistics. In: Proceeding of the International Conference on Machine Learning, pp. 4129–4139 (2021). PMLR [29] Zhou, S., Liu, C., Ye, D., Zhu, T., Zhou, W., Yu, P.S.: Adversarial attacks and defenses in deep learning: From a perspective of cybersecurity. ACM Computing Surveys 55 (8), 1–39 (2022) [30] Liu, Z., Mao, H., Wu, C.-Y., Feichtenhofer, C., Darrell, T., Xie, S.: A convnet for the 2020s. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 11976–11986 (2022) [31] Li, Z., Liu, F., Yang, W., Peng, S., Zhou, J.: A survey of convolutional neu-ral networks: analysis, applications, and prospects. IEEE transactions on neural networks and learning systems 33 (12), 6999–7019 (2021) [32] Boato, G., Pasquini, C., Stefani, A.L., Verde, S., Miorandi, D.: Trueface: A dataset for the detection of synthetic face images from social networks. In: Pro-ceedings of the IEEE International Joint Conference on Biometrics (IJCB), pp. 1–7 (2022). IEEE [33] Kaggle: Real and Fake Faces. https://www.kaggle.com/datasets/xhlulu/140k-r eal-and-fake-faces. online web resource ( Accessed on 01-12-2025 ) (2025) [34] Madry, A., Makelov, A., Schmidt, L., Tsipras, D., Vladu, A.: Towards deep learn-ing models resistant to adversarial attacks. In: Proceedings of the International Conference on Learning Representations, pp. 1–27 (2018) [35] Girdhar, R., El-Nouby, A., Liu, Z., Singh, M., Alwala, K.V., Joulin, A., Misra, I.: Imagebind: One embedding space to bind them all. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 15180– 15190 (2023) [36] Goodfellow, I.J., Shlens, J., Szegedy, C.: Explaining and harnessing adversar-ial examples. In: Proceedings of the 3rd International Conference on Learning Representations, pp. 1–10 (2015) [37] Carlini, N., Wagner, D.: Towards evaluating the robustness of neural networks. In: Proceedings of the IEEE Symposium on Security and Privacy (SP), pp. 39–57 (2017). Ieee 21 [38] Maaten, L., Hinton, G.: Visualizing data using t-SNE. Journal of machine learning research 9(11) (2008) [39] Bischl, B., Binder, M., Lang, M., Pielok, T., Richter, J., Coors, S., Thomas, J., Ullmann, T., Becker, M., Boulesteix, A.-L., et al. : Hyperparameter optimization: Foundations, algorithms, best practices, and open challenges. Wiley Interdisci-plinary Reviews: Data Mining and Knowledge Discovery 13 (2), 1484 (2023) [40] Gupta, S., Raja, K., Passerone, R.: Visual prompt engineering for enhancing facial recognition systems robustness against evasion attacks. IEEE Access (2024) [41] Rottmann, M., Maag, K., Peyron, M., Gottschalk, H., Kreji´ c, N.: Detection of iterative adversarial attacks via counter attack. Journal of Optimization Theory and Applications 198 (3), 892–929 (2023) 22
