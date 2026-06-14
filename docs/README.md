@@ -6,38 +6,31 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-13
-- 运行时间：2026-06-13 20:43:40 UTC
+- 最新运行日期：2026-06-14
+- 运行时间：2026-06-14 21:10:09 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：1
-- 速读区：5
+- 本次总论文数：3
+- 精读区：2
+- 速读区：1
 
 ### 今日简报（AI）
-今日精读一份AI风险事件大规模数据集，速读关注联邦学习对齐与基础模型鲁棒性。最值得看《RiskNet》数据集和《AlignFed》的联邦大模型微调对齐方法。建议从事AI安全或分布式训练者优先深入这两篇论文。
-- 详情：[/202606/13/README](/202606/13/README)
+1) 今日主推两项大模型安全研究：防御恶意微调的对抗攻击方法与推理模型对齐可信度评估。
+2) 最值得关注的是：通过训练时扩增对抗攻击可有效防御恶意微调；推理模型会部分损失对齐属性，需谨慎部署。
+3) 建议关注微调与推理阶段的安全漏洞，尤其在使用开源模型时加强防御验证。
+- 详情：[/202606/14/README](/202606/14/README)
 
 ### 精读区论文标签
-1. [RiskNet: A large-scale dataset of AI risk incidents from news with alignment and multi-dimensional annotations](/202606/13/2606.08376v1-risknet-a-large-scale-dataset-of-ai-risk-incidents-from-news-with-alignment-and-multi-dimensional-annotations)  
+1. [Defending Against Malicious Finetuning by Scaling Train-time Adversarial Attacks](/202606/14/2606.07970v1-defending-against-malicious-finetuning-by-scaling-train-time-adversarial-attacks)  
+   标签：评分：9.0/10、query:smd
+   evidence：防御恶意微调攻击
+2. [Does Reasoning Preserve Alignment? On the Trustworthiness of Large Reasoning Models](/202606/14/2606.11046v1-does-reasoning-preserve-alignment-on-the-trustworthiness-of-large-reasoning-models)  
    标签：评分：8.0/10、query:smd
-   evidence：从新闻事件中策展安全数据
+   evidence：研究推理后训练是否保持对齐，发现默认情况下并不保持
 
 ### 速读区论文标签
-1. [AlignFed: Alignment-Aware Asynchronous Federated Fine-Tuning for Large Language Models in Heterogeneous Edge Environments](/202606/13/2606.08197v1-alignfed-alignment-aware-asynchronous-federated-fine-tuning-for-large-language-models-in-heterogeneous-edge-environments)  
-   标签：评分：7.0/10、query:smd
-   evidence：提出面向对齐的联邦微调以保持模型对齐
-2. [Securing Self-supervised Data Curation for Foundation Models Robustness](/202606/13/2606.09511v1-securing-self-supervised-data-curation-for-foundation-models-robustness)  
-   标签：评分：7.0/10、query:smd
-   evidence：通过投毒检测来策展安全数据
-3. [Alignment Defends LLMs from Property Inference Attacks](/202606/13/2606.10217v1-alignment-defends-llms-from-property-inference-attacks)  
+1. [Selecting Samples on Graphs: A Unified Dataset Pruning Framework for Lossless Training Acceleration](/202606/14/2606.12913v1-selecting-samples-on-graphs-a-unified-dataset-pruning-framework-for-lossless-training-acceleration)  
    标签：评分：6.0/10、query:smd
-   evidence：基于对齐的属性推理防御，与通过微调防御攻击相关
-4. [Advancing the State-of-the-Art in Empirical Privacy Auditing](/202606/13/2606.10481v1-advancing-the-state-of-the-art-in-empirical-privacy-auditing)  
-   标签：评分：6.0/10、query:dg
-   evidence：使用合成数据生成进行隐私审计，可迁移至安全数据合成
-5. [Grammar-Constrained Decoding Can Jailbreak LLMs into Generating Malicious Code](/202606/13/2606.11817v1-grammar-constrained-decoding-can-jailbreak-llms-into-generating-malicious-code)  
-   标签：评分：6.0/10、query:smd
-   evidence：提出CodeShield安全对齐方法防御越狱攻击
+   evidence：提出基于图的样本选择方法，可应用于安全数据选择
 
 
 <div class="dpr-home-promo-card">
