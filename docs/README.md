@@ -6,31 +6,26 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-14
-- 运行时间：2026-06-14 21:10:09 UTC
+- 最新运行日期：2026-06-15
+- 运行时间：2026-06-15 22:45:14 UTC
 - 运行状态：成功
-- 本次总论文数：3
-- 精读区：2
+- 本次总论文数：1
+- 精读区：0
 - 速读区：1
 
 ### 今日简报（AI）
-1) 今日主推两项大模型安全研究：防御恶意微调的对抗攻击方法与推理模型对齐可信度评估。
-2) 最值得关注的是：通过训练时扩增对抗攻击可有效防御恶意微调；推理模型会部分损失对齐属性，需谨慎部署。
-3) 建议关注微调与推理阶段的安全漏洞，尤其在使用开源模型时加强防御验证。
-- 详情：[/202606/14/README](/202606/14/README)
+今日速读1篇，探讨已部署安全分类器的在线漂移检测与共形自适应更新方法。  
+核心方向：通过共形预测实现模型漂移实时检测与参数自适应调整，适用于安全关键场景的持续部署。  
+建议感兴趣者重点关注共形预测在模型监控与自动修正中的落地可行性。
+- 详情：[/202606/15/README](/202606/15/README)
 
 ### 精读区论文标签
-1. [Defending Against Malicious Finetuning by Scaling Train-time Adversarial Attacks](/202606/14/2606.07970v1-defending-against-malicious-finetuning-by-scaling-train-time-adversarial-attacks)  
-   标签：评分：9.0/10、query:smd
-   evidence：防御恶意微调攻击
-2. [Does Reasoning Preserve Alignment? On the Trustworthiness of Large Reasoning Models](/202606/14/2606.11046v1-does-reasoning-preserve-alignment-on-the-trustworthiness-of-large-reasoning-models)  
-   标签：评分：8.0/10、query:smd
-   evidence：研究推理后训练是否保持对齐，发现默认情况下并不保持
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Selecting Samples on Graphs: A Unified Dataset Pruning Framework for Lossless Training Acceleration](/202606/14/2606.12913v1-selecting-samples-on-graphs-a-unified-dataset-pruning-framework-for-lossless-training-acceleration)  
+1. [Online Shift Detection and Conformal Adaptation for Deployed Safety Classifiers](/202606/15/2606.11949v1-online-shift-detection-and-conformal-adaptation-for-deployed-safety-classifiers)  
    标签：评分：6.0/10、query:smd
-   evidence：提出基于图的样本选择方法，可应用于安全数据选择
+   evidence：检测安全分类器中的真实时间越狱
 
 
 <div class="dpr-home-promo-card">
