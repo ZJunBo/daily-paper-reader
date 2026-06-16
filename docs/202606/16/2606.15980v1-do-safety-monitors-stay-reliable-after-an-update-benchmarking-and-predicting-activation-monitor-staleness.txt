@@ -1,0 +1,255 @@
+Title: Do Safety Monitors Stay Reliable After an Update? Benchmarking and Predicting Activation-Monitor Staleness
+
+URL Source: https://arxiv.org/pdf/2606.15980v1
+
+Published Time: Tue, 16 Jun 2026 01:25:11 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Do Safety Monitors Stay Reliable After an Update? Benchmarking and Predicting Activation-Monitor Staleness 
+
+Evan Duan 
+
+University of Michigan 
+
+evanduan@umich.edu 
+
+Abstract 
+
+Activation monitors — lightweight probes trained on a language model’s internal rep-resentations — are an increasingly common layer in deployment safety stacks. Deployed models, however, are rarely static: they are quantized, fine-tuned, adapted with LoRA, or served with merged adapters while the mon-itor remains frozen. We present the first sys-tematic test of whether this implicit contract holds: whether activation monitors trained on a base model remain reliable after these rou-tine model updates. Across multiple safety-relevant monitors, model depths, update fami-lies, and open-weight models, we find a sharp split: quantization-style updates largely pre-serve frozen probe performance, while fine-tuning-style updates frequently make probes stale. Fragility is highly monitor-dependent, with privacy/PII probes most affected and refusal-compliance probes comparatively sta-ble, showing that retraining a behavior need not stale its corresponding monitor. QLoRA is especially damaging despite NF4 quantiza-tion alone being relatively benign, suggesting that quantization becomes riskier when com-bined with adaptation. We further show that degradation is predictable from pre-deployment features, enabling revalidation budgets to be triaged toward the monitors most likely to fail. These results suggest that fine-tuning should trigger activation-monitor revalidation by de-fault, while prediction can help prioritize which monitors to check first. 
+
+1 Introduction 
+
+Safety stacks for deployed language models in-creasingly include activation monitors: lightweight classifiers, often linear probes, trained on inter-nal representations to flag safety-relevant condi-tions such as harmful requests, deceptive intent, or impending refusal (Zou et al., 2023; Azaria and Mitchell, 2023; Goldowsky-Dill et al., 2025). Their appeal is practical: probes are cheaper than a sec-ond guard model, add little latency, and read in-ternal model state rather than only sampled text, which output-level guardrails cannot do (Inan et al., 2023; Han et al., 2024). Deployed models, however, are moving targets. The same checkpoint may be quantized for cheaper serving, customized with parameter-efficient fine-tuning, served with runtime adapters, merged with those adapters, or adapted on an already-quantized base (Hu et al., 2022; Dettmers et al., 2022, 2023; Frantar et al., 2023; Lin et al., 2024; Xiao et al., 2023). In each case, the deployed model changes while the activation monitor, trained once on base-model activations, remains frozen. The implicit contract is that the representation read by the probe remains stable under these updates. To our knowl-edge, this contract has not been systematically tested across routine post-deployment update fami-lies. This paper asks whether the contract holds. We study: (i) which routine model-side updates de-grade frozen activation monitors, and by how much; (ii) whether some monitoring targets are more frag-ile than others; and (iii) whether degradation is predictable in advance from information available before post-update evaluation. We answer these questions with a system-atic benchmark. Linear probes are trained on base-model activations from Gemma-2-2B-it and Qwen2.5-7B-Instruct for four monitors— harmfulness, privacy/PII, refusal-compliance, and a controlled high-stakes construct—then frozen and re-evaluated across twelve update conditions spanning quantization, LoRA, merged LoRA, and QLoRA. The completed grid contains 2,520 el-igible update cells, with fixed degradation crite-ria for large AUC drops and operational failures. We also train a staleness predictor using only pre-deployment features—update metadata, base-probe quality, and base-side probe/activation geometry—  
+
+> arXiv:2606.15980v1 [cs.LG] 14 Jun 2026 Figure 1: Frozen activation-monitor evaluation pipeline. Probes are trained once on base-model activations, frozen, and then evaluated after model updates. Staleness is measured by ∆AUC, big-drop rate, and operational failure.
+
+and evaluate it against strong group-mean baselines under leave-group-out extrapolation. Three findings emerge. First, fragility is monitor-dependent: big-drop rates range from 57.1% for pri-vacy/PII to 7.9% for refusal-compliance. Second, staleness is concentrated in fine-tuning, not quan-tization: quantization families have low big-drop rates (0.83–3.33%) and no operational failures, while fine-tuning families have much higher big-drop rates (43.2–53.8%) and 13.75% operational failures. Runtime and merged adapters produce nearly identical degradation, suggesting that the learned update itself is the main driver. Third, stal-eness is predictable beyond lookup-table baselines: the learned predictor beats the strongest group-mean baseline by the fixed +0 .05 Spearman mar-gin in three of four leave-group-out settings, includ-ing leave-update-family-out (+0 .136) .These results advocate for a simple deployment rule: fine-tuning updates should trigger monitor revalidation by default, while quantization is lower-risk but still worth auditing. The predictor can fur-ther prioritize limited revalidation toward the mon-itor/update cells most likely to fail. Our contribu-tions are: • We find a structured fine-tuning asymmetry: safety LoRA leaves refusal-compliance com-paratively stable, privacy tuning sharply de-grades privacy/PII probes, and QLoRA shows that benign NF4 quantization can become damaging when paired with adaptation. • We systematically evaluate frozen safety probes under routine model-side updates across 2 models, 4 monitors, 12 update con-ditions, 6 layers, and 5 seeds, yielding 2,520 eligible update cells with fixed degradation criteria and logged backend coverage. • We identify a quantization-flat / fine-tune-hot split, nearly identical degradation for runtime versus merged adapters, and a 7 × fragility spread across monitor types, with privacy/PII most fragile. • We show that monitor degradation can be pre-dicted in extrapolation using pre-deployment features and strong group-mean baselines, in-cluding for unseen update families. 
+
+2 Related Work 
+
+Activation probes and internal safety moni-tors. Probing classifiers are widely used to study neural representations (Alain and Bengio, 2016; Belinkov, 2022), and recent work uses them as safety-relevant readouts of LLM internals. Linear or low-complexity probes have been used to de-tect truthfulness, deception, sleeper-agent behav-ior, and other latent safety properties (Burns et al., 2023; Azaria and Mitchell, 2023; Hubinger et al., 2024; Goldowsky-Dill et al., 2025). Representation-engineering work also shows that high-level behav-iors can often be read or steered through activation-space directions (Zou et al., 2023; Arditi et al., 2024). Recent safety work extends these ideas to safety-aware probing and activation-based inter-vention (Wu et al., 2025; Han et al., 2025). These studies show that activations contain useful safety signals, but they usually evaluate monitors on the same model or update regime for which they were developed. We instead ask whether a frozen acti-vation monitor remains valid after the underlying model changes. 
+
+Text-level guardrails versus activation monitors. 
+
+Text-level guardrails such as moderation systems, Llama Guard, WildGuard, and ShieldGemma op-erate on prompts and outputs rather than hidden states (Markov et al., 2023; Inan et al., 2023; Han et al., 2024; Zeng et al., 2024). This makes them easier to reuse across models, but prevents them from directly reading pre-output internal states. Ac-tivation monitors provide that internal access, but are tied to the representation geometry of a specific checkpoint. 
+
+Model-side updates and safety degradation. 
+
+Modern deployment pipelines often change models through quantization and parameter-efficient fine-tuning. Quantization methods such as LLM.int8, NF4/QLoRA, GPTQ, AWQ, and SmoothQuant reduce serving cost while preserving task perfor-mance (Dettmers et al., 2022, 2023; Frantar et al., 2023; Lin et al., 2024; Xiao et al., 2023), while LoRA and QLoRA enable lightweight customiza-tion (Hu et al., 2022; Dettmers et al., 2023). These updates can also affect safety: fine-tuning can com-promise aligned models (Yang et al., 2023; Qi et al., 2024), compression can change trustworthi-ness and robustness (Hong et al., 2024; Egashira et al., 2024), and recent methods attempt to pro-tect refusal directions, safety layers, or alignment-sensitive subspaces (Hsu et al., 2024; Li et al., 2024; Du et al., 2025). 
+
+Refusal representations and monitor stability. 
+
+Mechanistic studies suggest that refusal and safety behavior are organized in identifiable internal struc-tures, including residual-stream directions, safety-sensitive layers, and sparse features (Arditi et al., 2024; Li et al., 2024; Cunningham et al., 2024; Yeo et al., 2025). These structures can shift under tun-ing (Du et al., 2025), and related work shows that compression can damage SAE feature fidelity even when perplexity remains stable (Duan, 2026a). 
+
+Predicting degradation under shift. Estimat-ing model performance under distribution shift without post-shift labels has been studied through confidence- and agreement-based methods (Garg et al., 2022; Baek et al., 2022). Related pre-intervention screening predicts sparse-autoencoder steering side effects from feature statistics before            
+
+> Component Setting
+> Models Gemma-2-2B-it, Qwen2.5-7B-Instruct Monitors harmfulness, high-stakes, pri-vacy/PII, refusal-compliance Layers 4, 8, 12, 16, 20, 24 Seeds 0–4 Probe frozen linear probe Completed update cells 2520 Main metrics ∆AUC, big-drop rate, operational failure
+> Table 1: Summary of models, monitors, layers, seeds, probe type, update families, and completed update cells used in the full-scale staleness evaluation.
+
+steering (Duan, 2026b). Recent work is complementary to our findings. SafetyLock observes that fine-tuned models can retain base-like safety representations, which is consistent with our refusal-compliance result: pre-serving a safety-relevant representation does not guarantee that every frozen monitor direction re-mains aligned after updating (Zhu et al., 2024). NeuroFilter similarly uses activation probes as effi-cient privacy guardrails and notes that probes may require adaptation after model updates (Das and Fioretto, 2026). Existing work shows that activa-tion probes can read safety-relevant internal states, but it has not systematically tested whether frozen probes remain reliable after routine model updates. 
+
+3 Experimental Setup 
+
+We evaluate two open-weight instruction-tuned models spanning a 3.5 × parameter range: Gemma-2-2B-it (Team et al., 2024) and Qwen2.5-7B-Instruct (Yang et al., 2024). Both are loaded in bfloat16 as the base condition; all update conditions are derived from these checkpoints. The grid is model-agnostic by construction and supports drop-in substitution of further models. 
+
+Monitors . We study four binary safety-relevant monitoring tasks, each instantiated as a labeled prompt dataset. Harmfulness uses WildGuard-Mix prompt-level harm labels (Han et al., 2024). Privacy/PII uses a balanced PII-benchmark-style dataset (Jha, 2026), where positive examples con-tain personal information and negative examples contain no labeled PII. Refusal-compliance uses XSTest (Röttger et al., 2023), contrasting safe prompts that resemble unsafe requests with gen-uinely unsafe prompts; we keep its natural size to avoid cross-source style confounds. High-stakes is Update family Update types Models covered            
+
+> Quantization bnb INT8, bnb NF4 Gemma + Qwen Weight-only quant GPTQ, AWQ Qwen only Activation-aware quant W8A8/SmoothQuant Qwen only LoRA alpaca/general, safety, pri-vacy Gemma + Qwen Merged LoRA merged versions Gemma + Qwen QLoRA safety QLoRA Gemma + Qwen
+
+Table 2: Update conditions and backend coverage. The designed grid contains twelve post-base update condi-tions. 
+
+a controlled synthetic monitor: matched low- and high-stakes templates span the same topic domains, making stakes the intended systematic axis. Each monitor uses 1,000 examples if possible, balanced 500/500 by class. We use a 70/30 train/test split, exact-duplicate removal, and grouped splits when-ever examples share a template or pair identity. 
+
+Update conditions. We evaluate twelve post-base update conditions, summarized with their per-model backend coverage in Table 2. Quanti-zation updates include bitsandbytes INT8 and NF4 (Dettmers et al., 2022, 2023); weight-only quantiza-tion includes GPTQ and AWQ (Frantar et al., 2023; Lin et al., 2024); and activation-aware quantization uses a SmoothQuant-style W8A8 checkpoint (Xiao et al., 2023). Fine-tuning updates include three rank-16 LoRA adapters (Hu et al., 2022) for gen-eral instruction following, refusal/safety behavior, and privacy/PII-removal rewriting, plus merged ver-sions of each adapter and a QLoRA safety adapter served on an NF4-quantized base (Dettmers et al., 2023). Safety and privacy fine-tuning data are dis-joint from the corresponding monitor datasets, with verbatim-overlap checks to avoid train-on-test leak-age. 
+
+Probes. Monitors are implemented as linear logistic probes on residual-stream activations at the final non-padding token of the chat-formatted prompt, read at layers 4, 8, 12, 16, 20, 24 (all valid for both models). For each (model, monitor, layer) we train five probes on independent 85% subsam-ples of the training split (seeds 0–4). Probes are trained only on base-model activations and are frozen thereafter: every update condition is evalu-ated by re-extracting activations from the updated model and scoring them with the unchanged probe. 
+
+Metrics and grid. Our primary quantity is the change in held-out AUC of the frozen probe be-tween the base and updated model; we addition-ally record recall at 1% and 5% false-positive rate and expected calibration error. The full grid is 2 models × 4 monitors × 12 update conditions 
+
+× 6 layers × 5 seeds = 2,880 designed update cells, of which 2,520 completed (the remainder are the logged Gemma cells lacking public quantized checkpoints); all completed cells passed the base-quality eligibility gate fixed before the full-scale run (Table 1) 
+
+4 Methodology 
+
+Activation-Monitor Persistence. Let M be a base language model and let ϕMℓ (x) ∈ Rd de-note the residual-stream activation at the final non-padding token of input x after decoder block ℓ. A monitor is a dataset D = {(xi, y i)} of prompts with binary safety-relevant labels together with a probe h trained on {(ϕMℓ (xi), y i) : i ∈ Dtrain }.An update is an operator U mapping M to an up-dated model M ′ = U (M ) with the same archi-tecture and tokenizer interface, so layer indices remain aligned, but altered weights or numerics— quantization, adapter insertion, adapter merging, or quantized-base adaptation. The persistence ques-tion is whether h, trained on ϕMℓ and frozen, re-mains accurate when composed with ϕM ′ 
+
+> ℓ
+
+.
+
+Benchmark Cells. The unit of evaluation is a cell 
+
+c = ( model , monitor , update , layer , seed ), where the seed indexes the probe-training subsample. For each cell we compute the base score Abase (c) = AUC( h ◦ ϕMℓ ; Dtest ) and the post-update score 
+
+Apost (c) = AUC( h ◦ ϕM ′ 
+
+> ℓ
+
+; Dtest ) on the identical held-out split, and define 
+
+∆AUC( c) = Apost (c) − Abase (c).
+
+Before the full-scale run, we fixed three derived criteria: big _drop( c) = 1[∆AUC( c) ≤ − 0.05] ,marking degradation large enough to change op-erational conclusions; operational _failure( c) = 
+
+1[Apost (c) < 0.70] , marking a probe that is no longer usable regardless of its starting point; and 
+
+eligible( c) = 1[Abase (c) ≥ 0.75] , restricting anal-ysis to cells where a meaningful monitor existed to degrade. All aggregate statistics (median ∆AUC ,big-drop rate, operational-failure rate) are com-puted over eligible cells. 
+
+Staleness Prediction. Beyond characterizing degradation, we ask whether it is predictable be-fore post-update evaluation. The predictor maps 
+
+z(c) to ∆AUC( c) for regression or big drop( c) for classification. Every feature in z(c) is observable (a) Big-drop cells (b) Operational failures Figure 2: Failure-set overlap across fine-tuning families. Jaccard overlap is computed over matched cells defined by model, monitor, layer, seed, and probe type. Panel (a) shows overlap for big-drop cells, and Panel (b) shows overlap for operational failures. 
+
+pre-deployment: cell metadata, base-probe qual-ity, derived fragility quantities, and base-model probe/activation geometry. These include model, monitor, update, update family, layer, normalized depth, base AUC, ECE, recall at fixed FPR, eligi-bility margin, recall gaps, depth indicators, update-intent × monitor terms, family × early-layer terms, probe weight norm, class-centroid distance, be-tween/within variance ratio, training-margin statis-tics, and score entropy. These form four nested feature sets—metadata-only ⊂ base-metrics ⊂
+
+fragility ⊂ fragility+geometry—used to attribute predictive power. 
+
+Baselines. Because grid structure alone can ex-plain substantial variation, we compare against eight group-mean lookup baselines: global mean; means by update, update family, update × layer, update × monitor, update × model, update × layer 
+
+× monitor, and update × layer × monitor × model. If a test key is unseen in training, as in leave-update-out, the lookup backs off to the largest seen subset of its key columns before falling back to the global mean. The claim of interest is the margin of the best learned predictor over the best of these baselines. 
+
+Evaluation Schemes. We evaluate predictors un-der stratified 5-fold cross-validation as an interpo-lation reference and four extrapolation schemes: leave-update-out (12 folds), leave-monitor-out (4), leave-model-out (2), and leave-update-family-out (6). The primary metric is mean within-fold Spear-man correlation between predicted and observed 
+
+∆AUC ; pooled correlations are secondary because heterogeneous folds can inflate rank correlations. Predictors include elastic net, random forest, extra trees, and histogram gradient boosting. For each scheme, we compare the best predictor × feature-                          
+
+> Update family nMedian
+> ∆AUC Big-drop rate Operational failure
+> Quantization 480 -0.0021 1.46% 0.00% Weight-only quant 240 -0.0059 3.33% 0.00% Activation-aware quant 120 -0.0062 0.83% 0.00% LoRA 720 -0.0374 43.33% 13.75% Merged LoRA 720 -0.0381 43.19% 13.75% QLoRA 240 -0.0571 53.75% 13.75%
+
+Table 3: Probe degradation summarized by update fam-ily using median ∆AUC, big-drop rate, and operational-failure rate. 
+
+set configuration against the best of the eight base-lines, using a symmetric best-vs-best comparison over fixed model families. Success requires beating the best baseline by at least +0 .05 mean within-fold Spearman in at least two of the four leave-out schemes. 
+
+5 Results 
+
+Across the 2,520 completed (and uniformly eligi-ble) update cells, 768 (30.5%) exhibit a big drop and 231 (9.2%) an operational failure. 
+
+5.1 Update Family Determines Monitor Staleness 
+
+Frozen monitors frequently go stale after fine-tuning, but rarely after quantization. Table 3 gives the family-level picture. The three quantization families are nearly flat: median ∆AUC ranges from −0.0021 (bitsandbytes INT8/NF4, n = 480 )through −0.0059 (weight-only GPTQ/AWQ, n =240 ) to −0.0062 (activation-aware W8A8, n =120 ), big-drop rates range from 0.83% to 3.33% ,and none of the 840 quantization-family cells pro-duces an operational failure. The fine-tuning fami-lies are an order of magnitude worse on every statis-tic: median ∆AUC of −0.0374 (LoRA, n = 720 ), 
+
+−0.0381 (merged LoRA, n = 720 ), and −0.0571 
+
+(QLoRA, n = 240 ); big-drop rates of 43 .33% ,
+
+43 .19% , and 53 .75% ; and a 13 .75% operational-failure rate in each family. Confidence intervals preserve the same separation: aggregate quanti-zation has a big-drop rate of 1.90% with Wilson 
+
+95% CI [1 .18 , 3.07] and no operational failures, while LoRA, merged LoRA, and QLoRA have big-drop rates of 43 .33% [39 .76 , 46 .98] , 43 .19% [39 .62 , 46 .84] , and 53 .75% [47 .43 , 59 .95] , respec-tively. The family medians sit near the big-drop threshold while nearly half the cells cross it, in-dicating a heavy left tail concentrated in partic-ular monitor × layer pockets rather than a uni-form shift; consistent with this, operational fail-Monitor n Median base AUC Median ∆AUC Median ∆ recall@1% FPR Median ∆ recall@5% FPR Big-drop rate Op. failure rate                            
+
+> Harmfulness 630 0.9457 -0.0240 -0.1000 -0.0867 35.87% 4.29% High-stakes 630 0.9827 -0.0142 -0.1167 -0.0694 20.95% 3.97% Privacy/PII 630 0.8477 -0.0886 -0.0667 -0.1377 57.14% 28.41% Refusal-compliance 630 0.9928 -0.0052 -0.0333 -0.0167 7.94% 0.00%
+
+Table 4: Base probe quality and low-FPR degradation by monitor. 
+
+ures recur at an identical rate across all three fine-tuning families, suggesting the same vulnerable cells fail under every adapter. We confirm this over-lap directly (Figure 2): LoRA and merged LoRA have near-identical failing-cell sets, with Jaccard overlap 0.980 for big drops and 0.982 for opera-tional failures. QLoRA overlaps less but still sub-stantially with the LoRA families ( 0.735 –0.750 
+
+for big drops), suggesting both shared vulnerable monitor/layer pockets and additional quantized-adaptation-specific failures. Figure 3 characterizes this layer axis: quantization remains near-flat at every measured depth, whereas LoRA-style up-dates degrade probes across most layers, with the strongest QLoRA degradation concentrated around middle layers. Runtime and merged LoRA produce nearly iden-tical degradation in paired comparison. Across all matched runtime/merged cells, the median paired 
+
+∆AUC difference is 0.0000 , the pooled Wilcoxon test does not show evidence of a reliable over-all shift ( p = 0 .1369 ), and big-drop/operational-failure discordance is rare: only 2 versus 1 dis-cordant big-drop cells and 1 versus 1 discordant operational-failure cells, with exact discordance tests p = 1 .0. This supports the merged condi-tions’ intended role as a numerical control: stal-eness is attributable to the weight update itself, not the serving path. QLoRA, which combines an NF4 base with adaptation, is the most damaging condition in the grid. We note that GPTQ, AWQ, and W8A8 were available only for Qwen2.5-7B, so comparisons among quantization families are within-model; the quantization-versus-fine-tuning contrast holds within both models. The qualitative split is also insensitive to the exact big-drop cutoff: sweeping the threshold from −0.03 to −0.07 , ag-gregate quantization remains below 7% big-drop rate, while every LoRA-family update remains above 35% .
+
+5.2 Monitor Tasks Differ Sharply in Fragility 
+
+Fragility varies strongly across monitor type. Fig-ure 5 shows big-drop rates by monitor over n =630 eligible cells each: privacy/PII 57.14%, harm-fulness 35.87%, high-stakes 20.95%, and refusal-5.0 7.5 10.0 12.5 15.0 17.5 20.0 22.5 25.0         
+
+> layer
+> −0.10
+> −0.08
+> −0.06
+> −0.04
+> −0.02
+> 0.00
+> median ΔAUC
+> median ΔAUC by layer
+> quantization
+> lora
+> merged_lora
+> qlora
+> 5.0 7.5 10.0 12.5 15.0 17.5 20.0 22.5 25.0
+> layer
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> big-drop rate
+> big-drop rate by layer
+> quantization
+> lora
+> merged_lora
+> qlora
+> Depth analysis (eligible cells)
+
+Figure 3: Layer-wise monitor degradation by update family. 
+
+Feature set Spearman Pearson MAE RMSE ∆ρ
+
+Metadata 0.669 0.664 0.026 0.042 —+ Base metrics 0.678 0.681 0.025 0.040 +0.009 + Fragility 0.681 0.678 0.025 0.040 +0.003 + Geometry/artifacts 0.703 0.713 0.024 0.038 +0.022 
+
+Table 5: Predictor feature-set ablation. Adding base met-rics and fragility features gives modest gains, while geometry/artifact features provide the largest incremen-tal improvement. 
+
+compliance 7.94%—a 7× spread between the most and least fragile monitor under the identical up-date distribution. Privacy/PII is the dominant fail-ure case, accounting for 360 of the 768 big drops. Table 4 shows that this fragility also appears at low false-positive operating points: privacy/PII has the largest median recall loss at 5% FPR and the highest operational-failure rate, while refusal-compliance remains comparatively stable. Refusal-compliance is the most stable despite being trained on the smallest dataset, though its smaller test split makes its rate estimate the noisiest of the four. We reiterate that high-stakes is a controlled synthetic monitor; its absolute rate should be read as a di-agnostic on a clean construct rather than a field estimate. The update-family conclusion does not rely on this synthetic construct: after excluding high-stakes, the aggregate quantization big-drop rate remains low at 2.54% with no operational fail-ures, while LoRA, merged LoRA, and QLoRA rise to 47 .59% , 47 .59% , and 58 .89% big-drop rates. 
+
+5.3 Degradation Is Predictable Beyond Lookup-Table Baselines 
+
+Monitor degradation is predictable beyond lookup-table baselines. Table 7 and Figure 6 report the regression results under the four extrapolation schemes. The group-mean baselines are strong, reaching mean within-fold Spearman of 0.58–0.64, which underscores that raw predictor correlations would be uninformative; the claim rests on the mar-gin over the best baseline. The learned predictor Check n Main result      
+
+> Retrained-probe recovery 42 cells Median recovery fraction = 0.981
+> Adapter-seed variance 3 seeds Max median-∆AUC range = 0.024
+> Response-side monitor 12 cells Response-side ∆AUC = -0.0817 ;prompt-side = -0.0302
+
+Table 6: Mechanism and robustness analyses across recovery, adapter-seed variance, and response-side mon-itoring. 
+
+exceeds the fixed +0 .05 margin in three of four schemes: leave-update-out ( +0 .0915 , 0.6324 →
+
+0.7239 ), leave-monitor-out ( +0 .0529 , 0.6165 →
+
+0.6694 , narrowly clearing the margin), and leave-update-family-out ( +0 .1361 , 0.5813 → 0.7174 )— the last being the hardest extrapolation, in which an entire update family unseen in training must be ranked. Leave-model-out does not clear the mar-gin ( +0 .0257 , 0.6433 → 0.6690 ); with only two models, model-specific structure cannot transfer and the update × layer × monitor lookups already capture most cross-model regularity. The locked criterion ( ≥ +0 .05 in ≥ 2 of 4 schemes) is met. Table 5 ablates the predictor inputs: metadata is already informative, but artifact/geometry features provide the largest incremental gain, indicating that representation-level properties help predict which monitors become stale. Practically, this ranking translates into efficient triage: ordering monitor × layer cells by predicted big-drop risk catches far more true failures per unit of revalidation budget than the lookup-table or random-selection baselines (Figure 4) 
+
+5.4 Mechanism and Robustness Analyses. 
+
+We further analyze whether stale monitors fail be-cause the monitored signal disappears, because one adapter run is anomalous, or because our probes read only prompt-final-token activations. The re-covery analysis compares, on the same held-out examples, the base probe on base activations, the frozen base probe on updated-model activations, and a probe newly trained on updated-model acti-vations, separating representational erasure from representational drift. Recovery is high (Table 6): the monitored signal usually survives the update rather than being erased. This recovery is diagnos-tic rather than a deployment fix, since recovering performance requires labeled post-update activa-tions that a frozen deployed monitor does not have. The adapter-seed check trains independent safety-             
+
+> CV scheme Best baseline Spearman Best ML Spearman
+> ∆
+> Leave-update-out 0.6324 0.7239 +0.0915 Leave-monitor-out 0.6165 0.6694 +0.0529 Leave-model-out 0.6433 0.6690 +0.0257 Leave-family-out 0.5813 0.7174 +0.1361
+
+Table 7: Comparison between the best lookup-table baseline and the best machine-learning predictor across leave-out evaluation schemes. 
+
+Figure 4: Predictor budget curve for revalidation triage: ranking cells by predicted big-drop risk catches true failures much faster than lookup baselines or random selection. 
+
+LoRA adapters under different random seeds and finds the degradation pattern stable across them, rul-ing out an anomalous single run. The response-side check repeats the procedure on activations from generated responses rather than the prompt-final token, where degradation is at least as large, so stal-eness is not an artifact of where the probe reads. To-gether these rule out signal erasure, an anomalous adapter, and a read-location artifact, supporting a representational-drift interpretation: fine-tuning leaves the monitored distinction intact but moves the readout direction enough that a frozen base-model probe becomes stale. 
+
+Update Intent Does Not Directly Predict Probe Staleness. The monitor-level ordering reveals a non-obvious asymmetry. Safety-oriented LoRA up-dates explicitly train the model’s refusal behavior, yet refusal-compliance is the most stable monitor in the benchmark. Conversely, privacy-targeted tun-ing produces the strongest degradation for the pri-vacy/PII monitor, suggesting that intent-matched data can displace the same representation a moni-tor reads. QLoRA adds a second asymmetry: NF4 quantization alone is nearly benign, but adapta-tion on an NF4 base is the most damaging update family. Thus, the practical risk is not simply that fine-tuning changes behavior, but that some up-dates move the specific internal readout directions on which frozen monitors depend. Figure 5: Big-drop rate by monitor type under the same update distribution. 
+
+> Figure 6: Mean within-fold Spearman correlation for the strongest lookup-table baseline and best learned predictor across leave-group-out schemes.
+
+6 Discussion 
+
+Deployment implications. In our evaluated set-tings, the operational asymmetry is stark: fine-tuning events — including parameter-efficient ones, regardless of whether adapters are served at run-time or merged — degraded 43–54% of moni-tor cells past the big-drop threshold and rendered roughly one in seven unusable, while 840 quanti-zation cells produced no operational failures. This suggests that any weight-adaptation event in a de-ployment pipeline should trigger monitor revalida-tion as a matter of course, with re-calibration or probe retraining as the default remediation; quanti-zation appears lower-risk, but its nonzero big-drop rate (up to 3.33% for weight-only schemes) argues for cheap spot checks rather than exemption. The predictor’s role is triage, not certification: because all of its features are available before any post-update evaluation, it can rank monitor × layer cells by expected degradation and direct a limited revali-dation budget toward the likely failures first — an early-warning system that complements, and must not replace, actual re-measurement. 
+
+Why quantization is flat but fine-tuning is not. 
+
+The two update families differ in what they are constrained to preserve. Post-training quantization is engineered to preserve the input–output func-tion: calibration, per-channel scaling, and outlier handling all minimize the functional error intro-duced by reduced precision. Our results are consis-tent with this objective extending, at least approxi-mately, to intermediate geometry — a linear probe fails only when activations move along its decision normal, and the perturbations quantization induces appear small and roughly isotropic with respect to that direction, leaving AUC nearly unchanged. This held across three mechanistically distinct quan-tization schemes (weight rounding, weight-only group quantization, and activation-aware scaling), suggesting the flatness is a property of function-preserving compression broadly rather than of one scheme. Fine-tuning carries no such constraint: it optimizes behavior with no pressure to preserve internal coordinates, so even a low-rank update can rotate the readout direction enough that a frozen base-model probe misreads the new geometry — while, as our recovery analysis shows, the underly-ing signal often remains linearly recoverable. We state these as consistent interpretations rather than established mechanisms; the benchmark measures where probes fail, not yet why. 
+
+Why privacy/PII monitors may be espe-cially fragile. The privacy construct is deliber-ately narrow — the presence of concrete PII val-ues in otherwise matched text — and such fine-grained, surface-proximal features may occupy lower-variance directions that fine-tuning displaces more easily than broad semantic axes like harmful-ness. This susceptibility is plausibly compounded by intent: two of our seven fine-tuning conditions directly retrain the model’s handling of PII-bearing text, so part of the degradation likely reflects rep-resentational change in exactly the subspace the monitor reads. 
+
+7 Conclusion 
+
+We asked whether the implicit contract of activation monitoring holds — that a probe trained on base-model activations keeps reading the same safety-relevant geometry after routine model-side updates — and the answer is sharply structured rather than uniform. Function-preserving quantization leaves frozen monitors largely intact, while parameter-efficient fine-tuning frequently stales them, and the effect varies sharply by monitor. The key point is that this staleness is not erasure: the monitored sig-nal usually survives the update, but the frozen read-out direction silently falls out of alignment with it — a failure invisible without re-measurement, yet pre-dictable in advance from pre-deployment features alone. Practically, weight adaptation should trig-ger monitor revalidation by default, with prediction triaging which monitors to check first. We release the benchmark grid, construction code, probes, and predictor to support future work on update-robust activation monitoring. 
+
+Limitations 
+
+Our benchmark covers many updates, monitors, layers, and seeds, but remains limited. We evaluate two open-weight instruction-tuned models in the 2–7B range, so cross-model generality is not estab-lished. We also test one main update magnitude per fine-tuning family, so LoRA and QLoRA effects may change with rank, training steps, learning rate, data scale, and target modules. Our monitors are incomplete proxies for deploy-ment safety. High-stakes is a synthetic diagnos-tic. GPTQ, AWQ, and SmoothQuant-style W8A8 checkpoints were available only for Qwen2.5-7B. Finally, the study is behavioral, not mechanistic: we measure when probes fail and predict failure from pre-deployment features, but do not explain which internal directions move. Future work should study mechanisms, broader models, and monitor-side remedies. 
+
+References 
+
+Guillaume Alain and Yoshua Bengio. 2016. Under-standing intermediate layers using linear classifier probes. Andy Arditi, Oscar Obeso, Aaquib Syed, Daniel Paleka, Nina Panickssery, Wes Gurnee, and Neel Nanda. 2024. Refusal in language models is mediated by a single direction. In Advances in Neural Informa-tion Processing Systems .Amos Azaria and Tom Mitchell. 2023. The internal state of an LLM knows when it’s lying. In Find-ings of the Association for Computational Linguis-tics: EMNLP 2023 , pages 967–976. Association for Computational Linguistics. Christina Baek, Yiding Jiang, Aditi Raghunathan, and J. Zico Kolter. 2022. Agreement-on-the-line: Pre-dicting the performance of neural networks under distribution shift. In Advances in Neural Information Processing Systems , volume 35, pages 19274–19289. Yonatan Belinkov. 2022. Probing classifiers: Promises, shortcomings, and advances. Computational Linguis-tics , 48(1):207–219. Collin Burns, Haotian Ye, Dan Klein, and Jacob Stein-hardt. 2023. Discovering latent knowledge in lan-guage models without supervision. In International Conference on Learning Representations .Hoagy Cunningham, Aidan Ewart, Logan Riggs, Robert Huben, and Lee Sharkey. 2024. Sparse autoencoders find highly interpretable features in language models. In International Conference on Learning Representa-tions .Saswat Das and Ferdinando Fioretto. 2026. Neurofil-ter: Privacy guardrails for conversational llm agents. 
+
+arXiv preprint arXiv:2601.14660 .Tim Dettmers, Mike Lewis, Younes Belkada, and Luke Zettlemoyer. 2022. LLM.int8(): 8-bit matrix multi-plication for transformers at scale. In Advances in Neural Information Processing Systems , volume 35, pages 30318–30332. Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. 2023. QLoRA: Efficient finetun-ing of quantized LLMs. In Advances in Neural Infor-mation Processing Systems , volume 36. Yanrui Du, Fenglei Fan, Sendong Zhao, Jiawei Cao, Qika Lin, Kai He, Ting Liu, Bing Qin, and Mengling Feng. 2025. Anchoring Refusal Direction: Mitigat-ing Safety Risks in Tuning via Projection Constraint. 
+
+arXiv.org .Evan Duan. 2026a. Perplexity can miss sae feature damage under quantization. Evan Duan. 2026b. Pre-intervention prediction of sparse autoencoder steering side effects. Kazuki Egashira, Mark Vero, Robin Staab, Jingxuan He, and Martin Vechev. 2024. Exploiting LLM quantiza-tion. In Advances in Neural Information Processing Systems .Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh. 2023. Gptq: Accurate post-training quantization for generative pre-trained transformers. Saurabh Garg, Sivaraman Balakrishnan, Zachary C. Lipton, Behnam Neyshabur, and Hanie Sedghi. 2022. Leveraging unlabeled data to predict out-of-distribution performance. In International Confer-ence on Learning Representations .Nicholas Goldowsky-Dill, Bilal Chughtai, Stefan Heimersheim, and Marius Hobbhahn. 2025. Detect-ing strategic deception with linear probes. In Pro-ceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research . PMLR. Peixuan Han, Cheng Qian, Xiusi Chen, Yuji Zhang, Heng Ji, and Denghui Zhang. 2025. Safeswitch: Steering Unsafe LLM Behavior via Internal Activa-tion Signals. In Findings of the Association for Com-putational Linguistics: EMNLP 2025 , pages 6936– 6955. Association for Computational Linguistics. Seungju Han, Kavel Rao, Allyson Ettinger, Liwei Jiang, Bill Yuchen Lin, Nathan Lambert, Yejin Choi, and Nouha Dziri. 2024. Wildguard: Open one-stop mod-eration tools for safety risks, jailbreaks, and refusals of LLMs. In Advances in Neural Information Pro-cessing Systems .Junyuan Hong, Jinhao Duan, Chenhui Zhang, Zhangheng Li, Chulin Xie, Kelsey Lieberman, James Diffenderfer, Brian R. Bartoldson, Ajay Ku-mar Jaiswal, Kaidi Xu, Bhavya Kailkhura, Dan Hendrycks, Dawn Song, Zhangyang Wang, and Bo Li. 2024. Decoding compressed trust: Scru-tinizing the trustworthiness of efficient LLMs under compression. In Proceedings of the 41st International Conference on Machine Learning ,volume 235 of Proceedings of Machine Learning Research , pages 18611–18633. PMLR. Chia-Yi Hsu, Yu-Lin Tsai, Chih-Hsun Lin, Pin-Yu Chen, Chia-Mu Yu, and Chun-Ying Huang. 2024. Safe lora: The silver lining of reducing safety risks when fine-tuning large language models. Advances in Neural Information Processing Systems , 37:65072–65094. Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2022. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations .Evan Hubinger, Carson Denison, Jesse Mu, Mike Lam-bert, Meg Tong, Monte MacDiarmid, Tamera Lan-ham, Daniel M Ziegler, Tim Maxwell, Newton Cheng, et al. 2024. Sleeper agents: Training decep-tive llms that persist through safety training. arXiv preprint arXiv:2401.05566 .Hakan Inan, Kartikeya Upasani, Jianfeng Chi, Rashi Rungta, Krithika Iyer, Yuning Mao, Michael Tontchev, Qing Hu, Brian Fuller, Davide Testuggine, and Madian Khabsa. 2023. Llama guard: LLM-based input-output safeguard for human-AI conversations. Pritesh Jha. 2026. Piibench: A unified multi-source benchmark corpus for pii detection. Shen Li, Liuyi Yao, Lan Zhang, and Yaliang Li. 2024. Safety Layers in Aligned Large Language Models: The Key to LLM Security. arXiv.org .Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Wei-Ming Chen, Wei-Chen Wang, Guangxuan Xiao, Xingyu Dang, Chuang Gan, and Song Han. 2024. Awq: Activation-aware weight quantization for on-device llm compression and acceleration. Proceed-ings of machine learning and systems , 6:87–100. Todor Markov, Chong Zhang, Sandhini Agarwal, Tyna Eloundou, Teddy Lee, Steven Adler, Angela Jiang, and Lilian Weng. 2023. A holistic approach to unde-sired content detection in the real world. In Proceed-ings of the AAAI Conference on Artificial Intelligence ,volume 37, pages 15009–15018. Xiangyu Qi, Yi Zeng, Tinghao Xie, Pin-Yu Chen, Ruoxi Jia, Prateek Mittal, and Peter Henderson. 2024. Fine-tuning aligned language models compromises safety, even when users do not intend to! In International Conference on Learning Representations .Paul Röttger, Hannah Rose Kirk, Bertie Vidgen, Giuseppe Attanasio, Federico Bianchi, and Dirk Hovy. 2023. Xstest: A test suite for identifying exag-gerated safety behaviours in large language models. 
+
+arXiv preprint arXiv:2308.01263 .Gemma Team, Morgane Riviere, Shreya Pathak, Pier Giuseppe Sessa, Cassidy Hardin, Surya Bhupati-raju, Léonard Hussenot, Thomas Mesnard, Bobak Shahriari, Alexandre Ramé, et al. 2024. Gemma 2: Improving open language models at a practical size. 
+
+arXiv preprint arXiv:2408.00118 .Chengcan Wu, Zhixin Zhang, Zeming Wei, Yihao Zhang, and Meng Sun. 2025. Secure LLM Fine-Tuning via Safety-Aware Probing. ArXiv .Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien Demouth, and Song Han. 2023. Smoothquant: Accurate and efficient post-training quantization for large language models. In Proceedings of the 40th International Conference on Machine Learning , vol-ume 202 of Proceedings of Machine Learning Re-search , pages 38087–38099. PMLR. An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, et al. 2024. Qwen2.5 tech-nical report. arXiv preprint arXiv:2412.15115 .Xianjun Yang, Xiao Wang, Qi Zhang, Linda Petzold, William Yang Wang, Xun Zhao, and Dahua Lin. 2023. Shadow alignment: The ease of subverting safely-aligned language models. Wei Jie Yeo, Nirmalendu Prakash, Clement Neo, Roy Ka-Wei Lee, Erik Cambria, and Ranjan Satapathy. 2025. Understanding Refusal in Language Models with Sparse Autoencoders. Conference on Empirical Methods in Natural Language Processing .Wenjun Zeng, Yuchi Liu, Ryan Mullins, Ludovic Peran, Joe Fernandez, Hamza Harkous, Karthik Narasimhan, Drew Proud, Piyush Kumar, Bhaktipriya Radharapu, et al. 2024. Shieldgemma: Generative ai con-tent moderation based on gemma. arXiv preprint arXiv:2407.21772 .Minjun Zhu, Linyi Yang, Yifan Wei, Ningyu Zhang, and Yue Zhang. 2024. Locking down the finetuned llms safety. arXiv preprint arXiv:2410.10343 .Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren, Alexander Pan, Xuwang Yin, Mantas Mazeika, Ann-Kathrin Dombrowski, et al. 2023. Representation engineering: A top-down approach to ai transparency. arXiv preprint arXiv:2310.01405 .
