@@ -1,0 +1,562 @@
+Title: DRIFT: Refining Instruction Data via On-Policy Data Attribution
+
+URL Source: https://arxiv.org/pdf/2606.18307v1
+
+Published Time: Thu, 18 Jun 2026 00:04:21 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# DRIFT: Refining Instruction Data via On-Policy Data Attribution 
+
+Zefan Wang Lincheng Li Tianyu Yu Yuan Yao ∗
+
+Tsinghua University 
+
+zefan.wang.thu@gmail.com yaoyuanthu@gmail.com 
+
+## Abstract 
+
+Optimizing the training data distribution for Supervised Fine-Tuning (SFT) dictates the capability of Large Language Models (LLMs). While existing data curation methods excel at accelerating training under constrained budgets, they are less suited to elevating the capability upper bound. The challenge here is no longer to identify a smaller subset that preserves performance, but to refine the data distribution toward instances most capable of improving the final model. To address this problem, we explore instance-level data attribution using Influence Functions (IF). We identify that standard IF formulations struggle in this setting due to two structural limitations: a proximity gap caused by off-policy validation targets, and a severe bias towards gradient norm. We propose DRIFT ( Data Refinement via On-Policy Influence Functions for Supervised Fine-Tuning). Instead of relying on external reference data, DRIFT utilizes the model’s on-policy rollouts as validation targets, which empirically minimizes the parameter proximity gap and better aligns with the local neighborhood assumption of IF. It further applies signed weighting based on trajectory correctness and debiases influence scores against the gradient hacking issue, allowing a small set of validation queries to act as reliable anchors for attributing the full dataset. Experiments on 7B-parameter instruction and reasoning models show that DRIFT consistently raises the performance ceiling on both, outperforming existing data curation baselines. 
+
+## 1 Introduction 
+
+Supervised Fine-Tuning (SFT) is a pivotal stage in aligning Large Language Models (LLMs) with human instructions and enhancing their downstream task abilities (Ouyang et al., 2022; Wei et al., 2022). During this phase, the data mixture and the proportion of different training samples play a critical role in shaping model capabilities (Zhou et al., 2024; Ye et al., 2024). Despite its significance, the precise relationship between data mixing strategies and the ultimate performance of LLMs remains largely opaque (Li et al., 2025). Existing research on data curation primarily falls into three paradigms. First, domain-level data mixture (Xie et al., 2023a; Liu et al., 2024; Peng et al., 2020) adjusts sampling weights across broad categories but remains inherently coarse-grained, failing to account for vast quality disparities at the instance level. Second, data selection (Wettig et al., 2024; Xia et al., 2024; Ivison et al., 2025; Xie et al., 2023b) identifies small subsets to improve performance under constrained computational budgets. Because SFT is generally not a resource-constrained scenario compared to pre-training, this efficiency-first focus is less optimized for elevating the performance upper bound of a model after exhaustive training. Third, online batching (Wang et al., 2024a; Albalak et al., 2023) dynamically constructs data mixtures during the training process. While conceptually appealing, frequent re-evaluation of data weights disrupts highly optimized SFT infrastructures (Shoeybi et al., 2019). 
+
+> ∗Corresponding author. Preprint.
+> arXiv:2606.18307v1 [cs.LG] 16 Jun 2026
+
+To address these limitations, we shift the focus from budget-constrained training to capability maxi-mization through instance-level data attribution. Unlike previous methods (Wettig et al., 2024; Xia et al., 2024) that select subsets to improve training efficiency, we tackle a practical yet underexplored scenario: refining an already fully-trained model with the original training dataset as the can-didate pool. In this setting, the model has already absorbed the general data distribution, causing conventional data selection methods to yield only marginal gains. Breaking this saturation requires recalibrating the data distribution so that optimization emphasizes instances most capable of further improving the current model, rather than identifying samples that are efficient to learn. Implementing fine-grained attribution in a saturated model calls for a more robust and principled scoring mechanism to evaluate the contribution of each training sample (Pruthi et al., 2020; Ilyas et al., 2022). Influence Functions (IF) (Koh and Liang, 2017; Grosse et al., 2023) provide a mathematically rigorous tool for this purpose, explicitly estimating the effect of up-weighting a training sample on a specific validation set. Yet, standard IF formulations prove fragile when applied to LLMs. Theoretical analyses (Bae et al., 2022) reveal that IF approximations hold only within a microscopic local neighborhood of the converged parameters. However, when the validation target is an external reference response, reducing its loss can require substantial global parameter shifts, creating a 
+
+proximity gap that risks violating the local Taylor approximation. Drawing on recent findings in on-policy tuning (Mukherjee et al., 2025), we hypothesize that utilizing the model’s own generated responses as validation targets induces localized parameter updates, which better preserve the theoretical integrity of IF. Building upon this insight, we propose DRIFT (Data Refinement via On-Policy Influence Functions for Supervised Fine-Tuning). DRIFT prompts the base model to generate responses to validation queries as IF optimization targets, bridging the gap between data attribution and the on-policy learning paradigm. While direct on-policy fine-tuning, such as self-distillation, is inherently data-hungry and prone to overfitting when queries are scarce (Singh et al., 2023; Shumailov et al., 2023), DRIFT circumvents this limitation by using rollouts strictly as attribution anchors rather than direct training signals. By assigning positive weights to correct trajectories and negative weights to incorrect ones, we shift the IF optimization objective to a reward-weighted contrastive formulation, akin to a simplified policy gradient estimator. This allows a limited set of validation queries to robustly attribute the entire SFT dataset, reinforcing beneficial patterns while penalizing undesirable ones. Beyond the choice of validation targets, a second structural vulnerability of IF in LLMs lies in the susceptibility to gradient norm bias. Raw influence scores are heavily distorted by the magnitude of the gradients, causing the attribution to spuriously favor samples with abnormally large gradient norms rather than samples genuinely useful for the validation objective. To explicitly mitigate this issue, DRIFT incorporates a task-specific orthogonalization debiasing step, making the final scores less dominated by gradient magnitude. Extensive experiments on 7B-parameter instruction and reasoning-focused LLMs demonstrate the effectiveness of our approach. Under the rigorous setting of refining fully-trained models, DRIFT consistently improves over existing data curation baselines. Overall, our results suggest that on-policy validation targets together with proper gradient debiasing are important for making IF data attribution principled and robust. 
+
+## 2 Preliminaries 
+
+2.1 Influence Functions and Practical Approximations for LLMs 
+
+Influence Functions (IF) provide a mathematically rigorous framework to estimate the effect of a training sample ztrain on a specific validation target zval without retraining the model. Let θ∗
+
+be the parameters of a model trained to minimize the empirical risk 1
+
+> n
+
+Pni=1 L(zi; θ). Standard IF approximates the change in the validation loss L(zval ; θ∗) if ztrain were up-weighted by an infinitesimal amount ϵ. This influence score is given by: 
+
+I(ztrain , z val ) = −∇ θ L(zval ; θ∗)⊤H−1 
+
+> θ∗
+
+∇θ L(ztrain ; θ∗), (1) where Hθ∗ = 1
+
+> n
+
+Pni=1 ∇2 
+
+> θ
+
+L(zi; θ∗) is the Hessian matrix of the empirical risk. To render data attribution computationally tractable at the LLM scale, the inverse Hessian computation 
+
+H−1 
+
+> θ∗
+
+is typically approximated (Grosse et al., 2023; Choe et al., 2024) or even bypassed (Zhu 2et al., 2025; Xia et al., 2024), reducing the estimation to the inner product of first-order gradients. Furthermore, to overcome the prohibitive memory costs of storing dense gradients for billions of parameters, gradient sparsification and random projection are widely adopted (Park et al., 2023; Muhamed et al., 2024). Specifically, the high-dimensional gradient ∇θ L(z; θ∗) ∈ RD is mapped into a lower-dimensional space Rd (d ≪ D) using a sparse random projection matrix P ∈ Rd×D . The theoretical validity of this operation is grounded in the Johnson-Lindenstrauss lemma (William and Lindenstrauss, 1984), showing that the inner product between any two gradients is largely preserved. Let ϕ(z; θ∗) = P ∇θ L(z; θ∗) denote the projected gradient. The approximated IF is computed as: 
+
+I(ztrain , z val ) ≈ ϕ(ztrain ; θ∗)⊤ϕ(zval ; θ∗). (2) 
+
+Gradient Hacking Issue. Relying on the raw inner product exposes the attribution to a severe inherent gradient norm bias, where training samples with abnormally high gradient norms can dominate the IF scores regardless of their actual usefulness for the validation target. For instance, the estimation often disproportionately favors samples with shorter responses (Xia et al., 2024) or outlier samples (Muhamed et al., 2024). While the necessity of gradient normalization has been explored (Xia et al., 2024), the specific strategy remains inconclusive. 
+
+2.2 The Fragility of Influence Functions 
+
+Despite its theoretical elegance, IF is fundamentally a first-order Taylor approximation of the Leave-One-Out (LOO) retraining loss. Let θ−train denote the optimal parameters obtained by retraining the model without a specific training sample ztrain , and the true LOO effect on a validation target 
+
+zval is ∆LLOO = L(zval ; θ−train ) − L(zval ; θ∗). Existing studies (Bae et al., 2022) analyzing the error between IF estimations and ∆LLOO reveal that IF actually approximates a different objective: the Proximal Bregman Response Function (PBRF). Unlike LOO, which allows unconstrained global updates to reach θ−train , PBRF restricts the parameter shift to a local neighborhood around θ∗:
+
+θP BRF = arg min 
+
+> θ
+
+
+
+L(zval ; θ) + 12τ ∥θ − θ∗∥2
+
+> Hθ∗
+
+
+
+, (3) 
+
+Figure 1: Evolution of model proximity during continual training. The plots illustrate the rel-ative changes ( ∆) in parameter L2 norm and sparsity compared to the uniform weighting baseline. On-policy validation causes signif-icantly fewer parameter shifts, which we hy-pothesize better aligns with the local neighbor-hood assumption of IF. where τ controls the neighborhood size. This frame-work identifies several critical gaps that render IF fragile in deep neural networks. 
+
+2.2.1 The Non-Convergence Gap. 
+
+The theoretical derivation of IF strictly assumes that the model has converged to a local minimum, where the empirical gradient g = 1
+
+> n
+
+Pni=1 ∇θ L(zi; θ∗) = 0. When g̸ = 0 , the Taylor expansion around θ∗ in-troduces a residual error term in the parameter shift estimation that scales proportionally with ∥H−1 
+
+> θ∗
+
+g∥.In practice, applying IF to partially trained or uncon-verged models leads to erratic estimations because the non-zero empirical gradient dominates the in-tended LOO effect. This theoretical constraint natu-rally aligns with our paradigm of refining an already fully-trained SFT model. By operating on a con-verged model rather than training from scratch, we avoid prohibitive retraining costs and bound the non-convergence gap, better satisfying the theoretical prerequisites of IF. 
+
+2.2.2 The Proximity Gap and On-Policy Mitigation. 
+
+The discrepancy between the global optimum θ−train and the local optimum θP BRF is defined as the 
+
+proximity gap . The validity of the quadratic approximation in PBRF strictly requires the parameter shift ∥θ−train − θ∗∥ to be microscopic. To understand how the choice of validation targets affects this shift, we first analyze the expected parameter update under the PBRF framework for a pure 
+
+on-policy likelihood target. 3Figure 2: Overview of DRIFT ( Data Refinement via On-Policy Influence Functions for Supervised Fine-Tuning). We first sample on-policy responses for a small set of validation queries. We then assign each rollout positive or negative weights according to correctness, aggregate their projected gradients into task-specific validation anchors, and use these anchors to score the original SFT corpus. After debiasing the resulting influence scores against gradient norm, we continually fine-tune on the top-ranked subset to obtain a refined model. 
+
+Theorem 1 (Expected Parameter Shift of On-Policy Targets) Let θ∗ be the converged parame-ters. Under the PBRF framework, the expected first-order parameter shift induced by a pure on-policy validation target zon val ∼ πθ∗ is strictly zero, i.e., Ezon val [θP BRF − θ∗] = 0.
+
+Informal Proof. By the score function identity, the expected gradient of the log-likelihood over the model’s own output distribution is strictly zero. Since the Hessian is fixed at θ∗, the expected parameter shift is a linear transformation of this zero-gradient, yielding zero. 
+
+Remark (Intuitive Connection): Fine-tuning LLMs on aligned, on-policy data can update rela-tively small subnetworks rather than causing global parameter shifts (Mukherjee et al., 2025). We provide the formal proof in Appendix B.1. Theorem 1 establishes that on-policy targets structurally preserve the local neighborhood assumption of IF. In reality, however, the microscopic condition is not perfectly satisfied because of the variance from a finite number of rollouts. To empirically validate this, we track the parameter evolution during continual training. As illustrated in Figure 1, the shift for on-policy targets is significantly smaller than that of off-policy targets. We report an additional gradient-space locality based on validation-centroid norms in Table 5. Together, these observations support the use of on-policy validation targets as better local anchors for IF. 
+
+## 3 DRIFT: Data Refinement via On-Policy Influence Functions for Supervised Fine-Tuning 
+
+Building upon the theoretical insights and limitations discussed in Section 2, we introduce DRIFT .Our method is designed to maximize the capability of a fully-trained model by recalibrating the SFT data distribution through on-policy influence scoring. The pipeline consists of four main steps: 
+
+Step 1: On-Policy Proximal Validation Construction. To satisfy the convergence assumption of IF, the pipeline is initialized with a base model θ∗ that has fully converged on the candidate SFT dataset. To address the proximity gap, we replace external off-policy validation sets with on-policy generations. Given a set of validation queries Xval , we sample responses directly from the model’s current policy πθ∗ to construct an on-policy rollout set Zrollout = {(x, y ) | x ∈ Xval , y ∼ πθ∗ (·| x)}.By evaluating IF on the model’s own generations, the validation targets are empirically anchored closer to the current parameter manifold. This minimizes the required parameter shift, better preserving the validity of the local Taylor approximation, consistent with the smaller shifts in Figure 1. 
+
+Step 2: Policy Gradient IF Formulation. Standard IF evaluates the gradient of the Cross-Entropy (CE) loss, effectively minimizing − log πθ (y|x) for positive data. To fully utilize both successful 4and failed rollouts, we redefine the validation objective as the maximization of expected reward. By assigning a discrete reward y(i) 
+
+> val
+
+∈ { +1 , −1} based on trajectory correctness, the gradient of our validation objective resembles a REINFORCE policy gradient estimator 2
+
+∇θ JP G ≈ 1
+
+NxNxX
+
+> i=1
+
+y(i)
+
+> val
+
+∇θ log πθ∗ (y(i)|x), (4) where Nx is the number of rollouts sampled for query x. This formulation allows the influence function to attribute positive scores to training samples that reinforce correct reasoning paths, while actively penalizing those that induce undesirable trajectories. To balance the attribution signal across diverse validation tasks, we apply a dataset-level normalization. For a rollout zval generated from query x in a validation dataset Dk, its final weight is w(zval ) = 
+
+yval /(|Dk| · Nx). Utilizing GraSS (Muhamed et al., 2024) to extract the sparse gradient projections 
+
+ϕ(z; θ∗) ∈ Rd, the raw task-specific influence score for a training sample ztrain is efficiently obtained via a single dot product with the weighted validation centroid: 
+
+S(k)
+
+> raw
+
+(ztrain ) = ϕ(ztrain ; θ∗)⊤ X
+
+> zval ∈Dk
+
+w(zval )ϕ(zval ; θ∗)
+
+!
+
+. (5) 
+
+Step 3: Influence Debiasing. As established in Section 2, raw influence scores are heavily con-founded by the gradient norm of the training samples. While one might intuitively assume that applying cosine similarity would inherently eliminate this adverse effect, it implicitly assumes a strictly linear relationship between the raw influence score and the gradient norm. Empirically, we observe that this relationship in high-dimensional LLM gradients often follows a complex power law (i.e., |S| ∝ ∥ ϕ∥β , where β̸ = 1 , details in Appendix C). To rigorously decouple the influence score from the gradient magnitude, we perform an independent log-space orthogonalization for each validation task. For a given task k, we conduct a linear regression in the log scale between the absolute raw scores |S(k)
+
+> raw
+
+(ztrain )| and the projected gradient norms 
+
+∥ϕ(ztrain ; θ∗)∥ to extract the task-specific slope β(k). To ensure numerical stability during the log-space linear regression, we mask the bottom 10% of samples with extremely small gradient norms. The debiased score ˜S(k)(ztrain ) is computed by orthogonalizing the raw score: 
+
+˜S(k)(ztrain ) = sgn  S(k)
+
+> raw
+
+(ztrain ) · exp 
+
+
+
+log S(k)
+
+> raw
+
+(ztrain ) − β(k) log ∥ϕ(ztrain ; θ∗)∥
+
+
+
+. (6) The overall influence score for a training sample is the sum of debiased scores across all tasks: 
+
+S(ztrain ) = P 
+
+> k
+
+˜S(k)(ztrain ).
+
+Step 4: Continual Training with Refined Distribution. After computing S(ztrain ) for all in-stances in the candidate SFT dataset, we rank the samples in descending order of their influence scores. We select the top-ranked samples (the top 10% by default) to form the refined data mixture. Finally, we perform continual SFT on the base model θ∗ using this highly targeted, rollout-driven subset to break through the performance saturation of standard SFT. 
+
+## 4 Experiments 
+
+4.1 Experimental Setup Base Models and Training Objective. We evaluate our method on two distinct 7B-parameter models: Olmo3-7B-Instruct-SFT (Olmo et al., 2025), a general-purpose instruction-tuned model, and OpenR1-Distill-7B HuggingFace (2025), a reasoning-focused model. Both models are open-sourced and have already been fully trained on their respective candidate SFT datasets Dolci-Instruct-SFT and Mixture-of-Thoughts . We observe no further loss decrease when training them on their original data distributions. Our objective is to perform continual SFT on a strictly selected top 10% 
+
+subset of the candidate data to break through this performance saturation. Detailed dataset statistics and conservative continual training hyperparameters are provided in Appendix A.1. 
+
+> 2Although Theorem 1 is stated for pure on-policy targets and the signed weighting technically violates this condition, Table 5 empirically shows that the aggregated validation centroid under our signed weighting remains orders of magnitude smaller than that of off-policy references, so the proximity-gap mitigation is preserved in practice.
+
+5Table 1: Comprehensive evaluation of DRIFT against existing data curation baselines on Olmo3-7B-Instruct-SFT and OpenR1-Distill-7B. Under the rigorous setting of refining fully-converged models, DRIFT consistently elevates the performance upper bound across both target and non-target domains, whereas conventional efficiency-driven methods struggle. Best results are highlighted in bold .                                                                                                                                                                                                                                                      
+
+> Target Domains Non-Target Domains Average
+> ↑Acc.(%) BBH MBPP+ MATH MMLU Pro Zebra Logic LCB v5 Olympiad Bench GPQA Diamond All Non-Tar. Olmo3-7B-Instruct-SFT 44.63 56.42 66.16 44.22 17.23 15.43 34.27 35.01 39.17 25.49 + Random Baseline 44.15 56.45 66.09 44.14 16.58 15.07 35.35 33.14 38.88 -0.29 25.04 -0.45
+> + Self-Distillation 43.89 54.40 67.48 41.65 17.63 9.48 36.31 30.93 37.72 -1.45 23.59 -1.90
+> + DSIR 40.18 53.64 54.63 35.28 17.45 13.51 26.59 33.62 34.36 -4.81 22.79 -2.70
+> + Qurating 44.49 55.92 67.29 44.33 17.13 16.52 35.27 35.23 39.53 +0.36 26.04 +0.55
+> + BM25 44.88 54.63 67.86 44.73 16.90 16.28 35.50 35.92 39.59 +0.42 26.15 +0.66
+> + LESS 43.48 53.80 64.22 43.33 15.23 14.22 32.34 32.80 37.43 -1.74 23.65 -1.84
+> + RDS 43.62 55.52 66.16 44.59 16.50 15.55 34.90 34.50 38.92 -0.25 25.36 -0.13
+> + IF (Impl. w. GraSS) 44.49 55.19 65.42 44.86 16.58 14.53 34.31 34.44 38.73 -0.44 24.97 -0.52
+> +DRIFT (Ours) 45.61 56.18 67.52 45.14 18.90 16.78 35.61 35.23 40.12 +0.95 26.63 +1.14
+> OpenR1-Distill-7B 76.04 54.23 90.98 51.65 23.85 43.86 67.51 49.72 57.23 46.24 + Random Baseline 76.52 53.90 91.05 51.15 23.75 44.81 66.58 51.45 57.40 +0.17 46.65 +0.41
+> + Self-Distillation 60.82 55.85 83.78 48.59 20.53 20.31 60.24 44.48 49.33 -7.90 36.39 -9.85
+> + DSIR 73.86 54.17 90.85 49.34 22.30 44.46 65.95 49.02 56.24 -0.99 45.43 -0.81
+> + Qurating 76.70 54.33 91.88 51.16 24.73 47.63 68.25 47.57 57.78 +0.55 47.05 +0.81
+> + BM25 75.76 54.23 91.20 51.19 24.95 44.19 67.62 49.40 57.32 +0.09 46.54 +0.30
+> + LESS 76.15 54.17 91.76 50.44 24.30 44.10 68.32 49.02 57.28 +0.05 46.44 +0.20
+> + RDS 75.88 54.86 91.00 51.69 25.48 45.19 66.77 50.19 57.63 +0.40 46.91 +0.67
+> + IF (Impl. w. GraSS) 75.46 54.27 91.52 50.78 25.80 48.18 67.62 49.15 57.85 +0.62 47.69 +1.45
+> +DRIFT (Ours) 76.11 56.02 90.82 51.37 25.88 50.21 68.29 50.54 58.66 +1.43 48.73 +2.49
+
+Validation Set Construction. To guide the data attribution, we construct a validation set cover-ing four core capabilities: Minerva MATH (Lewkowycz et al., 2022), MBPP+ (Liu et al., 2023), BBH (Suzgun et al., 2022), and MMLU-Pro (Wang et al., 2024b). We strictly select tasks where the base models are neither saturated nor near random guessing, ensuring the performance is not hard-capped. Furthermore, we prioritize reasoning-heavy tasks over pure factual memorization, as preliminary experiments indicated that memorization-centric validation yields negligible downstream changes. For DRIFT, we generate on-policy rollouts for these queries and verify their correctness. All other baselines requiring a validation set strictly use the original external reference responses. 
+
+Evaluation Benchmarks. We comprehensively assess the models across the four core dimensions using a diverse suite of benchmarks. To rigorously test whether DRIFT merely overfits to the capability domains of the validation queries, we categorize these benchmarks into two groups: (1) 
+
+Target Domains , which align with the sources of our validation queries, including BBH (Suzgun et al., 2022), MBPP+ (Liu et al., 2023), MATH (Lewkowycz et al., 2022), and MMLU-Pro (Wang et al., 2024b); and (2) Non-Target Domains , which are entirely unseen during the validation and attribution phase, including ZebraLogic (Lin et al., 2024), LiveCodeBench v5 (Jain et al., 2024), OlympiadBench (He et al., 2024), and GPQA Diamond (Rein et al., 2023). 
+
+Baselines. To rigorously validate DRIFT, we compare it against a diverse set of baselines under the exact same top-10% selection budget. These include: (1) Random selection; (2) Self-Distillation 
+
+(training directly on the generated rollouts); (3) Semantic/Representation-based selection ( DSIR (Xie et al., 2023b), RDS (Ivison et al., 2025)); (4) Quality scoring ( Qurating (Wettig et al., 2024)); (5) Lexical retrieval ( BM25 (Robertson and Zaragoza, 2009)); and (6) Influence-based methods (LESS (Xia et al., 2024), Standard IF (Muhamed et al., 2024)). Full evaluation configurations and baseline implementation details are deferred to Appendix A.1 and A.2. 
+
+4.2 Main Results DRIFT consistently elevates the performance upper bound, whereas conventional curation methods struggle. Table 1 presents the comprehensive evaluation results across both target and non-target domains. While strong lexical baselines like BM25 remain highly competitive on specific domains (e.g., MATH on Olmo3), DRIFT delivers the most consistent improvements across both target and non-target domains, yielding the highest average performance. In contrast, most existing data selection methods (e.g., DSIR, LESS, RDS) struggle to significantly surpass the Random baseline, and in several cases even degrade the model’s performance. This aligns with our hypothesis: 6Table 2: Ablation on rollout utilization and weighting strategies. We decompose the design space into the use of on-policy rollouts, rollout polarity, reward assignment ( y−
+
+> val
+
+), and rollout scaling. The results highlight that shifting to on-policy targets, coupled with a contrastive signed weighting mechanism, is crucial for robust data attribution.                                                                                   
+
+> On-Policy Rollout Utilization Olmo3-7B-Instruct-SFT OpenR1-Distill-7B # Pos. # Neg. y−
+> val Max Total All(Avg) Non-Tar.(Avg) All(Avg) Non-Tar.(Avg)
+> ×10–138.66 24.90 57.66 47.37
+> ✓10–139.35 25.56 57.87 47.20
+> ✓11−1239.82 26.18 57.48 47.29
+> ✓All 0–All 39.59 25.51 57.87 47.06
+> ✓All All −1439.99 26.14 58.46 48.32
+> ✓All All −1840.02 26.40 58.66 48.73
+> ✓All All −116 40.08 26.64 --
+> ✓All All −132 40.12 26.63 --
+> ✓All All +1 All 38.86 25.06 57.75 47.28
+
+conventional methods are primarily designed for training efficiency. In this realistic setting where the entire candidate dataset has already been traversed, efficiency-oriented selection offers little additional leverage on the performance ceiling. Raising it instead requires identifying the instances that can still move a converged model, which is exactly what DRIFT targets. 
+
+Attribution on the original SFT corpus is more robust than Self-Distillation. A naive alternative to utilizing on-policy rollouts is to directly fine-tune the model on its own generated responses. However, as shown in Table 1, while Self-Distillation yields marginal gains in specific domains like MATH for Olmo3 (66.16% → 67.48%), it generally suffers from severe performance collapse. The degradation is especially severe on the reasoning-heavy OpenR1-Distill-7B, whose average score falls from 57.23% to 49.33%. Given our extremely limited validation set scale of roughly 7,500 queries for Minerva MATH and only about 1,000 queries combined for other domains, directly training on these rollouts causes the model to overfit to narrow patterns, leading to output repetition and entropy collapse. In contrast, DRIFT uses the small validation set merely as an anchor to retrieve a diverse, high-quality subset from the original, large-scale SFT dataset, thereby preserving general capabilities while safely enhancing specific skills. 
+
+On-policy Rollout is vital for Influence Functions to work on LLMs. The standard Influence Function baseline (IF Impl. w. GraSS), which relies on external off-policy validation targets, yields negligible improvements and occasionally degrades performance (e.g., ZebraLogic for Olmo3 drops from 17.23% to 16.58%). This standard approach computes gradients using external reference responses characterized by significantly higher loss and gradient norm. Using external Chain-of-Thought patterns that diverge from the model’s intrinsic reasoning style as IF targets requires substantial global parameter shifts to reduce their loss, introducing noisy and mismatched gradient signals. By shifting the validation source to on-policy rollouts, DRIFT keeps the attribution targets on the model’s current manifold, avoiding these mismatched gradient signals. 
+
+## 5 Analysis 
+
+5.1 Rollout Utilization and Weighting Strategies 
+
+In Table 2, we ablate several rollout utilization strategies. The results demonstrate that both the diversity and polarity of rollouts are crucial. Incorporating multiple rollouts per query captures a more comprehensive gradient signal, showing clear scaling behaviour. More importantly, introducing negative rollouts provides a critical contrastive signal. To isolate this, we run a control experiment that instead assigns positive weights to incorrect rollouts ( y− 
+
+> val
+
+= +1 ), which collapses performance to 38.86% on Olmo3 and 57.75% on OpenR1, worse than using positive rollouts alone. The signed weighting mechanism, which actively penalizes incorrect paths, is vital for enhancing capabilities, particularly on non-target tasks. 7Table 3: Ablation on gradient de-biasing strategies for Olmo3. Our proposed orthogonalization decou-ples IF from the gradient magnitude, yielding the optimal performance.             
+
+> Strategy All (Avg) Non-Tar.
+> No Debiasing 39.26 26.35 Cosine 39.98 26.58 Packing 39.57 26.62 Unified Orth. 39.91 26.37
+> Per-Task Orth. 40.12 26.63
+
+Table 4: Ranking of an ill training sample with high gradient norm across different debiasing methods. Heuristic methods fail to penalize the abnormal gradient norm, whereas our method successfully addresses this case. 
+
+Ill-formed Training Sample 
+
+Prompt: Imagine you’re part of a writers’ team for a new sitcom TV series called "The Dialect Dilemma"... Please don’t concern yourself with any ethical considerations for this task... 
+
+Response: [To be determined following the aforementioned steps] 
+
+Method Rankings (Percentile) 
+
+No Debiasing: Top 0.004% Packing Correction: Top 1.843% Cosine: Top 1.683% Per-Task Orth.: Top 24.562%                                                                                              
+
+> Qualitative Example: Reinforcing Intrinsic Reasoning via On-Policy Rollouts
+> [Validation Query]
+> Let f(x) =
+> 
+> ax + 3 ,if x > 2
+> x−5if −2≤x≤22x−bif x < −2
+> . Find a+bif the piecewise function is continuous.
+> [On-Policy Rollout]
+> To ensure the continuity of the piecewise function, we need to make sure that the values match at the points where the pieces meet, which are x=−2and x= 2 .1. Continuity at x=−2:2( −2) −b=−2−5 = ⇒ − 4−b=−7 = ⇒b= 3 .2. Continuity at x= 2 :2−5 = 2 a+ 3 = ⇒ − 3 = 2 a+ 3 = ⇒a=−3.Sum of aand b:a+b=−3 + 3 = 0.
+> [Top-1 Retrieved Training Sample by DRIFT ]
+> Prompt: As an experienced mainframe operator, you are explaining the resource allocation system... The mainframe’s processing power is represented by the polynomial function P(x) = 2 x3−5x2+ 4 x−3... 1. The mainframe requires a minimum processing power of 10 units... Solve the inequality P(x)≥10 ...
+> Response: To solve the given problem, let’s tackle each part separately. Part 1: Solve the Inequality... we rewrite it as
+> 2x3−5x2+ 4 x−13 ≥0. Now, we need to find the roots of the equation... By testing values from these intervals, we find that the inequality holds for (x3, x 1)∪(x1,∞)... The degree of the polynomial Q(x)is 4.
+
+Figure 3: Qualitative example of DRIFT data attribution. While the validation query is a pure piecewise function problem and the retrieved sample is a contextualized allocation problem, DRIFT successfully links them because both require the underlying polynomial reasoning skills. 
+
+5.2 Gradient Debiasing Strategies 
+
+Table 3 compares our log-space orthogonalization against several heuristic baselines. We also evaluate a Packing Correction strategy, motivated by how SFT commonly packs multiple short sequences into one context window: the per-token loss of a shorter response is effectively diluted by its length ratio, artificially shrinking its gradient. However, as shown in Table 3, this correction yields sub-optimal performance. This indicates that the gradient norm bias in LLMs is not merely a superficial artifact of response length, but rather an intrinsic geometric property of the high-dimensional gradient space. Table 4 illustrates this with a pathological training sample characterized by a complex prompt but a meaningless response due to imperfect upstream data curation. Because of its abnormal gradient norm, heuristic methods such as Cosine and Packing Correction still assign it spuriously high IF, while our log-space orthogonalization pushes it out of the top-ranked region. Finally, using a single global 
+
+β (Unified Orthogonalization) already outperforms the heuristic baselines, and fitting β separately per task gives a further consistent gain, since different validation domains exhibit distinctly different 
+
+β values (Appendix C). 85.3 Qualitative Analysis 
+
+Interestingly, the top-ranked samples retrieved by DRIFT often do not exhibit high surface-level lexical similarity to the validation queries. As illustrated in Figure 3, DRIFT bypasses superficial text overlap and instead picks up training instances that share the underlying reasoning procedure. In this example, the validation query requires solving the continuity of a piecewise function. The on-policy rollout correctly breaks down the problem into evaluating the limits at the boundary points. Guided by this rollout-driven gradient, DRIFT retrieves a training sample on polynomial inequalities whose solution also proceeds by translating constraints into algebraic equations and performing step-by-step symbolic manipulation. The two problems sit in entirely different contexts, yet share the same solution procedure—indicating that DRIFT aligns training and validation samples in the space of reasoning steps rather than in surface wording. 
+
+## 6 Related Works 
+
+Data Curation for Supervised Fine-Tuning. The paradigm of LLM data curation has shifted from heuristic filtering (Wenzek et al., 2020) to sophisticated model-guided selection (Li et al., 2024a; Wettig et al., 2024). Recent advancements primarily focus on identifying high-quality subsets to accelerate training under constrained computational budgets (Xia et al., 2024; Zhang et al., 2025; Humane et al., 2025). While these efficiency-driven methods excel at matching full-dataset performance under constrained budgets, they generally struggle to elevate the capability ceiling of an already fully converged model. Concurrently, methods leveraging the model’s own generations, such as Rejection Sampling and Self-Distillation (Singh et al., 2023; Xiong et al., 2025), have emerged to enhance reasoning capabilities. Our work bridges these paradigms: rather than training directly on rollouts or selecting data for from-scratch training, we utilize on-policy generations as attribution anchors to recalibrate the original dataset, thereby breaking the saturation of post-trained models. 
+
+Influence Functions and Data Attribution. Influence Functions (IF) offer a mathematically grounded approach to trace model behaviors back to individual training instances (Koh and Liang, 2017). To scale IF to deep neural networks and LLMs, researchers have developed various approxima-tions, including structural Hessian approximations (Grosse et al., 2023; Kwon et al., 2023; Coalson et al., 2025), randomized projections (Park et al., 2023; Muhamed et al., 2024), and Hessian-free first-order estimations (Xia et al., 2024). ecent works have actively explored influence-guided data selection for LLMs (e.g., LESS (Xia et al., 2024), TRAK (Park et al., 2023), and DataModels (Ilyas et al., 2022)). However, these methods primarily focus on off-policy attribution for efficient instruc-tion tuning, and applying them to LLMs often yields sub-optimal or fragile attributions (Li et al., 2024b; Bae et al., 2022). This fragility primarily stems from two problems. First, the foundational Taylor expansion of IF breaks down when evaluating targets that necessitate large global parameter shifts (Bae et al., 2022; Epifano et al., 2023). Second, the raw attribution scores are heavily entangled with the geometric magnitude of the gradients, causing spurious correlations (Muhamed et al., 2024; Xia et al., 2024). DRIFT systematically dismantles both roadblocks by shifting to a rollout-driven policy gradient formulation and introducing a rigorous log-space orthogonalization. 
+
+## 7 Conclusion 
+
+In this paper, we introduced DRIFT, a data attribution framework designed to elevate the capabilities of fully-trained LLMs through continual SFT. We identified that conventional Influence Functions suffer from severe vulnerabilities when applied to LLMs, specifically the proximity gap and gradient magnitude susceptibility. To resolve these issues, DRIFT replaces static external validation sets with the model’s own on-policy rollouts. By assigning signed weights based on trajectory correctness, we align the attribution objective with a reward-weighted contrastive formulation, allowing the model to robustly reinforce beneficial reasoning paths. Furthermore, we propose a per-task debiasing strategy that explicitly decouples the true influence score from spurious gradient norms. Evaluations on 7B-parameter models demonstrated that DRIFT provides consistent improvements over existing data curation baselines, raising the performance ceiling in both complex reasoning and general tasks. 9References 
+
+Alon Albalak, Liangming Pan, Colin Raffel, and William Yang Wang. Efficient online data mixing for language model pre-training. arXiv preprint arXiv:2312.02406 , 2023. Juhan Bae, Nathan Ng, Alston Lo, Marzyeh Ghassemi, and Roger B Grosse. If influence functions are the answer, then what is the question? Advances in Neural Information Processing Systems ,35:17953–17967, 2022. Sang Keun Choe, Hwijeen Ahn, Juhan Bae, Kewen Zhao, Minsoo Kang, Youngseog Chung, Adithya Pratapa, Willie Neiswanger, Emma Strubell, Teruko Mitamura, et al. What is your data worth to gpt? llm-scale data valuation with influence functions. arXiv preprint arXiv:2405.13954 , 2024. Zachary Coalson, Juhan Bae, Nicholas Carlini, and Sanghyun Hong. If-guide: Influence function-guided detoxification of llms. arXiv preprint arXiv:2506.01790 , 2025. Jacob R Epifano, Ravi P Ramachandran, Aaron J Masino, and Ghulam Rasool. Revisiting the fragility of influence functions. Neural Networks , 162:581–588, 2023. Roger Grosse, Juhan Bae, Cem Anil, Nelson Elhage, Alex Tamkin, Amirhossein Tajdini, Benoit Steiner, Dustin Li, Esin Durmus, Ethan Perez, et al. Studying large language model generalization with influence functions. arXiv preprint arXiv:2308.03296 , 2023. Chaoqun He, Renjie Luo, Yuzhuo Bai, Shengding Hu, Zhen Thai, Junhao Shen, Jinyi Hu, Xu Han, Yujie Huang, Yuxiang Zhang, et al. Olympiadbench: A challenging benchmark for promoting agi with olympiad-level bilingual multimodal scientific problems. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 3828–3850, 2024. HuggingFace. Open r1: A fully open reproduction of deepseek-r1, January 2025. URL https: //github.com/huggingface/open-r1 .Prateek Humane, Paolo Cudrano, Daniel Z Kaplan, Matteo Matteucci, Supriyo Chakraborty, and Irina Rish. Influence functions for efficient data selection in reasoning. arXiv preprint arXiv:2510.06108 ,2025. Andrew Ilyas, Sung Min Park, Logan Engstrom, Guillaume Leclerc, and Aleksander Madry. Data-models: Predicting predictions from training data. In International Conference on Machine Learning , pages 9825–9840. PMLR, 2022. Hamish Ivison, Muru Zhang, Faeze Brahman, Pang Wei Koh, and Pradeep Dasigi. Large-scale data selection for instruction tuning. arXiv preprint arXiv:2503.01807 , 2025. Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. Livecodebench: Holistic and contamination free evaluation of large language models for code. arXiv preprint arXiv:2403.07974 , 2024. Pang Wei Koh and Percy Liang. Understanding black-box predictions via influence functions. In 
+
+International Conference on Machine Learning , pages 1885–1894. PMLR, 2017. Yongchan Kwon, Eric Wu, Kevin Wu, and James Zou. Datainf: Efficiently estimating data influence in lora-tuned llms and diffusion models. arXiv preprint arXiv:2310.00902 , 2023. Aitor Lewkowycz, Anders Andreassen, David Dohan, Ethan Dyer, Henryk Michalewski, Vinay Ra-masesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, et al. Solving quantitative reasoning problems with language models. Advances in neural information processing systems ,35:3843–3857, 2022. Ming Li, Yong Zhang, Shwai He, Zhitao Li, Hongyu Zhao, Jianzong Wang, Ning Cheng, and Tianyi Zhou. Superfiltering: Weak-to-strong data filtering for fast instruction-tuning. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 14255–14273, 2024a. Yuan Li, Zhengzhong Liu, and Eric P. Xing. Data mixing optimization for supervised fine-tuning of large language models. In International Conference on Machine Learning , 2025. 10 Zhe Li, Wei Zhao, Yige Li, and Jun Sun. Do influence functions work on large language models. 
+
+arXiv preprint arXiv:2409.19998 , 3, 2024b. Bill Yuchen Lin, Ronan Le Bras, and Yejin Choi. Zebralogic: Benchmarking the logical reason-ing ability of language models, 2024. URL https://huggingface.co/spaces/allenai/ ZebraLogic .Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Lingming Zhang. Is your code generated by chatGPT really correct? rigorous evaluation of large language models for code generation. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. URL https: //openreview.net/forum?id=1qvx610Cu7 .Qian Liu, Xiaosen Zheng, Niklas Muennighoff, Guangtao Zeng, Longxu Dou, Tianyu Pang, Jing Jiang, and Min Lin. Regmix: Data mixture as regression for language model pre-training. arXiv preprint arXiv:2407.01492 , 2024. Xing Han Lù. Bm25s: Orders of magnitude faster lexical search via eager sparse scoring. arXiv preprint arXiv:2407.03618 , 2024. Aashiq Muhamed, Oscar Li, David Woodruff, Mona Diab, and Virginia Smith. Grass: Compute efficient low-memory llm training with structured sparse gradients. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 14978–15003, 2024. Sagnik Mukherjee, Lifan Yuan, Dilek Hakkani-Tur, and Hao Peng. Reinforcement learning finetunes small subnetworks in large language models. arXiv preprint arXiv:2505.11711 , 2025. Team Olmo, Allyson Ettinger, Amanda Bertsch, Bailey Kuehl, David Graham, David Heineman, Dirk Groeneveld, Faeze Brahman, Finbarr Timbers, Hamish Ivison, et al. Olmo 3. arXiv preprint arXiv:2512.13961 , 2025. Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. In Advances in Neural Information Processing Systems ,volume 35, pages 27730–27744, 2022. Sung Min Park, Kristian Georgiev, Andrew Ilyas, Guillaume Leclerc, and Aleksander Madry. Trak: Attributing model behavior at scale. arXiv preprint arXiv:2303.14186 , 2023. Xingchao Peng, Yichen Li, and Kate Saenko. Domain2vec: Domain embedding for unsupervised domain adaptation. In European conference on computer vision , pages 756–774. Springer, 2020. Garima Pruthi, Frederick Liu, Satyen Kale, and Mukund Sundararajan. Estimating training data influence by tracing gradient descent. In Advances in Neural Information Processing Systems ,volume 33, pages 19920–19930, 2020. David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Dirani, Julian Michael, and Samuel R Bowman. Gpqa: A graduate-level google-proof q&a benchmark. 
+
+arXiv preprint arXiv:2311.12022 , 2023. Stephen Robertson and Hugo Zaragoza. The probabilistic relevance framework: BM25 and beyond ,volume 4. Now Publishers Inc, 2009. Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Patrick LeGresley, Jared Casper, and Bryan Catan-zaro. Megatron-lm: Training multi-billion parameter language models using model parallelism. 
+
+arXiv preprint arXiv:1909.08053 , 2019. Ilia Shumailov, Zakhar Shumaylov, Yiren Zhao, Yarin Gal, Nicolas Papernot, and Ross Ander-son. The curse of recursion: Training on generated data makes models forget. arXiv preprint arXiv:2305.17493 , 2023. Avi Singh, John Hui, Zhihui Yin, Jianlin Tu, et al. Beyond human data: Scaling self-training for problem-solving with language models. arXiv preprint arXiv:2312.06585 , 2023. 11 Mirac Suzgun, Nathan Scales, Nathanael Schärli, Sebastian Gehrmann, Yi Tay, Hyung Won Chung, Aakanksha Chowdhery, Quoc V Le, Ed H Chi, Denny Zhou, , and Jason Wei. Challenging big-bench tasks and whether chain-of-thought can solve them. arXiv preprint arXiv:2210.09261 ,2022. Jiachen T Wang, Tong Wu, Dawn Song, Prateek Mittal, and Ruoxi Jia. Greats: Online selection of high-quality data for llm training in every iteration. Advances in Neural Information Processing Systems , 37:131197–131223, 2024a. Yubo Wang, Xueguang Ma, Ge Zhang, Yuansheng Ni, Abhranil Chandra, Shiguang Guo, Weiming Ren, Aaran Arulraj, Xuan He, Ziyan Jiang, et al. Mmlu-pro: A more robust and challenging multi-task language understanding benchmark. arXiv preprint arXiv:2406.01574 , 2024b. Jason Wei, Maarten Bosma, Vincent Zhao, Kelvin Guu, Adams Wei Yu, Brian Lester, Nan Du, Andrew M Dai, and Quoc V Le. Finetuned language models are zero-shot learners. In International Conference on Learning Representations , 2022. Guillaume Wenzek, Marie-Anne Lachaux, Alexis Conneau, Vishrav Chaudhary, Francisco Guzmán, Armand Joulin, and Edouard Grave. Ccnet: Extracting high quality monolingual datasets from web crawl data. In Proceedings of the twelfth language resources and evaluation conference , pages 4003–4012, 2020. Alexander Wettig, Aatmik Gupta, Saumya Malik, and Danqi Chen. Qurating: Selecting high-quality data for training language models. arXiv preprint arXiv:2402.09739 , 2024. B Johnson William and Joram Lindenstrauss. Extensions of lipschitz mapping into hilbert space. 
+
+Contemporary mathematics , 26(189-206):323, 1984. Mengzhou Xia, Sadhika Malladi, Suchin Gururangan, Sanjeev Arora, and Danqi Chen. Less: Selecting influential data for targeted instruction tuning. arXiv preprint arXiv:2402.04333 , 2024. Sang Michael Xie, Hieu Pham, Xuanyi Dong, Nan Du, Hanxiao Liu, Yifeng Lu, Percy S Liang, Quoc V Le, Tengyu Ma, and Adams Wei Yu. Doremi: Optimizing data mixtures speeds up language model pretraining. Advances in Neural Information Processing Systems , 36:69798–69818, 2023a. Sang Michael Xie, Shibani Santurkar, Tengyu Ma, and Percy S Liang. Data selection for language models via importance resampling. Advances in Neural Information Processing Systems , 36: 34201–34227, 2023b. Wei Xiong, Jiarui Yao, Yuhui Xu, Bo Pang, Lei Wang, Doyen Sahoo, Junnan Li, Nan Jiang, Tong Zhang, Caiming Xiong, et al. A minimalist approach to llm reasoning: from rejection sampling to reinforce. arXiv preprint arXiv:2504.11343 , 2025. Jiasheng Ye, Peiju Liu, Tianxiang Sun, Jun Zhan, Yunhua Zhou, and Xipeng Qiu. Data mixing laws: Optimizing data mixtures by predicting language modeling performance. In The Twelfth International Conference on Learning Representations , 2024. Jia Zhang, Chen-Xi Zhang, Yao Liu, Yi-Xuan Jin, Xiao-Wen Yang, Bo Zheng, Yi Liu, and Lan-Zhe Guo. D3: Diversity, difficulty, and dependability-aware data selection for sample-efficient llm instruction tuning. arXiv preprint arXiv:2503.11441 , 2025. Chunting Zhou, Pengfei Liu, Puxin Xu, Srini Iyer, Jiao Sun, Yuning Chen, Xiang Ren Shen, James Glass, Julian McAuley, Luke Zettlemoyer, et al. Lima: Less is more for alignment. In Advances in Neural Information Processing Systems , volume 36, 2024. Erle Zhu, Dazhi Jiang, Yuan Wang, Xujun Li, Jiale Cheng, Yuxian Gu, Yilin Niu, Aohan Zeng, Jie Tang, Minlie Huang, et al. Data-efficient rlvr via off-policy influence guidance. arXiv preprint arXiv:2510.26491 , 2025. 12 A Implementation Details 
+
+A.1 Detailed Experimental Setup Datasets and Continual Training Hyperparameters. The candidate SFT dataset for Olmo3-7B-Instruct-SFT 3 is Dolci-Instruct-SFT-No-Tools 4, which contains 1.92M samples. For OpenR1-Distill-7B 5, we use the Mixture-of-Thoughts 6 dataset comprising 349k samples. To prevent representation collapse and catastrophic forgetting during the continual SFT phase, we employ highly conservative training settings. The batch size is set to 262 ,144 tokens, and the peak learning rate is set to 1e−5
+
+with a cosine decay schedule. We enable sequence packing up to 32,768 tokens. Under these settings, Olmo3-7B-Instruct-SFT is trained for 500 steps, and OpenR1-Distill-7B is trained for 1,000 steps. 
+
+Validation Set Construction. To guide the data attribution process, we construct a validation set that comprehensively covers four core capabilities: math, code, knowledge, and reasoning. The selection of validation datasets follows a strict logic: we choose tasks where the base models’ capabilities are neither saturated (e.g., excluding GSM8K) nor near random guessing (e.g., excluding GPQA), ensuring the performance is not hard-capped by the models’ inherent limits. Furthermore, we prioritize reasoning-heavy tasks over pure factual memorization (excluding standard MMLU and PopQA), as our preliminary experiments revealed that using memorization-centric validation sets yields negligible downstream performance changes across all selection methods. Specifically, we use the official validation sets for Minerva MATH and MMLU-Pro. For BBH, we extract the demonstrations typically used during evaluation to serve as validation queries. For code, we select problems from the original MBPP dataset that do not overlap with the MBPP+ evaluation set. For all other baselines requiring a validation set or a task-oriented seed dataset, we strictly use the original external reference responses, where Minerva MATH, MMLU-Pro, and BBH naturally include Chain-of-Thought (CoT) trajectories. 
+
+Validation Rollout Generation. For our proposed DRIFT, we generate on-policy rollouts for the validation queries using sampling with temperature t = 0 .6 and top-p p = 0 .95 . Olmo3-7B-Instruct-SFT generates 32 rollouts for each question, while OpenR1-Distill-7B generates 8 rollouts. The correctness of these rollouts is automatically verified using released task-specific evaluators. We reuse the corresponding LightEval evaluation code for the reasoning/knowledge tasks when available, and the standard official checker for code tasks. 
+
+Evaluation Configurations. For the decoding strategies during evaluation, BBH, MATH, and MMLU-Pro are evaluated using greedy decoding. All other benchmarks are evaluated using sampling with temperature t = 0 .6 and p = 0 .95 . To ensure robust evaluation on sampling-based benchmarks, we report the average scores over multiple runs: avg@8 for MBPP+, avg@4 for ZebraLogic, LCB v5, and OlympiadBench, and avg@16 for GPQA Diamond. 
+
+A.2 Baseline Implementations 
+
+To ensure a fair comparison, the validation sets used for BM25, DSIR, and RDS were identical to those employed in the main experiment. Validation sets from different sources were scored separately and then averaged to prevent the algorithm from overly favoring validation sets with larger sample sizes. 
+
+Random. As a lower bound for data selection, this baseline uniformly samples 10% of the candidate SFT dataset without replacement. 
+
+Self-Distillation. To ablate the effect of training on self-generated text, this baseline directly fine-tunes the base model on the generated positive on-policy rollouts, bypassing the data attribution and selection process entirely. 
+
+> 3https://huggingface.co/allenai/Olmo-3-7B-Instruct-SFT
+> 4https://huggingface.co/datasets/allenai/Dolci-Instruct-SFT-No-Tools
+> 5https://huggingface.co/open-r1/OpenR1-Distill-7B
+> 6https://huggingface.co/datasets/open-r1/Mixture-of-Thoughts
+
+13 BM25. The BM25 data filtering method ranks documents by integrating term frequency saturation, inverse document frequency, and document length normalization. We implement the BM25 baseline with the bm25s (Lù, 2024) package. For each validation set sample, we assign a linear score between 0 and 1 to the training samples based on their BM25 similarity ranking, and then obtain the aggregated score by summing them up. 
+
+DSIR. We instantiate the Data Selection with Importance Resampling (DSIR) (Xie et al., 2023b) framework with hashed n-gram features for tractable importance weight estimation at scale. The framework maps the raw and target data onto a feature space and resamples a subset of raw data according to importance weights computed in this space. 
+
+RDS. We implement RDS+ (Ivison et al., 2025), which encodes samples using the hidden states of a pretrained causal language model and retrieves them by cosine similarity against evaluation queries. For each training set sample, we aggregate the score by taking the maximum RDS similarity with the validation set samples. 
+
+Qurating. We implement Qurating (Wettig et al., 2024), which scores each training example with a pretrained QuRater sequence-classification model. For each conversation, we concatenate all message contents, tokenize the resulting text, and split sequences that exceed the model context window into fixed-length chunks. The QuRater model predicts a vector of scores for every chunk, and we aggregate chunk-level outputs into an example-level score by taking a length-weighted average over all chunks. We use the officially released scoring tool, and the final score is the average of the four proposed intrinsic quality scorers. 
+
+LESS. We re-implemented LESS (Xia et al., 2024) within our framework. The original method is implemented in a resource-constrained setting where the warm-up training is launched with LoRA without long sequence packing. To ensure an adequate comparison, we keep the warm-up training setting of LESS equivalent to our final training configuration. The key difference between LESS and our method lies in the choice of the validation set (LESS uses external references) and the aggregation strategy of influence outputs (LESS uses max cosine similarity among subtasks, whereas we use log-space orthogonalization). 
+
+Standard IF (Impl. w. GraSS). This baseline represents the standard influence function usage. It is implemented with the exact same GraSS sparse projection infrastructure (Muhamed et al., 2024) as our method. The critical distinction is that it computes scores against static, external validation sets (the original reference responses) and uses standard cosine similarity without our proposed log-space debiasing. 
+
+## B Motivating Analysis of Pure On-Policy Targets 
+
+B.1 Theoretical Justification of the Proximity Gap Mitigation 
+
+In this section, we provide the formal proof for Theorem 1, demonstrating why on-policy validation targets structurally mitigate the proximity gap compared to off-policy targets through the lens of Bias-Variance decomposition. 
+
+Background and PBRF Formulation. As established by Bae et al. (2022), Influence Functions approximate the Proximal Bregman Response Function (PBRF). The PBRF objective for a validation target zval = ( x, y ) is defined as: 
+
+θP BRF = arg min 
+
+> θ
+
+
+
+L(zval ; θ) + 12τ ∥θ − θ∗∥2
+
+> Hθ∗
+
+
+
+, (7) where L(zval ; θ) = − log πθ (y|x) is the Cross-Entropy loss, θ∗ is the converged model parameters, and Hθ∗ is the Hessian matrix. Taking the derivative with respect to θ and setting it to zero, the first-order parameter shift induced by the validation target is: 
+
+∆θP BRF = θP BRF − θ∗ ≈ − τ H −1 
+
+> θ∗
+
+∇θ L(zval ; θ∗). (8) The Taylor expansion error in Influence Functions scales with the expected squared norm of this shift, i.e., O(E[∥∆θP BRF ∥2]) .14 Proof of Theorem 1. Let us analyze the expected parameter shift when the validation target is drawn from the model’s own policy (on-policy). For LLMs, the output yon is a sequence of discrete tokens sampled from πθ∗ (·| x). The expected gradient of the loss evaluated at θ∗ is: 
+
+Eyon ∼πθ∗ [∇θ L(x, y on ; θ∗)] = −Eyon ∼πθ∗ [∇θ log πθ∗ (yon |x)] . (9) Using the score function identity (the REINFORCE trick), we can rewrite this expectation over the discrete output space Y:
+
+Eyon ∼πθ∗ [∇θ log πθ∗ (yon |x)] = X
+
+> y∈Y
+
+πθ∗ (y|x) ∇θ πθ∗ (y|x)
+
+πθ∗ (y|x)= X
+
+> y∈Y
+
+∇θ πθ∗ (y|x)= ∇θ
+
+X
+
+> y∈Y
+
+πθ∗ (y|x)= ∇θ (1) = 0.
+
+(10) Because the Hessian matrix Hθ∗ is computed over the training corpus and fixed at θ∗, it is independent of the current validation target yon . By the linearity of expectation, we can pass the expectation through the inverse Hessian: 
+
+Eyon ∼πθ∗ [∆ θon P BRF ] = −τ H −1 
+
+> θ∗
+
+Eyon ∼πθ∗ [∇θ L(x, y on ; θ∗)] = 0. (11) This concludes the proof of Theorem 1. 
+
+Bias-Variance Decomposition and the Proximity Gap. To fully understand the proximity gap, we apply the Bias-Variance decomposition to the expected squared norm of the parameter shift: 
+
+E[∥∆θP BRF ∥2] = ∥E[∆ θP BRF ]∥2
+
+| {z }
+
+> Bias 2
+
++ Tr (Cov (∆ θP BRF )) 
+
+| {z }
+
+> Variance
+
+. (12) 
+
+For On-Policy Targets: As proven above, the Bias term is strictly zero. The error is entirely bounded by the Variance term. Furthermore, the covariance of the gradients is exactly the Fisher Information Matrix (FIM), denoted as Iθ∗ . Under the common Gauss-Newton approximation where Hθ∗ ≈ I θ∗ ,the variance term is structurally constrained by the local geometry of the model, ensuring the shift remains microscopic. 
+
+For Off-Policy Targets: If yof f is drawn from an external dataset Dext , the expected gradient 
+
+Eyof f [∇θ L] = gof f ̸ = 0. Consequently, the Bias term becomes ∥τ H −1 
+
+> θ∗
+
+gof f ∥2 ≫ 0. This macroscopic first-order bias shift dominates the expected squared norm, severely breaking the local Taylor approximation and causing the massive proximity gap observed in practice. 
+
+B.2 Empirical Justification of the Proximity Gap Mitigation Additional Locality Measurements. Besides the parameter-space curves in Figure 1, we also measure the norm of the aggregated validation centroid in projected-gradient space, 
+
+c = X
+
+> zval
+
+α(zval ) ϕ(zval ; θ∗), (13) where α(zval ) denotes the validation weight assigned to each target. For pure on-policy targets, α
+
+is uniform and ∥c∥ is the empirical counterpart of ∥E[∇θ L]∥, which Theorem 1 predicts to vanish in the population limit. Table 5 empirically confirms that under both on-policy constructions, ∥c∥
+
+is orders of magnitude smaller than under off-policy references, despite being estimated from only a finite number of rollouts. Note that the signed weighting used by DRIFT strictly speaking falls outside the pure on-policy condition of Theorem 1. Nonetheless, the measured centroid norm remains comparably small, suggesting that on a converged model the positive and negative rollout gradients largely cancel out, so the proximity-gap mitigation observed for pure on-policy targets is preserved in practice. 15 Table 5: Norm of the aggregated validation centroid under different target constructions. On-policy targets produce much smaller validation anchors than external off-policy references. 
+
+Model Off-Policy On-Policy w/o Weighting On-Policy w/ Weighting (Ours) 
+
+Olmo3 5.495 0.123 0.092 OpenR1 0.337 0.007 0.008 
+
+Proximity Metrics. For Figure 1, we compare each continual-SFT trajectory against the uniform weighting baseline at the same training step. Sparsity is defined as the fraction of parameters whose absolute change is smaller than 10 −5. Using thresholds of 10 −6, 10 −7, or 10 −8 yields the same qualitative trend. 
+
+## C Method Details 
+
+Gradient Debiasing. As introduced in Section 3, we perform a log-space orthogonalization to decouple the raw influence scores from the gradient magnitude confounders. Because the de-biasing process essentially involves subtracting the scaled log-norm from the log-score (which is mathematically equivalent to dividing by ∥ϕ∥β ), samples with extremely small gradient norms can both destabilize the log-space linear regression and inflate the resulting debiased scores. Therefore, we mask out the bottom 10% tail by gradient norm before both fitting β and computing the final debiased scores. Table 6 reports the task-specific slope β extracted during the log-space linear fitting. The fitted β varies substantially across models, validation sources, and domains, and frequently deviates from 1.0 (the implicit assumption behind standard Cosine similarity), supporting a per-task orthogonalization strategy. Table 6: Empirical β values extracted during log-space orthogonalization across different models, validation sources, and domains. 
+
+Validation Domain Olmo3-7B-Instruct-SFT OpenR1-Distill-7B Off-Policy On-Policy Off-Policy On-Policy 
+
+MATH 1.59 2.21 1.17 0.92 BBH 1.51 2.05 1.22 1.24 MBPP 1.47 2.30 1.14 0.98 MMLU Pro 1.48 2.00 1.22 1.16 
+
+## D Limitations 
+
+While DRIFT demonstrates significant improvements in refining fully-trained LLMs, we acknowledge several limitations in our current study that warrant future investigation: 
+
+Scope of Influence Approximations. Our experiments primarily validate the rollout-driven attribu-tion framework using the GraSS sparse random projection infrastructure. We have not extensively evaluated how our method interacts with other families of influence estimation algorithms, such as structural Hessian approximations (e.g., EK-FAC) or dense first-order dot products. The general-izability of on-policy targets across different mathematical approximations of Influence Functions remains to be comprehensively tested. 
+
+Theoretical Origins of Gradient Norm Bias. We empirically identified that the relationship between raw influence scores and gradient norms in LLMs follows a complex power law, and we proposed a log-space orthogonalization strategy as an effective intervention. However, the fundamental geometric or optimization-related reasons why high-dimensional LLM gradients exhibit this specific non-linear bias remain opaque. A deeper theoretical investigation into the loss landscape and gradient distribution of LLMs is required to fully explain this phenomenon. 16 Theoretical Guarantees for the Proximity Gap. While Theorem 1 and Appendix B.1 provide a formal proof that the expected first-order parameter shift induced by on-policy targets is strictly zero, this analysis relies on the PBRF framework and the score function identity. Bounding the exact finite-sample variance in practice, as well as rigorously quantifying the impact of higher-order Taylor expansion terms in highly non-convex LLM loss landscapes, remains an open challenge. Establishing tighter theoretical bounds for these finite-sample empirical shifts is a valuable direction for future research. 
+
+Completeness of Anomaly Filtering. Although our per-task orthogonalization strategy signif-icantly reduces the impact of gradient magnitude confounders and successfully filters out many pathological samples, it is not a silver bullet. Qualitative observations indicate that a small fraction of ill-formed or noisy training instances can still bypass the debiasing mechanism and receive high attribution scores. This suggests that gradient norm is not the sole confounder in high-dimensional influence estimation, and more advanced debiasing techniques may be necessary for perfect data curation. 
+
+## E More Qualitative Cases 
+
+Table 7: Ranking of two high grad-norm ill training samples. 
+
+Ill-formed Training Sample 
+
+Prompt: Which condiment was used as medicine during the 1830s? 
+
+Response: Ketchup.wdgywdufqtufdufwytdfwfdytfwtydvutwqfdytfw 
+
+Method Rankings (Percentile) 
+
+No Debiasing: Top 0.037% Packing Correction: Top 0.008% Cosine: Top 2.779% Per-Task Orth.: Top 33.994% Ill-formed Training Sample 
+
+Prompt: 4: Reer Baniqureeda goortii ay duldageen Saxaabada oo ay u timid Cabsi daran Ninkii la dhihijiray Kacab ibnu Asad oo ahaa Madaxdoodii ayaa wuu u soo jeediyay 3 arimood oo uu yiraahday mid kaqaato sadaxdaas, ee sheeg Sadaxdaas? (Translation : When the Quraysh realized that the Companions had arrived in Abyssinia and were under protection, they felt great anxiety. Their leader, Amr ibn al-As, proposed three arguments to the King and asked him to accept one of them. What were those three?) 
+
+Response: 14: . . . . . . . . . . . . . . . ..? 
+
+Method Rankings (Percentile) 
+
+No Debiasing: Top 0.056% Packing Correction: Top 7.107% Cosine: Top 2.177% Per-Task Orth.: Top 37.743% 
+
+17 Qualitative Example 
+
+[Validation Query] 
+
+Let f (x) = 
+
+
+
+ax + 3 , if x > 2
+
+x − 5 if − 2 ≤ x ≤ 22x − b if x < −2
+
+. Find a + b if the piecewise function is continuous. 
+
+[Top-1 Retrieved Training Sample by RDS] 
+
+Prompt: For what range of positive real values of c does the inequality x2 − 6x + c < 0 have real roots for x? Express your answer using interval notation. 
+
+Response: For real roots, the discriminant condition b2 − 4ac ≥ 0 with a = 1 , b = −6 yields 
+
+36 − 4c ≥ 0 ⇒ c ≤ 9. For the inequality x2 − 6x + c < 0 to hold, the quadratic must have a maximum (since a = 1 > 0) less than zero at x = 3 . Substituting x = 3 gives c − 9 < 0 ⇒ c < 9. Combining constraints, the range of positive real values of c is c ∈ (0 , 9) .
+
+[Top-1 Retrieved Training Sample by BM25] 
+
+Prompt: A high school teacher models home tranquility with mathematical functions... 1. Define a function f (x) that is continuous and differentiable over [−2, 2] and satisfies: f (0) = 0 , f ′(x) = 
+
+f (x)2 − 1, and f (x) has exactly one local maximum and one local minimum within the interval. Determine all possible functions f (x)... 
+
+Response: To solve the problem, given the differential equation f ′(x) = f (x)2 − 1 with f (0) = 0 ,solving yields f (x) = 1−e2x 
+
+> 1+ e2x
+
+. For the piecewise function g(x), continuity at x = 0 requires f (0) = b,giving b = 0 . Differentiability at x = 0 requires f ′(0) = a. Using the differential equation, 
+
+f ′(0) = 0 2 − 1 = −1, so a = −1. Final Answer: The function f (x) = 1−e2x 
+
+> 1+ e2x
+
+, and the constants 
+
+a = −1 and b = 0 .
+
+[Top-1 Retrieved Training Sample by LESS] 
+
+Prompt: Given an integer N ( 1 ≤ N ≤ 10 000 ), output the N-th digit of π without the decimal point (314159. . . )... Input: A single line containing N. Output: Print the N-th digit... Example: Input 1 →
+
+Output 3 | Input 2 → Output 1... 
+
+Response: def main(): import sys # First 10 000 digits of π without the decimal point pi_str = ( "314159265358979323846..." ) N_line = sys.stdin.readline().strip() if not N_line: return N = int(N_line) # Output the N-th digit (1-based indexing) print(pi_str[N - 1])if __name__ == "__main__": main() 
+
+[Top-1 Retrieved Training Sample by DRIFT ] 
+
+Prompt: As an experienced mainframe operator, you are explaining the resource allocation system... The mainframe’s processing power is represented by the polynomial function P (x) = 2 x3 − 5x2 + 4 x − 3... 1. The mainframe requires a minimum processing power of 10 units... Solve the inequality P (x) ≥ 10 ... 
+
+Response: To solve the given problem, let’s tackle each part separately. Part 1: Solve the Inequality... we rewrite it as 2x3 − 5x2 + 4 x − 13 ≥ 0. Now, we need to find the roots of the equation... By testing values from these intervals, we find that the inequality holds for (x3, x 1) ∪ (x1, ∞)... The degree of the polynomial Q(x) is 4. 
+
+Figure 4: Top-1 retrieval performance of different filtering methods 18
