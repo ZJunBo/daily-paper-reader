@@ -6,28 +6,28 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-20
-- 运行时间：2026-06-20 21:35:14 UTC
+- 最新运行日期：2026-06-21
+- 运行时间：2026-06-21 21:20:07 UTC
 - 运行状态：成功
 - 本次总论文数：2
 - 精读区：1
 - 速读区：1
 
 ### 今日简报（AI）
-今日精读高分论文《Emergent Alignment》，速读持续同调追踪表示动力学论文。  
-值得关注《Emergent Alignment》中对齐涌现的机制，以及拓扑数据分析在表征演进中的应用。  
-建议深入阅读精读论文，并尝试将持续同调方法用于模型内部状态的可解释性分析。
-- 详情：[/202606/20/README](/202606/20/README)
+今日精读了一篇关于大模型多语义叠加的高分论文，并速读了一篇代码安全生成研究。  
+最值得关注的是GEMS通过几何约束实现多语义叠加的创新方法，大幅提升LLM语义表达能力。  
+建议深入研读GEMS，同时借鉴SPARK的安全知识激活思路，优化代码生成任务。
+- 详情：[/202606/21/README](/202606/21/README)
 
 ### 精读区论文标签
-1. [Emergent Alignment](/202606/20/2606.19527v1-emergent-alignment)  
-   标签：评分：8.0/10、query:smd
-   evidence：微调中的在线对齐技术
+1. [GEMS: Geometric Constraints Enable Multi-Semantic Superposition in LLMs](/202606/21/2606.19946v1-gems-geometric-constraints-enable-multi-semantic-superposition-in-llms)  
+   标签：评分：9.0/10、query:dg
+   evidence：专注于激活引导的大语言模型多语义控制，直接相关于激活引导需求
 
 ### 速读区论文标签
-1. [Tracking Representation Dynamics in Large Language Models with Persistent Homology](/202606/20/2606.19542v1-tracking-representation-dynamics-in-large-language-models-with-persistent-homology)  
-   标签：评分：6.0/10、query:smd
-   evidence：利用持续同调研究微调过程中的对齐动态，有助于理解安全退化
+1. [SPARK: Security Knowledge Priming and Representation-Guided Knowledge Activation for LLM-based Secure Code Generation](/202606/21/2606.16244v1-spark-security-knowledge-priming-and-representation-guided-knowledge-activation-for-llm-based-secure-code-generation)  
+   标签：评分：6.0/10、query:dg
+   evidence：使用表示引导的知识激活来增强安全性，类似于用于安全数据生成的激活引导
 
 
 <div class="dpr-home-promo-card">
