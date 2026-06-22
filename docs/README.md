@@ -6,28 +6,22 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-21
-- 运行时间：2026-06-21 21:20:07 UTC
+- 最新运行日期：2026-06-22
+- 运行时间：2026-06-22 21:33:35 UTC
 - 运行状态：成功
-- 本次总论文数：2
-- 精读区：1
-- 速读区：1
+- 本次总论文数：0
+- 精读区：0
+- 速读区：0
 
 ### 今日简报（AI）
-今日精读了一篇关于大模型多语义叠加的高分论文，并速读了一篇代码安全生成研究。  
-最值得关注的是GEMS通过几何约束实现多语义叠加的创新方法，大幅提升LLM语义表达能力。  
-建议深入研读GEMS，同时借鉴SPARK的安全知识激活思路，优化代码生成任务。
-- 详情：[/202606/21/README](/202606/21/README)
+> 今日无新推荐，系统未产出可展示论文。
+- 详情：[/202606/22/README](/202606/22/README)
 
 ### 精读区论文标签
-1. [GEMS: Geometric Constraints Enable Multi-Semantic Superposition in LLMs](/202606/21/2606.19946v1-gems-geometric-constraints-enable-multi-semantic-superposition-in-llms)  
-   标签：评分：9.0/10、query:dg
-   evidence：专注于激活引导的大语言模型多语义控制，直接相关于激活引导需求
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [SPARK: Security Knowledge Priming and Representation-Guided Knowledge Activation for LLM-based Secure Code Generation](/202606/21/2606.16244v1-spark-security-knowledge-priming-and-representation-guided-knowledge-activation-for-llm-based-secure-code-generation)  
-   标签：评分：6.0/10、query:dg
-   evidence：使用表示引导的知识激活来增强安全性，类似于用于安全数据生成的激活引导
+- 本次无速读推荐。
 
 
 <div class="dpr-home-promo-card">
