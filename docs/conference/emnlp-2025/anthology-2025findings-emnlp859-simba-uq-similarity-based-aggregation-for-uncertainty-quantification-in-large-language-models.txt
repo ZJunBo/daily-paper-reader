@@ -1,0 +1,612 @@
+Title: 2025.findings-emnlp.859.pdf
+
+URL Source: https://aclanthology.org/2025.findings-emnlp.859.pdf
+
+Published Time: Fri, 31 Oct 2025 19:48:12 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+> Findings of the Association for Computational Linguistics: EMNLP 2025 , pages 15880–15894 November 4-9, 2025 ©2025 Association for Computational Linguistics
+
+# SIMBA UQ: Similarity-Based Aggregation for Uncertainty Quantification in Large Language Models 
+
+Debarun Bhattacharjya 1, Balaji Ganesan 1, Junkyu Lee 1, Radu Marinescu 1,Katsiaryna Mirylenka 2, Michael Glass 1, Xiao Shou 3
+
+> 1
+
+IBM Research, 2Zalando, 3Baylor University {debarunb@us, bganesa1@in, Junkyu.Lee@, radu.marinescu@ie}.ibm.com, katya.mirylenka@zalando.ch, mrglass@us.ibm.com, Xiao_Shou@baylor.edu 
+
+Abstract 
+
+When does a large language model (LLM) know what it does not know? Uncertainty quantification (UQ) provides measures of un-certainty, such as an estimate of the confidence 
+
+in an LLM’s generated output, and is therefore increasingly recognized as a crucial component of trusted AI systems. Black-box UQ methods do not require access to internal model infor-mation from the generating LLM and therefore have numerous real-world advantages, such as robustness to system changes, adaptability to choice of LLM, reduced costs, and computa-tional tractability. In this paper, we investi-gate the effectiveness of UQ techniques that are primarily but not necessarily entirely black-box, where the consistency between a gener-ated output and other sampled generations is used as a proxy for confidence in its correct-ness. We propose a high-level non-verbalized 
+
+similarity-based aggregation framework that subsumes a broad swath of UQ approaches suitable for complex generative tasks, as well as introduce specific novel techniques from the framework that train confidence estimation models using small training sets. Through an empirical study with datasets spanning the di-verse tasks of question answering, summariza-tion, and text-to-SQL, we demonstrate that our proposed similarity-based methods can yield better calibrated confidences than baselines. 
+
+1 Introduction 
+
+Uncertainty quantification (UQ) approaches help inform reliability of model predictions and are therefore critical for deploying large language mod-els (LLMs). UQ refers to a broad suite of tech-niques that yield measures of uncertainty; here we are interested in assessing the confidence of an LLM’s generations for a user-specified task. While confidence is not always a well-defined quantity in the UQ literature, it typically captures some mea-sure of faith in an LLM’s response to a query as represented by a number between 0 and 1. In this work, we consider tasks where there is a notion of whether an LLM’s response to a user query is cor-rect or not, and interpret confidence of a response as the probability that it is correct. This is in con-trast to approaches that estimate the uncertainty 
+
+of LLM generations in response to a query, which measure the variability of the output. An important category of UQ techniques are 
+
+black-box methods, which only assume access to the model being used without requiring informa-tion such as the model parameters or even the to-ken log probabilities. Such techniques have nu-merous practical advantages as they are robust to the constantly evolving landscape of LLMs, com-putationally lightweight, and quickly deployable at inference time. As a result, black-box UQ has become increasingly popular for tasks such as ques-tion answering (Lin et al., 2024b; Cole et al., 2023; Manakul et al., 2023). Much of the research on black-box UQ can be viewed as consistency-based , where the idea is to use the consistency between a generation and other sampled generations as a proxy for its confidence. The implicit underlying assumption behind such approaches is that when a generated response is more different from others, it is more likely to be incorrect, implying that responses that are consis-tently similar are more likely to be correct; this has been explored for various use cases involving self-consistency (Mitchell et al., 2022; Wang et al., 2023; Chen et al., 2024). Recent work has referred to this assumption as the consistency hypothesis ,formalizing it through statistical tests and evalua-tion metrics, and empirically validating its preva-lence across a suite of tasks and datasets (Xiao et al., 2025). In this paper, we provide a fresh perspective on consistency-based approaches through the lens of aggregating pairwise similarities. Figure 1 outlines the procedure for a high-level framework that aims 
+
+15880 Figure 1: Framework for UQ yielding confidence estimates for generations from an LLM in response to a natural language query. An illustrative natural language query from the Spider dataset for the text-to-SQL task is shown, along with example outputs at each step of the pipeline. Jaccard is chosen as the similarity metric, and confidences are estimated using a proposed ‘aggregation by classification’ method with random forests (described later). 
+
+at exploiting the afore-mentioned consistency as-sumption for UQ. First, multiple outputs/samples are generated by the LLM through some sampling procedure. Pairwise similarities between samples can then be computed using any similarity metric of choice. Finally, these similarities are leveraged to provide confidence estimates for each generation of interest. Our methodological contributions are primarily in the third phase of Figure 1. In particu-lar, rather than viewing the third phase as clustering outputs like in closely related work (Kuhn et al., 2023; Lin et al., 2024b), we propose similarity-based aggregation as a framework for estimating confidences. In contrast to aggregating verbalized confidences (Xiong et al., 2024), we aggregate pairwise similarities between generations, making our approach non-verbalized and therefore avoid-ing some empirically observed concerns around potential overconfidence when asking LLMs for probabilities (Hu and Levy, 2023; Xiong et al., 2024). Verbalized confidence aggregation is known to struggle for complex generative tasks. Confidence estimates from UQ can be evaluated in various ways depending on how they will be used by the system or end user. We are primar-ily interested in approaches yielding confidences that are well calibrated , as gauged by how closely they align with the empirical accuracy of the pre-dictions (Murphy and Epstein, 1967; Dawid, 1982). We also evaluate our proposed approaches on met-rics that gauge how confidence estimates benefit when used to select from a set of generations or predict whether a generation is correct or not. Our contributions are summarized as follows: • We introduce a high-level similarity-based ag-gregation (SIMBA) framework, unifying and generalizing various consistency-based UQ ap-proaches by positioning them as different ways to represent (and possibly learn) confidence as a function of similarities with other generations. • We propose specific novel approaches from the framework, including 1) Bayesian aggregation that uses pairwise similarities as evidence, and 2) viewing confidence estimation as classifica-tion and obtaining the probability of a generation being correct using similarities as features. • We conduct experiments using 9 datasets – 3 each for question answering, summarization, and text-to-SQL tasks – including ablations. Similarity-based aggregation methods are shown to perform well on all chosen evaluation metrics, particularly those measuring calibration error. Importantly, results indicate that the methods perform well across short and long form generations, including when output is structured, like in SQL queries. 
+
+2 Related Work 
+
+Procedures for UQ estimate measures like the vari-ability or confidence of LLM outputs, and can be categorized as either white-box or black-box. White-box methods assume access to the LLM’s internal components, such as model weights, logits, or embeddings. In contrast, black-box methods rely only on outputs, inferring confidence through alter-native means. An orthogonal distinction is between verbalized and non-verbalized methods, where the former type prompts an LLM to express uncer-tainty in natural language, such as using phrases (“I don’t know” or “most probably”) or quantitative indicators (“low” or “50%” or “90%”). 15881 White-Box Methods. Early work on calibration in deep learning and transformers laid the ground-work for using token-level probabilities – derived from model output logits – as a signal for estimat-ing the reliability of model predictions (Kuleshov et al., 2018; Ott et al., 2018; Desai and Durrett, 2020). More recently, Kuhn et al. (2023) propose semantic entropy based clustering on multiple sam-ples generated from the model and then estimating confidence estimates by summing the token-level probabilities in each cluster. The use of token-level probabilities for UQ has become a rapidly burgeon-ing area of research, driven by growing interest in the predictive confidence of LLMs (Fadeeva et al., 2023; Aichberger et al., 2024; Lin et al., 2024a; Vazhentsev et al., 2025). Kadavath et al. (2022) suggest a verbalized method where the LLM gen-erates responses and then evaluates them as either True/False; the probability that the model assigns to the generated token determines confidence. Other approaches consider the LLM’s internal state such as embeddings and activation spaces. For instance, Ren et al. (2023) fit the embeddings for both inputs and outputs in the training data to a Gaussian distribution, and estimate the model’s confidence by computing the distance of the eval-uated data pair from this Gaussian distribution. Some methods probe the model’s attention layers to discriminate between correct and incorrect an-swers (Kadavath et al., 2022; Burns et al., 2023; Li et al., 2023; Azaria and Mitchell, 2023). Although these methods provide insights into the model’s linguistic understanding, they require supervised training on specially annotated data. 
+
+Black-Box Methods. One strand of research con-siders verbalized black-box methods, such as us-ing an LLM to evaluate the correctness of its own generated answers in a conversational agent sce-nario (Mielke et al., 2022). Xiong et al. (2024) conduct an empirical study on UQ for reasoning tasks, showing that LLMs tend to be overconfident when verbalizing their own confidence in the cor-rectness of the generated answers. Other related work includes fine-tuning GPT-3 to verbalize uncer-tainty associated with responses (Lin et al., 2022). Many black-box methods use similarity between multiple generations given an input question, where common choices of metrics are natural language inference scores (Kuhn et al., 2023) or embedding-based similarity (Gao et al., 2024; Farquhar et al., 2024). Such similarity metrics can be used to ex-tend clustering algorithms for uncertainty quantifi-cation of LLMs (Kuhn et al., 2023; Ao et al., 2024; Da et al., 2024; Jiang et al., 2024). In this line of work, one assumes that inconsistency in responses correlates with incorrect or hallucinatory genera-tions. For instance, Manakul et al. (2023) propose a simple sampling-based approach that uses con-sistency among generations to find potential hallu-cinations. Lin et al. (2024b) estimate uncertainty based on analysis of a similarity matrix between generations, such as through the sum of the eigen-values of the graph Laplacian, the degree matrix, and the eccentricity. Farquhar et al. (2024) and Nikitin et al. (2024) quantify uncertainty in LLM outputs using semantic similarity kernels to capture fine-grained variation among responses. Recent methods have also explored combining white- and black-box UQ (Chen and Mueller, 2024; Shrivas-tava et al., 2023). 
+
+Comparison with Prior Work. Our proposed framework and corresponding approaches lie within the (consistency-based) non-verbalized UQ category and are primarily black-box (although they can be made white-box if needed, by choosing features arising from token probabilities). While there is a growing body of work on UQ methods leveraging similarity, our proposed framework gen-eralizes beyond semantic similarity – which has been the main focus in the closest related work – by emphasizing the functional relation between simi-larities and confidence of generations. This is im-portant because not all generative tasks need to be concerned about semantic similarity of output, e.g., code generation. Also, we note that our proposed supervised methods in the framework differ from concurrent efforts (Liu et al., 2024; Ulmer et al., 2024; Yaldiz et al., 2025) in that: 1) they are also applicable when only similarities (and not token probabilities) are used as features and therefore can be entirely black-box, and 2) they are light-weight and thus easily deployable in real-world systems. We compare variations of the proposed aggregation methods for our extensive experimental study. 
+
+3 Methodology 
+
+We propose an overarching framework as well as specific techniques that provide confidence esti-mates, possibly using a limited amount of training data. In this section, we first present some basic notation and assumptions, and then describe the components of the workflow depicted in Figure 1. 15882 3.1 Basic Notation and Assumptions 
+
+Consider an LLM generating output y for some input query x. We assume there is an associated ground truth output y∗ for input x as well as a bi-nary reward r ∈ { 0, 1} from a reward function 
+
+r(x, y, y ∗). Importantly, we assume there is a way to gauge whether any particular generation (with corresponding ground truth) is correct or not, i.e. whether the reward is 1 or 0; Y ∗(x) denotes the set of correct responses for x. This may not be possible in some situations, such as when humans disagree about class labels (Baan et al., 2022). For tasks such as open-ended question answering and summarization, we deem the reward to be 1 if a text similarity metric (e.g. Rouge-L) between the ground truth and generated output exceeds a pre-determined threshold; this has also been assumed by related prior work (Kuhn et al., 2023; Lin et al., 2024b). For text-to-SQL, reward is 1 if the gener-ated and ground truth queries return the same result upon query execution on the underlying database. 
+
+3.2 Sampling 
+
+Consistency-based approaches begin with obtain-ing multiple generations y1, · · · , y m for an input x.In this work, we adopt a sampling approach where multiple samples are generated from multiple tem-peratures using the next-token probability distri-bution of the LLM. While there are other means of generating diverse samples (Gao et al., 2024), our focus is primarily on leveraging temperature. Varying temperature has been empirically shown to provide ample opportunity for assessing whether response variability is present, which is needed by consistency-based methods to help distinguish correct from incorrect responses in complex gener-ations (Zhu et al., 2024; Xiao et al., 2025). In practice, one may be interested in confidence estimates for only a subset of the generations, such as the ones most likely to be correct. Generations at higher temperatures could therefore be used merely for better estimating those at lower temperatures. 
+
+3.3 Computing Pairwise Similarities 
+
+After generating samples, consistency-based ap-proaches rely on access to a similarity metric with which one can compute pairwise similarities 
+
+s(yi, y j ) for all sample pairs, assumed to lie in the interval [0 , 1] . As shorthand, we denote the simi-larities between the ith generation and other gener-ations as si = si, 1, .., s i,i −1, s i,i +1 , .., s i,m , where 
+
+si,k = s(yi, y k) is the similarity between samples 
+
+yi and yk. For our experiments, we consider met-rics that treat samples as general text or sets of to-kens, such as the Jaccard coefficient and variations of ROUGE such as Rouge-1 and Rouge-L. We note that any similarity metric can be used, but in our experience, metrics that treat generations as sets of tokens are most suitable for consistency-based UQ. Future work could explore adapting learnable sim-ilarity functions over higher level concepts, such as those using graph neural networks for complex entity matching (Krivosheev et al., 2021). 
+
+3.4 Similarity Aggregation 
+
+The final phase of the pipeline relies on leverag-ing pairwise similarities for UQ. Recall that the underlying assumption behind consistency-based approaches is that correct generations are more similar to other generations than incorrect ones. An aggregated similarity between a generation and others therefore acts as a proxy for correctness. We present a simple yet broad perspective on consistency-based approaches that is applicable to any generative task. Rather than clustering genera-tions such as around semantic equivalence (Kuhn et al., 2023), the confidence for sample yi can be estimated using a suitable aggregation: ci = f (si),where si denotes pairwise similarities between yi
+
+and other samples. A deterministic function f (·)
+
+implies that identical generations yield identical confidences for the same sample set, which is a desirable property. Furthermore, f (·) should re-flect the underlying hypothesis around consistency-based methods, which is that more consistency is expected for correct answers. We propose the fol-lowing 3 categories, each differing in how aggrega-tion function f (·) is selected and/or learned. 
+
+Simple Aggregation. A simple approach is to find an aggregate distance between yi and other generations, ¯di = g(di, 1, · · · , d i,m ) where distance 
+
+di,k = 1 − si,k , and compute ci = 1 − ¯di since the aggregate distance lies in [0 , 1] . The rationale is that the consistency assumption suggests that a generation further removed from others is more likely to be incorrect. While any form of aggrega-tion g(·) is possible, we use the arithmetic mean for experiments, which simplifies as ci = ¯ si.This form of aggregation is mathematically equivalent to the spectral clustering by degree approach in Lin et al. (2024b) and therefore treated as a baseline for experiments. We show later that this performs reasonably well on some (but not all) UQ metrics. 15883 Bayesian Aggregation. We propose a Bayesian form of aggregation that updates beliefs about con-fidence using similarities as evidence. Specifically, we compute the posterior probability of yi being correct given similarities with other generations: 
+
+P (yi ∈ Y ∗|si) = p0
+
+∏  
+
+> k̸=i
+
+αi
+
+p0
+
+∏  
+
+> k̸=i
+
+αi + (1 − p0) ∏  
+
+> k̸=i
+
+βi
+
+,
+
+where p0 denotes the prior P (yi ∈ Y ∗), si are pair-wise similarities between yi and other generations, 
+
+αi = P (si,k |yi ∈ Y ∗), βi = P (si,k |yi /∈ Y ∗).The formula makes two important assumptions: 1) similarities in si depend only on whether yi is correct, and 2) similarities in si are conditionally independent. The first reflects the underlying as-sumption about the relation between consistency and correctness, allowing for a less variable distri-bution if yi is correct, while the second is made for tractability. Bayesian approaches are popular in related but different areas, such as modeling uncer-tainty in parameters of neural networks (Gal and Ghahramani, 2016; Maddox et al., 2019). Note that this approach requires a small train-ing set to learn the parameters of the probabilistic model. For experiments, we assume Beta distri-butions for the conditional similarity distributions; this requires 5 parameters to be learned – prior p0
+
+and 2 parameters each for the 2 Beta distributions. 
+
+Aggregation by Classification. We also pro-pose treating similarity aggregation as a classifica-tion task; specifically, we train a probabilistic clas-sifier for whether a response is correct using super-vised learning with features based on similarities. Denoting sfi as the set of similarity features for clas-sifying correctness, confidence for generation yi
+
+is computed as: ci = P (yi ∈ Y ∗) = f (sfi ). This method can be generalized by also including other non-similarity features ofi , such as the generative score from the LLM, in which case ci = f (sfi , ofi ).For our experiments, we learn the function f (·)
+
+using a random forest as the probabilistic classifier, since it was observed to perform better than other methods like logistic regression. We compare vari-ations of our proposed classification approach with different feature sets. (Details are provided later.) This is a simple yet powerful extension of simple aggregation where the function is learned using a small training set. Both this approach and the Bayesian one are more likely to be effective when the sampling procedure for training is identical to that during test time. In practical applications, this is reasonably straightforward to control, assuming the training and test sets are not too dissimilar, and the data with similarity features that is needed for training a classifier can be easily compiled using a small labeled dataset with ground truth responses. 
+
+4 Empirical Investigation 
+
+4.1 Experimental Setup 
+
+We summarize our experimental setup in this sub-section. Note that we restrict ourselves to using representative open-source LLMs for generation. 
+
+Datasets. We consider the following datasets: • QA : We consider the open-book dataset CoQA (Reddy et al., 2019), the closed-book dataset TriviaQA (Joshi et al., 2017), as well as the closed-book dataset Natural Ques-tions (Kwiatkowski et al., 2019). QA is widely studied in the literature on UQ for LLMs. • Summarization : For this task, we experiment with the following datasets: XSum (Narayan et al., 2018), SamSum (Gliwa et al., 2019), and CNN Dailymail (Nallapati et al., 2016). Note that summarization typically results in longer form generations as compared to QA. • Text-to-SQL : We consider the popular Spi-der benchmark (Yu et al., 2018), Spider-Realistic (Deng et al., 2021), which is a more challenging version of Spider, and BIRD (Li et al., 2024), a recent cross-domain benchmark covering many professional domains. Text-to-SQL with LLMs is an increasingly popular area of research for LLMs, with ongoing efforts to improve generation robustness and reliability through techniques like schema linking and ad-vanced grounding (Dragusin et al., 2025). 
+
+Models. For QA and summarization, we generate responses using two open-source models: LLaMA 3.3 70B instruct (Touvron et al., 2023) and Gran-ite 3.1 8B instruct (Mishra et al., 2024) models. For text-to-SQL, we use few-shot prompting on a Codellama 34B instruct model (Rozière et al., 2024), a code-specialized version of Llama 2, and 
+
+Granite 34B Code instruct (Mishra et al., 2024). For generation, we use the following default parameters: maximum number of new tokens = 200, and for sampling-based methods, we set top-k = 20 and top-p = 0.7 when applicable. Input sequences are truncated to a maximum length of 700 tokens with padding. For consistency-based methods, we generate samples across multiple tem-15884 peratures ranging from 0.25 to 1.5 in increments of 0.25, and compute average log probabilities across generated tokens for use in classification-based UQ approaches. 
+
+Evaluation Metrics. We consider the following 3 evaluation metrics, each capturing a different facet of how confidence estimates may be utilized: • As a performance metric, we propose accuracy from top selection (ATS ), which measures accu-racy (fraction of correct instances) in a test set when confidences are used to select one gener-ation from a set of generations for each query. This represents the situation where the system must provide a single response for every query and confidences are used as scores for selection among generations. • As a calibration metric, we choose adap-tive calibrated error (ACE ), which bins con-fidence estimates into probability ranges such that each bin contains the same number of data points (Nixon et al., 2019). Formally, 
+
+ACE = 1
+
+> KB
+
+∑Kk=1 
+
+∑Bb=1 |acc (b, k ) − c(b, k )|,where acc (b, k ) and c(b, k ) are the accuracy and confidence of adaptive calibration bin b for class label k. We prefer using adaptive bin sizes in-stead of fixed bin sizes, as the latter often results in unbalanced datapoints across bins. We set the 
+
+# of bins B = 5 for all experiments. • As a prediction metric, we consider the area under the receiver operating characteristic 
+
+(AUROC ), which computes the area under the curve of the false positive rate vs. true positive rate when confidences are used as a probabilis-tic classifier for the correctness of generations. This is a standard metric that is widely used for evaluating confidence estimation. 
+
+Baselines. We consider the following baselines, many of which are state-of-the-art approaches span-ning all categories of UQ in LLMs: • avg. log prob computes a probability by expo-nentiating the avg. logit over generated tokens; the generative score for sample yi is denoted pgi .• spec-ecc is a spectral clustering approach for UQ that leverages a graph Laplacian matrix com-puted from pairwise similarities and uses eccen-tricity (Lin et al., 2024b). • p(true) is when an LLM is asked whether a gen-eration is either True or False and the probability of the generated token (True/False) determines confidence (Kadavath et al., 2022). • arith-agg estimates a generation’s confidence as the arithmetic mean of pairwise similarities; it is mathematically equivalent to a spectral clustering approach that uses degree (Lin et al., 2024b). • clf-gen is a classification approach with genera-tive score pgi (as described above) as only feature. Note that we do not consider approaches that use natural language inference for similarity (Kuhn et al., 2023; Chen and Mueller, 2024) or those re-quiring fine-tuning LLMs as baselines, since they are either unsuitable for structured output such as SQL or require substantial training data. 
+
+Proposed Methods. We consider the following proposed methods. Recall that sfi and ofi refer to similarity and other features respectively, for methods leveraging aggregation by classification: • bayes-beta is the Bayesian agg. approach, where Beta distribution parameters are learned. • clf-pairs is agg. by classification when all pair-wise similarities are features: sfi = si, ofi = ∅.• clf-mean+gen includes the generative score with mean similarity: sfi = ¯ si, ofi = pgi .• clf-pairs+gen includes the generative score with all pairwise similarities: sfi = si, ofi = pgi .Further experimental details about datasets, hyper-parameter choices, etc. are in Appendix A. 
+
+4.2 Main Results 
+
+We investigate the effectiveness of our proposed classification approach using generations from 2
+
+different models on all datasets. We use a sam-pling procedure that generates 5 samples each over 
+
+6 temperatures, from 0.25 to 1.5 in increments of 
+
+0.25 . Evaluations are performed only on samples from the lower 3 temperatures since the higher tem-peratures provide generations with lower perfor-mance. This captures the realistic scenario where the user wishes to obtain confidence estimates for only those samples they will even consider. We split the data randomly into half for train/test sets, and repeat the experiment 5 times to understand variability of the results. To gauge the correctness of generations, we use a Rouge-L threshold of 0.5 and 0.3 for QA and summarization datasets respec-tively. Jaccard is used as a similarity metric for all methods that leverage pairwise similarity. Table 1 compares various baseline and proposed UQ approaches for generations from 2 models for the CoQA, SamSum, and Spider datasets. All 3 evaluation metrics are considered – lower ACE and higher ATS and AUROC are preferred. Comparing the performance of each UQ method as shown in 15885 Table 1: Comparing different UQ approaches over 3 evaluation metrics on generations from 2 models each on 3 datasets (1 per task) – CoQA, SamSum, and Spider. Each approach is marked as either black-box (BB) or white-box (WB). Proposed approaches are listed in bold, others are baselines. Jaccard is used for all similarity-based methods. Error bars are from max. and min. values over 5 runs, each with a random 50% train / 50% test split. 
+
+Eval Metrics: ATS ↑ ACE ↓ AUROC ↑ ATS ↑ ACE ↓ AUROC ↑
+
+CoQA Llama3.3 70B Granite3.1 8B 
+
+avg. log prob (WB) 0.27 ±0.01 0.272 ±0.019 0.72 ±0.02 0.06 ±0.01 0.808 ±0.002 0.86 ±0.03 
+
+p(true) (BB) 0.19 ±0.02 1.195 ±0.012 0.36 ±0.01 0.03 ±0.00 1.004 ±0.006 0.60 ±0.03 
+
+spec-ecc (BB) 0.12 ±0.02 0.331 ±0.018 0.21 ±0.02 0.06 ±0.01 0.685 ±0.010 0.19 ±0.02 
+
+arith-agg (BB) 0.27 ±0.01 0.272 ±0.019 0.83 ±0.01 0.05 ±0.01 0.206 ±0.003 0.71 ±0.02 
+
+clf-gen (WB) 0.29 ±0.02 0.074 ±0.011 0.73 ±0.02 0.06 ±0.00 0.028 ±0.002 0.86 ±0.03 
+
+bayes-beta (BB) 0.38 ±0.02 0.093 ±0.010 0.90 ±0.01 0.17 ±0.01 0.028 ±0.001 0.95 ±0.02 
+
+clf-pairs (BB) 0.37 ±0.02 0.041 ±0.012 0.91 ±0.01 0.18 ±0.01 0.015 ±0.004 0.95 ±0.02 
+
+clf-mean+gen (WB) 0.31 ±0.01 0.047 ±0.019 0.84 ±0.02 0.16 ±0.01 0.021 ±0.003 0.89 ±0.03 
+
+clf-pairs+gen (WB) 0.37 ±0.02 0.043 ±0.011 0.91 ±0.01 0.19 ±0.01 0.014 ±0.002 0.95 ±0.02 
+
+SamSum Llama3.3 70B Granite3.1 8B 
+
+avg. log prob (WB) 0.51 ±0.03 0.419 ±0.025 0.57 ±0.02 0.15 ±0.02 0.656 ±0.016 0.40 ±0.01 
+
+p(true) (BB) 0.50 ±0.03 1.099 ±0.015 0.50 ±0.00 0.46 ±0.02 0.911 ±0.013 0.50 ±0.01 
+
+spec-ecc (BB) 0.47 ±0.02 0.314 ±0.023 0.41 ±0.01 0.01 ±0.01 0.358 ±0.012 0.44 ±0.01 
+
+arith-agg (BB) 0.53 ±0.02 0.045 ±0.010 0.63 ±0.01 0.32 ±0.03 0.086 ±0.008 0.72 ±0.01 
+
+clf-gen (WB) 0.52 ±0.03 0.056 ±0.015 0.52 ±0.03 0.28 ±0.02 0.050 ±0.007 0.62 ±0.02 
+
+bayes-beta (BB) 0.53 ±0.02 0.322 ±0.018 0.63 ±0.01 0.32 ±0.02 0.911 ±0.013 0.72 ±0.01 
+
+clf-pairs (BB) 0.55 ±0.02 0.046 ±0.013 0.65 ±0.02 0.52 ±0.02 0.060 ±0.005 0.86 ±0.01 
+
+clf-mean+gen (WB) 0.53 ±0.02 0.052 ±0.020 0.62 ±0.01 0.42 ±0.04 0.055 ±0.016 0.81 ±0.02 
+
+clf-pairs+gen (WB) 0.55 ±0.02 0.045 ±0.015 0.65 ±0.02 0.53 ±0.02 0.061 ±0.005 0.86 ±0.01 
+
+Spider Codellama 34B Granite 34B Code 
+
+avg. log prob (WB) 0.28 ±0.02 0.654 ±0.012 0.53 ±0.01 0.24 ±0.03 0.632 ±0.012 0.65 ±0.01 
+
+p(true) (BB) 0.23 ±0.00 0.784 ±0.006 0.52 ±0.01 0.19 ±0.02 0.892 ±0.003 0.63 ±0.02 
+
+spec-ecc (BB) 0.01 ±0.00 0.201 ±0.006 0.37 ±0.01 0.02 ±0.00 0.551 ±0.009 0.20 ±0.01 
+
+arith-agg (BB) 0.29 ±0.02 0.238 ±0.009 0.68 ±0.01 0.33 ±0.01 0.070 ±0.005 0.81 ±0.01 
+
+clf-gen (WB) 0.28 ±0.02 0.050 ±0.009 0.53 ±0.02 0.24 ±0.03 0.050 ±0.008 0.64 ±0.01 
+
+bayes-beta (BB) 0.29 ±0.02 0.298 ±0.018 0.68 ±0.01 0.33 ±0.01 0.317 ±0.022 0.80 ±0.01 
+
+clf-pairs (BB) 0.30 ±0.01 0.036 ±0.005 0.69 ±0.01 0.33 ±0.02 0.034 ±0.004 0.85 ±0.01 
+
+clf-mean+gen (WB) 0.29 ±0.02 0.036 ±0.005 0.67 ±0.01 0.31 ±0.02 0.039 ±0.002 0.80 ±0.01 
+
+clf-pairs+gen (WB) 0.29 ±0.02 0.034 ±0.006 0.69 ±0.01 0.33 ±0.02 0.036 ±0.004 0.85 ±0.01 
+
+the rows, separately for each model, we observe that the proposed classification approaches using similarity features are generally high performing across all metrics. Bayesian aggregation does well on ATS and AUROC but poorly on ACE, perhaps because the conditional independence assumption that was made for tractability may not actually hold in practice. The contrast with baselines is pro-nounced for CoQA where the proposed approaches are notably better. Computing the arithmetic mean of similarities ( arith-agg ) is reasonably strong for AUROC. Table 2 compares a smaller set of UQ approaches for generations on the ACE metric us-ing generations from Llama-based models for the 6 other datasets – Natural Questions, TriviaQA, CNN Daily, XSum, BIRD, and Spider-Realistic. We note again that the proposed approaches perform well across datasets. 
+
+4.3 Ablations 
+
+We conduct ablational studies to understand the impact of some our choices on the main results. 
+
+Similarity Metric. The Jaccard coefficient was used as our primary choice of similarity metric for the main experiments. Figure 2 compares 3 similarity-based UQ approaches for the ACE met-ric on CoQA, SamSum and Spider, where we con-15886 Table 2: Comparing different UQ approaches over the ACE evaluation metric on 6 datasets: Natural Questions (NQ), TriviaQA, CNN, XSum, BIRD, and Spider-Realistic. Each approach is marked as either black-box (BB) or white-box (WB). Proposed approaches are in bold, others are baselines. Jaccard is used for all similarity-based methods. Error bars are from max. and min. values over 5 runs, each with a random 50% train / 50% test split. 
+
+Dataset: NQ TriviaQA CNN XSum BIRD Spider-Realistic 
+
+avg. log prob (WB) 0.913 ±0.000 0.914 ±0.002 0.700 ±0.011 0.824 ±0.013 0.552 ±0.006 0.325 ±0.013 
+
+arith-agg (BB) 0.361 ±0.002 0.383 ±0.003 0.319 ±0.012 0.433 ±0.016 0.096 ±0.007 0.075 ±0.008 
+
+clf-gen (WB) 0.001 ±0.000 0.004 ±0.001 0.052 ±0.013 0.038 ±0.017 0.078 ±0.002 0.063 ±0.003 
+
+clf-pairs (BB) 0.005 ±0.010 0.003 ±0.001 0.038 ±0.007 0.035 ±0.016 0.089 ±0.007 0.054 ±0.008 
+
+clf-mean+gen (WB) 0.001 ±0.002 0.003 ±0.001 0.049 ±0.017 0.035 ±0.019 0.069 ±0.007 0.056 ±0.007 
+
+clf-pairs+gen (WB) 0.005 ±0.007 0.003 ±0.001 0.039 ±0.007 0.034 ±0.016 0.085 ±0.009 0.054 ±0.005   
+
+> (a) CoQA (b) SamSum (c) Spider
+
+Figure 2: Effect of choice of similarity metric on the ACE metric for the CoQA, SamSum, and Spider datasets.   
+
+> (a) Effect of Rouge-L Threshold (b) Effect of Classifier (c) Effect of # of Samples
+
+Figure 3: Three different ablations on the ACE metric for the CoQA dataset. 
+
+sider the Rouge-1 and Rouge-L similarity metrics in addition to Jaccard. The plots indicate that the trends generally remain the same regardless of choice of similarity metric – the proposed classi-fication approaches are comparable to each other and perform better than arith-agg on ACE. 
+
+Three Different Ablations for CoQA. Each panel in Figure 3 performs a different ablation for the ACE metric on the CoQA dataset, where we use generations from Llama 3.3 70B and similarity-based methods use Jaccard. Recall that lower ACE means better calibration. • Figure 3(a) explores the effect of the Rouge-L threshold, which determines whether a genera-tion is correct. We compare 3 UQ approaches (including 2 baselines) for the ACE metric, ob-serving that trends generally remain the same across thresholds in {0.3, 0.5, 0.7}.• Figure 3(b) compares two types of classifiers – random forests and logistic regression – showing similar results. • Figure 3(c) tracks the change in ACE for two methods that use consistency as a function of the # of samples, where the supervised method clf-pairs is more robust than unsupervised arith-agg .
+
+Similarity Metric and Aggregation Function for BIRD. In Appendix B, we conduct an extensive comparison of similarity metrics and aggregation functions for the text-to-SQL BIRD benchmark, incorporating a broader set of similarity metrics including those catering specifically to SQL gen-erations. Results indicate that text/token similarity metrics like Jaccard and Rouge-L are suitable for UQ even when the output is SQL, and classification with random forests is a high-performing aggrega-tor regardless of choice of text/token metrics. 15887 5 Conclusion 
+
+Assessing the confidence of LLM generations in re-sponse to a query is a crucial endeavor for enabling trusted AI. Real-world systems can benefit greatly from UQ modules that are flexible in terms of appli-cability to diverse generative tasks and models, and also reasonably performant for varied downstream applications that use confidence estimates. We have proposed a general high-level similarity-based aggregation framework for UQ, leverag-ing pairwise similarities between multiple gener-ated samples, as well as specific novel approaches within that framework. One such approach views confidence estimation as a probabilistic classifi-cation task, where the objective is to predict the correctness of a generation using similarities with other generations for the same query as features. Our methods do not rely on asking an LLM for its confidence about a generation and can be catego-rized as consistency-based, since they rely on using consistency between generations as a signal for confidence. Through an extensive empirical evalua-tion with 9 datasets spanning the tasks of QA, sum-marization, and text-to-SQL, we show that using similarity features results in confidence estimates that fare well on various UQ evaluation metrics, particular around minimizing calibration error. Our data-driven methods are designed under the assumption of no data uncertainty and necessitate a small training set with samples generated in the same way for both training and testing. Since many real-world applications often provide at least a small number of in-domain samples, and our focus in this work is specifically on no-data or low-data scenarios, we have limited our experiments to in-domain settings. Investigating out-of-domain performance with such methods is important for future work as it involves challenges such as dis-tribution shift and domain adaptation that warrant separate study. Finally, we note that results show only moderate gains over baselines on the ATS and AUROC met-rics, indicating room for improvement when using the estimated confidences to distinguish between correct and incorrect responses. Further studies are needed to understand fundamental limitations of consistency-based UQ for LLMs. 
+
+Limitations 
+
+Confidence estimation is concerned with providing confidences for LLM generations. The consistency-based approaches proposed in this work rely on the assumption that correct generations are more similar to other generations, compared to incor-rect ones. We note that while there is empirical evidence to support this assumption along with widespread practical adoption of similar ideas, fur-ther work is required to provide theoretical justifi-cation and a more complete understanding of when the assumption may or may not hold. Thus, there are no guarantees associated with confidence esti-mates of individual instances and such approaches should be deployed with suitable caution. 
+
+Ethical Statement 
+
+We recognize both the positive and negative so-cietal impacts of LLMs, including the potential misuse of our work on uncertainty quantification to lend unwarranted credibility to model outputs. While our methods are intended to improve trans-parency and reliability in LLM use, we acknowl-edge that they could be misapplied in high-stakes contexts without proper additional safeguards. The datasets we consider are publicly available and peer-reviewed; there are no human subjects in-volved, and to the best of our knowledge, our work carries no direct harmful consequences. All cre-ators and original owners of assets have been prop-erly credited, and licenses and terms of use have been respected. We have not conducted crowd-sourcing experiments or research with human par-ticipants. More broadly, we encourage continued reflection on the implications of deploying LLMs. 
+
+Acknowledgments 
+
+We thank Nhan Pham, Kavitha Srinivas, Dhar-mashankar Subramanian, Long Vu, and other col-leagues for their valuable comments and feedback while discussing this work. 
+
+References       
+
+> Lukas Aichberger, Kajetan Schweighofer, Mykyta Ielanskyi, and Sepp Hochreiter. 2024. Semanti-cally diverse language generation for uncertainty estimation in language models. arXiv preprint arXiv:2406.04306 .Julien Aligon, Matteo Golfarelli, Patrick Marcel, Ste-fano Rizzi, and Elisa Turricchia. 2014. Similarity measures for OLAP sessions. Knowledge and Infor-mation Systems , 39:463–489. Shuang Ao, Stefan Rueger, and Advaith Siddharthan. 2024. CSS: Contrastive semantic similarity for uncer-
+
+15888 tainty quantification of LLMs. In Proceedings of the Conference on Uncertainty in Artificial Intelligence (UAI) .Kamel Aouiche, Pierre-Emmanuel Jouve, and Jérôme Darmont. 2006. Clustering-based materialized view selection in data warehouses. In East European Con-ference on Advances in Databases and Information Systems , pages 81–95. Amos Azaria and Tom Mitchell. 2023. The internal state of an LLM knows when it’s lying. In Find-ings of the Association for Computational Linguis-tics: EMNLP 2023 , pages 967–976. Joris Baan, Wilker Aziz, Barbara Plank, and Raquel Fernandez. 2022. Stop measuring calibration when humans disagree. In Proceedings of the Conference on Empirical Methods in Natural Language Process-ing , pages 1892–1915. Collin Burns, Haotian Ye, Dan Klein, and Jacob Stein-hardt. 2023. Discovering latent knowledge in lan-guage models without supervision. In Proceedings of the International Conference on Learning Repre-sentations (ICLR) .Jiuhai Chen and Jonas Mueller. 2024. Quantifying un-certainty in answers from any language model and en-hancing their trustworthiness. In Proceedings of the 62nd Annual Meeting of the Association for Compu-tational Linguistics (Volume 1: Long Papers) , pages 5186–5200. Xinyun Chen, Renat Aksitov, Uri Alon, Jie Ren, Kefan Xiao, Pengcheng Yin, Sushant Prakash, Charles Sut-ton, Xuezhi Wang, and Denny Zhou. 2024. Universal self-consistency for large language models. In ICML 2024 Workshop on In-Context Learning .Jeremy Cole, Michael Zhang, Dan Gillick, Julian Eisen-schlos, Bhuwan Dhingra, and Jacob Eisenstein. 2023. Selectively answering ambiguous questions. In Pro-ceedings of the 2023 Conference on Empirical Meth-ods in Natural Language Processing , pages 530–543. Longchao Da, Tiejin Chen, Lu Cheng, and Hua Wei. 2024. LLM uncertainty quantification through di-rectional entailment graph and claim level response augmentation. arXiv preprint arXiv:2407.00994 .A Philip Dawid. 1982. The well-calibrated Bayesian. 
+
+Journal of the American Statistical Association ,77(379):605–610. Xiang Deng, Ahmed Hassan Awadallah, Christopher Meek, Oleksandr Polozov, Huan Sun, and Matthew Richardson. 2021. Structure-grounded pretraining for text-to-sql. In Proceedings of the 2021 Confer-ence of the North American Chapter of the Associ-ation for Computational Linguistics: Human Lan-guage Technologies .Shrey Desai and Greg Durrett. 2020. Calibration of pre-trained transformers. In Proceedings of the Con-ference on Empirical Methods in Natural Language Processing (EMNLP) , pages 295–302. Catalina Dragusin, Katsiaryna Mirylenka, Christoph Miksovic Czasch, Michael Glass, Nahuel Defosse, Paolo Scotton, and Thomas Gschwind. 2025. Grounding LLMs for database exploration: Intent scoping and paraphrasing for robust NL2SQL. Proceedings of the VLDB Endowment , page 8097. Ekaterina Fadeeva, Roman Vashurin, Akim Tsvigun, Artem Vazhentsev, Sergey Petrakov, Kirill Fedyanin, Daniil Vasilev, Elizaveta Goncharova, Alexander Panchenko, Maxim Panov, et al. 2023. LM-Polygraph: Uncertainty estimation for language mod-els. In Proceedings of the 2023 Conference on Em-pirical Methods in Natural Language Processing: System Demonstrations , pages 446–461. Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and Yarin Gal. 2024. Detecting hallucinations in large language models using semantic entropy. Nature ,630(8017):625–630. Yarin Gal and Zoubin Ghahramani. 2016. Dropout as a Bayesian approximation: Representing model un-certainty in deep learning. In Proceedings of The In-ternational Conference on Machine Learning , pages 1050–1059. Xiang Gao, Jiaxin Zhang, Lalla Mouatadid, and Ka-malika Das. 2024. SPUQ: Perturbation-based uncer-tainty quantification for large language models. In 
+
+Proceedings of the European Chapter of the Asso-ciation for Computational Linguistics , pages 2336– 2346. Bogdan Gliwa, Iwona Mochol, Maciej Biesek, and Alek-sander Wawer. 2019. SAMSum Corpus: A human-annotated dialogue dataset for abstractive summariza-tion. CoRR , abs/1911.12237. Jennifer Hu and Roger Levy. 2023. Prompting is not a substitute for probability measurements in large language models. In Proceedings of the 2023 Con-ference on Empirical Methods in Natural Language Processing , pages 5040–5060. Mingjian Jiang, Yangjun Yangjun, Prasanna Sattigeri, Salim Roukos, and Tatsunori Hashimoto. 2024. Graph-based uncertainty metrics for long-form lan-guage model generations. In Annual Conference on Neural Information Processing Systems .Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke Zettlemoyer. 2017. TriviaQA: A large scale distantly supervised challenge dataset for reading comprehen-sion. In Proceedings of the 55th Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , page 1601–1611. Saurav Kadavath, Tom Conerly, Amanda Askell, Tom Henighan, Dawn Drain, Ethan Perez, Nicholas Schiefer, Zac Hatfield Doddsand Nova DasSarma, Eli Tran-Johnson, et al. 2022. Language models (mostly) know what they know. preprint arXiv: 2207.05221 [cs.CL] .15889 Evgeny Krivosheev, Mattia Atzeni, Katsiaryna Mirylenka, Paolo Scotton, Christoph Miksovic, and Anton Zorin. 2021. Business entity matching with siamese graph convolutional networks. In Proceed-ings of the AAAI Conference on Artificial Intelligence ,volume 35, pages 16054–16056. Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. 2023. Semantic uncertainty: Linguistic invariances for un-certainty estimation in natural language generation. In International Conference on Learning Representa-tions .Volodymyr Kuleshov, Peter Fenner, and Stefano Ermon. 2018. Accurate uncertainties for deep learning using calibrated regression. In Proceedings of the Inter-national Conference on Machine Learning (ICML) ,pages 2796–2804. Tom Kwiatkowski, Jennimaria Palomaki, Olivia Red-field, Michael Collins, Ankur Parikh, Chris Alberti, Danielle Epstein, Illia Polosukhin, Jacob Devlin, Ken-ton Lee, Kristina Toutanova, Llion Jones, Matthew Kelcey, Ming-Wei Chang, Andrew M. Dai, Jakob Uszkoreit, Quoc Le, and Slav Petrov. 2019. Natu-ral questions: A benchmark for question answering research. Transactions of the Association for Compu-tational Linguistics , 7:452–466. Jinyang Li, Binyuan Hui, Ge Qu, Jiaxi Yang, Binhua Li, Bowen Li, Bailin Wang, Bowen Qin, Ruiying Geng, Nan Huo, et al. 2024. Can LLM already serve as a database interface? A big bench for large-scale database grounded text-to-SQLs. Advances in Neural Information Processing Systems , 36. Kenneth Li, Oam Patel, Fernanda Viégas, Hanspeter Pfister, and Martin Wattenberg. 2023. Inference-time intervention: Eliciting truthful answers from a lan-guage model. preprint arXiv: 2306.03341 [cs.CL] .Stephanie Lin, Jacob Hilton, and Owain Evans. 2022. Teaching models to express their uncertainty in words. Transactions on Machine Learning Research .Zhen Lin, Shubhendu Trivedi, and Jimeng Sun. 2024a. Contextualized sequence likelihood: Enhanced con-fidence scores for natural language generation. In 
+
+Proceedings of the Conference on Empirical Methods in Natural Language Processing (EMNLP) , pages 10351–10368. Zhen Lin, Shubhendu Trivedi, and Jimeng Sun. 2024b. Generating with confidence: Uncertainty quantifica-tion for black-box large language models. Transac-tions on Machine Learning Research .Linyu Liu, Weijia Xiang, Yichi Huang, Haoran Wang, Yisen Li, Sen Zhao, Bo Yang, and Quanquan Gu. 2024. Uncertainty estimation and quantification for llms: A simple supervised approach. arXiv preprint arXiv:2404.15993 .Wesley J. Maddox, Pavel Izmailov, Timur Garipov, Dmitry P. Vetrov, and Andrew Gordon Wilson. 2019. A simple baseline for Bayesian uncertainty in deep learning. In Advances in Neural Information Pro-cessing Systems .Vitor Hirota Makiyama, M Jordan Raddick, and Rafael DC Santos. 2015. Text mining applied to SQL queries: A case study for the SDSS SkyServer. In Symposium on Information Management and Big Data , pages 66–72. Potsawee Manakul, Adian Liusie, and Mark Gales. 2023. SelfCheckGPT: Zero-resource black-box hallucina-tion detection for generative large language models. In Proceedings of the 2023 Conference on Empiri-cal Methods in Natural Language Processing , pages 9004–9017. Sabrina J. Mielke, Arthur Szlam, Emily Dinan, and Y-Lan Boureau. 2022. Reducing conversational agents’ overconfidence through linguistic calibration. Trans-actions of the Association for Computational Linguis-tics , 10:857–872. Mayank Mishra, Matt Stallone, Gaoyuan Zhang, Yikang Shen, Aditya Prasad, Adriana Meza Soria, Michele Merler, Parameswaran Selvam, Saptha Surendran, Shivdeep Singh, Manish Sethi, Xuan-Hong Dang, Pengyuan Li, Kun-Lung Wu, Syed Zawad, Andrew Coleman, Matthew White, Mark Lewis, Raju Pavu-luri, Yan Koyfman, Boris Lublinsky, Maximilien de Bayser, Ibrahim Abdelaziz, Kinjal Basu, Mayank Agarwal, Yi Zhou, Chris Johnson, Aanchal Goyal, Hima Patel, Yousaf Shah, Petros Zerfos, Heiko Lud-wig, Asim Munawar, Maxwell Crouse, Pavan Ka-panipathi, Shweta Salaria, Bob Calio, Sophia Wen, Seetharami Seelam, Brian Belgodere, Carlos Fon-seca, Amith Singhee, Nirmit Desai, David D. Cox, Ruchir Puri, and Rameswar Panda. 2024. Granite code models: A family of open foundation models for code intelligence. preprint arXiv: 2405.04324 [cs.CL] .Eric Mitchell, Joseph Noh, Siyan Li, Will Armstrong, Ananth Agarwal, Patrick Liu, Chelsea Finn, and Christopher D Manning. 2022. Enhancing self-consistency and performance of pre-trained language models through natural language inference. In Pro-ceedings of the 2022 Conference on Empirical Meth-ods in Natural Language Processing , pages 1754– 1768. Allan H Murphy and Edward S Epstein. 1967. Veri-fication of probabilistic predictions: A brief review. 
+
+Journal of Applied Meteorology and Climatology ,6(5):748–755. Ramesh Nallapati, Bowen Zhou, Cicero dos Santos, Ça˘ glar Gu ˙lçehre, and Bing Xiang. 2016. Abstrac-tive text summarization using sequence-to-sequence RNNs and beyond. In Proceedings of the SIGNLL Conference on Computational Natural Language Learning , pages 280–290. Shashi Narayan, Shay B. Cohen, and Mirella Lapata. 2018. Don’t give me the details, just the summary! Topic-aware convolutional neural networks for ex-treme summarization. CoRR , abs/1808.08745. 15890 Alexander Nikitin, Mark de Jong, Bart van Merriën-boer, Marie-Francine Moens, and Ivan Titov. 2024. Kernel language entropy: Fine-grained uncertainty quantification for LLMs from semantic similarities. In Advances in Neural Information Processing Sys-tems , volume 37, pages 8901–8929. Jeremy Nixon, Michael W Dusenberry, Linchuan Zhang, Ghassen Jerfel, and Dustin Tran. 2019. Measuring calibration in deep learning. In CVPR workshops ,volume 2. Myle Ott, Sergey Edunov, David Grangier, and Michael Auli. 2018. Analyzing uncertainty in neural machine translation. In Proceedings of the International Con-ference on Machine Learning (ICML) , pages 3956– 3965. Mohammadreza Pourreza and Davood Rafiei. 2024. DIN-SQL: Decomposed in-context learning of text-to-SQL with self-correction. Advances in Neural Information Processing Systems , 36. Siva Reddy, Danqi Chen, and Christopher D Manning. 2019. CoQA: A conversational question answering challenge. Transactions of the Association for Com-putational Linguistics , 7:249–266. Nils Reimers and Iryna Gurevych. 2019. Sentence-bert: Sentence embeddings using siamese bert-networks. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing .Jie Ren, Jiaming Luo, Yao Zhao, Kundan Krishna, Mo-hammad Saleh, Balaji Lakshminarayanan, and Pe-ter J Liu. 2023. Out-of-distribution detection and selective generation for conditional language models. In Proceedings of the International Conference on Learning Representations (ICLR) .Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi, Jingyu Liu, Romain Sauvestre, Tal Remez, Jérémy Rapin, Artyom Kozhevnikov, Ivan Evtimov, Joanna Bitton, Manish Bhatt, Cristian Canton Ferrer, Aaron Grattafiori, Wenhan Xiong, Alexandre Défossez, Jade Copet, Faisal Azhar, Hugo Touvron, Louis Mar-tin, Nicolas Usunier, Thomas Scialom, and Gabriel Synnaeve. 2024. Code llama: Open foundation mod-els for code. arXiv: 2308.12950 [cs.CL] .Vaishnavi Shrivastava, Percy Liang, and Ananya Kumar. 2023. Llamas know what GPTs don’t show: Sur-rogate models for confidence estimation. preprint arXiv: 2311.08877 [cs.CL] .Xiu Tang, Sai Wu, Mingli Song, Shanshan Ying, Feifei Li, and Gang Chen. 2022. Preqr: Pre-training rep-resentation for sql understanding. In Proceedings of the 2022 International Conference on Management of Data , SIGMOD ’22, page 204–216. Hugo Touvron, Louis Martin, Kevin Stone, Peter Al-bert, Amjad Almahairi, Yasmine Babaei, Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. 2023. Llama 2: Open founda-tion and fine-tuned chat models. arXiv preprint arXiv:2307.09288 .Dennis Ulmer, Martin Gubri, Hwaran Lee, Sangdoo Yun, and Seong Oh. 2024. Calibrating large language models using their generations only. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,pages 15440–15459, Bangkok, Thailand. Association for Computational Linguistics. Artem Vazhentsev, Lyudmila Rvanova, Ivan Lazichny, Alexander Panchenko, Maxim Panov, Timothy Bald-win, and Artem Shelmanov. 2025. Token-level density-based uncertainty quantification methods for eliciting truthfulness of large language models. In 
+
+Proceedings of the Conference of the North Ameri-can Chapter of the Association for Computational Linguistics: Human Language Technologies , pages 2246–2262. Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le, Ed H Chi, Sharan Narang, Aakanksha Chowd-hery, and Denny Zhou. 2023. Self-consistency im-proves chain of thought reasoning in language mod-els. In Proceedings of the International Conference on Learning Representations (ICLR) .Quan Xiao, Debarun Bhattacharjya, Balaji Ganesan, Radu Marinescu, Katsiaryna Mirylenka, Nhan H. Pham, Michael Glass, and Junkyu Lee. 2025. The consistency hypothesis in uncertainty quantification for large language models. In Proceedings of the Forty-First Conference on Uncertainty in Artificial Intelligence , UAI ’25. JMLR.org. Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. 2024. Can LLMs express their uncertainty? An empirical evaluation of confidence elicitation in LLMs. In Proceedings of the International Conference on Learning Represen-tations (ICLR) .Duygu Nur Yaldiz, Yavuz Faruk Bakman, Baturalp Buyukates, Chenyang Tao, Anil Ramakrishna, Dim-itrios Dimitriadis, Jieyu Zhao, and Salman Aves-timehr. 2025. Do not design, learn: A trainable scor-ing function for uncertainty estimation in generative LLMs. In Findings of the Association for Computa-tional Linguistics: NAACL 2025 .Tao Yu, Rui Zhang, Kai Yang, Michihiro Yasunaga, Dongxu Wang, Zifan Li, James Ma, Irene Li, Qingn-ing Yao, Shanelle Roman, et al. 2018. Spider: A large-scale human-labeled dataset for complex and cross-domain semantic parsing and text-to-SQL task. In Proceedings of the Conference on Empirical Meth-ods in Natural Language Processing , pages 3911– 3921. Yuqi Zhu, Jia Li, Ge Li, YunFei Zhao, Zhi Jin, and Hong Mei. 2024. Hot or cold? Adaptive temperature sampling for code generation with large language models. In Proceedings of the AAAI Conference on Artificial Intelligence , volume 38, pages 437–445. 15891 A Experimental Details 
+
+Dataset Details 
+
+We provide additional information about the datasets considered for experiments. For QA and summarization tasks, we sub-select the first 1000 
+
+queries in the dev/validation splits for our experi-mental study: • Question Answering Task – CoQA (Reddy et al., 2019) is an open-book conversational QA dataset that measures the ability of machines to understand a text pas-sage and answer a series of interconnected questions that appear in a conversation. 
+
+– TriviaQA (Joshi et al., 2017) is a closed-book QA dataset that is more challenging than stan-dard QA benchmarks as the answers for a ques-tion may not be directly obtained by span pre-diction and the context is very long. 
+
+– Natural Questions (Kwiatkowski et al., 2019) is also a challenging closed-book QA that con-tains questions from real users and requires QA systems to read and comprehend an entire Wikipedia article that may or may not contain the answer to the question. • Summarization Task – XSum (Narayan et al., 2018) is a popular benchmark for abstractive summarization, fo-cusing on generating a single-sentence sum-mary for BBC news articles, essentially cap-turing their essence in one concise sentence. 
+
+– SamSum (Gliwa et al., 2019) is a collection of human-annotated, messenger-style conversa-tions designed for abstractive summarization research, featuring diverse styles and topics to mimic real-life dialogues. 
+
+– CNN Dailymail (Nallapati et al., 2016) is a dataset for text summarization built from hu-man generated abstractive summary bullets generated from news stories in CNN and Daily Mail websites. • Text-to-SQL Task – Spider (Yu et al., 2018) is a popular text-to-SQL benchmark covering 138 domains with 200 databases, such as academic, booking sys-tems, and geography-related databases. The dev set has 1034 queries. 
+
+– Spider-Realistic (Deng et al., 2021) is a more challenging version of the Spider dev set as it modifies the natural language queries in Spi-der in an attempt to reflect realistic scenarios where questions do not make explicit mention of column names. It includes 508 queries. 
+
+– BIRD (BIg Bench for LaRge-scale Database Grounded Text-to-SQL Evaluation) (Li et al., 2024) is a recent cross-domain benchmark of 95 databases covering over 37 professional domains. The dev set includes 1533 queries. 
+
+Model Details 
+
+• QA and Summarization Tasks : We generate responses using a LLaMA 3.3 70B instruct model (Touvron et al., 2023) and a Granite 3.1 8B instruct model (Mishra et al., 2024). • Text-to-SQL Tasks : We use a few-shot Codel-lama 34B instruct model (Rozière et al., 2024), which is a code-specialized version of Llama 2, trained with 500B tokens of code and code-related data, and a few-shot Granite 34B Code 
+
+instruct model (Mishra et al., 2024), trained on 3-4 trillion tokens sourced from 116 programming languages. 
+
+Prompt Templates 
+
+For QA datasets, we use the ‘prompt’ field from the datasets, similar to prior work (Lin et al., 2024b). Table 3 shows the prompt template used for sum-marization datasets. Table 4 shows prompt tem-plates/examples for our few-shot approach for SQL generation with the Codellama 34B model, as well as those for a baseline ( p-true ). These are illustra-tive and representative of prompts for other datasets for text-to-SQL. 
+
+Details about Select Methods 
+
+We provide some additional details about select baselines and proposed approaches below: • spec-ecc (Lin et al., 2024b): We apply a threshold of 0.9 to keep only the selected eigen vectors for the spectral clustering with eccentricity baseline. • p-true (Kadavath et al., 2022): We prompt the LLM used for generations to provide their belief about whether a generation is True or False. An illustration of the zero-shot prompt template is shown in Table 4. • clf-? : All classification approaches (including the baseline clf-gen ) use a random forest with a maximum depth of 4 in our experiments. 
+
+Computational Details 
+
+Our UQ experiments can be conducted on a stan-dalone CPU machine, but we use GPU machines (typically NVIDIA A100s with more than 40GB memory) for generating samples from the various 15892 Table 3: Prompt template for summarization. 
+
+Summary Generation (Zero-Shot) 
+
+[INST] 
+
+1. You are given an article or document. Your task is to summarize the input article in one sentence. 2. When generating your response, prioritize correctness, i.e., ensure that your response is correct given the context and user query, and that it is grounded in the context. 3. Furthermore, make sure that the response is supported by the given document or context. 
+
+[/INST] 
+
+Summarize the following document in one sentence:{} 
+
+> Table 4: Prompt templates for few-shot SQL generation with Codellama, as well as those for the p-true baseline.
+
+SQL Generation (Few-Shot) 
+
+[INST] 
+
+Your task is to generate a SQL query for the given question. 
+
+«SYS» 
+
+You are given the following database schema: {} The SQL query must include one or more of the tables and columns from this schema. If there is only one table, do not use an alias. For multiple tables, assign aliases such as t1, t2, and prefix each column reference with the table alias (e.g., t1.age, t2.phone). The SQL query should not contain more than one table unless required by the question. Aim for efficient queries. 
+
+«/SYS» 
+
+Few-Shot Examples: 
+
+Question: Show the ids and names of all documents. SQL query: SELECT document_id, document_name FROM Documents 
+
+Question: Show the number of documents. SQL query: SELECT count(*) FROM Documents 
+
+Question: Find the name and access counts of all documents, in alphabetical order of document name. SQL query: SELECT document_name, access_count FROM documents ORDER BY document_name 
+
+Question: Show all document ids and number of paragraphs in each document. Order by document id. SQL query: 
+
+[/INST] 
+
+p(True) (Zero-Shot) Instructions: 
+
+1. You are given an input question and a generated SQL query. Determine if the SQL query is correct with respect to the question. 2. Your output must be only True or False , with no extra formatting. 3. You are given the following database schema: {} 
+
+True or False? 
+
+Input: {} SQL query: {} Output: LLMs as these are large models. We also access models through APIs hosted as a service but this is optional and the experiments can be conducted on a single machine, either with GPUs or CPUs. 15893 Table 5: Comparing similarity metrics and aggregation approaches using generations from a few-shot Codellama 34B model on the BIRD dev set. We include 6 similarity metrics (across both SQL and token/text categories), 2 evaluation metrics (ACE and AUROC), and 5 UQ techniques – 2 baselines and 3 proposed methods of Bayesian aggregation with conditional Beta distributions, and aggregation by classification using logistic regression and random forests. Error bars are from max. and min. values over 5 runs, each with a random 50% train / 50% test split. 
+
+Eval. Metric ACE ↓ AUROC ↑
+
+spec-ecc arith-agg bayes-beta clf-lr clf-rf spec-ecc arith-agg bayes-beta clf-lr clf-rf 
+
+Makiyama 0.652 
+
+> ±0.010
+
+0.112 
+
+> ±0.006
+
+0.171 
+
+> ±0.066
+
+0.105 
+
+> ±0.007
+
+0.109 
+
+> ±0.007
+
+0.31 
+
+> ±0.02
+
+0.69 
+
+> ±0.02
+
+0.70 
+
+> ±0.02
+
+0.70 
+
+> ±0.02
+
+0.70 
+
+> ±0.02
+
+Output type 0.257 
+
+> ±0.003
+
+0.484 
+
+> ±0.005
+
+0.188 
+
+> ±0.009
+
+0.136 
+
+> ±0.005
+
+0.136 
+
+> ±0.005
+
+0.43 
+
+> ±0.00
+
+0.58 
+
+> ±0.00
+
+0.58 
+
+> ±0.00
+
+0.57 
+
+> ±0.02
+
+0.57 
+
+> ±0.02
+
+Jaccard 0.648 
+
+> ±0.010
+
+0.226 
+
+> ±0.005
+
+0.126 
+
+> ±0.006
+
+0.114 
+
+> ±0.008
+
+0.093 
+
+> ±0.008
+
+0.27 
+
+> ±0.03
+
+0.76 
+
+> ±0.01
+
+0.74 
+
+> ±0.01
+
+0.75 
+
+> ±0.02
+
+0.78 
+
+> ±0.02
+
+Rouge-1 0.460 
+
+> ±0.011
+
+0.388 
+
+> ±0.005
+
+0.137 
+
+> ±0.008
+
+0.097 
+
+> ±0.007
+
+0.090 
+
+> ±0.006
+
+0.31 
+
+> ±0.01
+
+0.73 
+
+> ±0.01
+
+0.77 
+
+> ±0.01
+
+0.77 
+
+> ±0.01
+
+0.77 
+
+> ±0.01
+
+Rouge-L 0.505 
+
+> ±0.010
+
+0.360 
+
+> ±0.006
+
+0.149 
+
+> ±0.011
+
+0.098 
+
+> ±0.007
+
+0.089 
+
+> ±0.008
+
+0.28 
+
+> ±0.01
+
+0.75 
+
+> ±0.01
+
+0.77 
+
+> ±0.01
+
+0.77 
+
+> ±0.02
+
+0.77 
+
+> ±0.02
+
+Sbert-cos 0.309 
+
+> ±0.008
+
+0.557 
+
+> ±0.006
+
+0.117 
+
+> ±0.006
+
+0.099 
+
+> ±0.009
+
+0.091 
+
+> ±0.007
+
+0.40 
+
+> ±0.01
+
+0.69 
+
+> ±0.01
+
+0.78 
+
+> ±0.01
+
+0.77 
+
+> ±0.01
+
+0.77 
+
+> ±0.01
+
+B Effect of Similarity Metric and Aggregation Technique on BIRD 
+
+We conduct a more in-depth investigation into con-fidence estimation using similarity-based aggrega-tion for the more complex text-to-SQL task. Specif-ically, we analyze the choice of similarity metric and similarity aggregation technique using gener-ations from a Codellama 34B model on the BIRD dataset. For this experiment, we generate 5 samples each over 6 temperatures ( {0.25 , 0.5, · · · , 1.5}), and evaluations are performed using all 6 samples across all queries. We randomly split the data into half for train/test sets, and repeat the experiment 5
+
+times to study variability of the results. We expand the set of similarity metrics to also include the following: • Embedding-based : We include the cosine simi-larity between sentence BERT (sbert) (Reimers and Gurevych, 2019) representations of the gen-erations as an embedding-based metric that com-pares semantic similarity. • SQL-specific : We also consider similarity met-rics specific to SQL queries, such as the binary metric of whether two generations belong to the same SQL output type among 3 categories (simple/join/nested) (Pourreza and Rafiei, 2024), as well as those that rely on parsing the SQL and comparing the contents of various clauses – Aligon (Aligon et al., 2014), Aouiche (Aouiche et al., 2006), and Makiyama (Makiyama et al., 2015). Makiyama is representative and has been shown to perform well among these on a query clustering task (Tang et al., 2022). We compare a small set of aggregation func-tions – 2 baselines and 3 proposed methods. For baselines, we include two spectral clustering ap-proaches for UQ that leverage a graph Laplacian matrix computed from pairwise similarities – one that uses eccentricity ( spec-ecc ) and another that uses degree (Lin et al., 2024b); as mentioned pre-viously, the latter is equivalent to simple aggrega-tion using arithmetic mean ( arith-agg ). For the proposed approaches, we include Bayesian aggre-gation ( bayes-beta ) and classification with logistic regression ( clf-lr ) as well as random forests ( clf-rf ). The rows in Table 5 correspond to 6 similarity metrics and the columns correspond to 5 UQ tech-niques with evaluations along 2 metrics – ACE and AUROC. Comparing similarity metrics, we observe that all token/text-based metrics (i.e. Jac-card, Rouge-1, Rouge-L, and Sbert-cos) generally perform well on ACE with a powerful aggregation method such as a random forest classifier. Rouge-L and sbert-cos are high performing metrics for this dataset. We also note that our proposed aggrega-tion methods are better for calibration metrics such as ACE rather than AUROC, as sometimes they only provide marginal improvements over averag-ing similarities with the arith-agg baseline. 15894
