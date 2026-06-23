@@ -1,19 +1,19 @@
 ---
 title: "Probabilities Are All You Need: A Probability-Only Approach to Uncertainty Estimation in Large Language Models"
-title_zh: 概率即一切：仅用概率估计大语言模型不确定性
+title_zh: 概率就够了：仅用概率估计大语言模型不确定性的方法
 authors: "Manh Nguyen, Sunil Gupta, Hung Le"
 date: 2026-03-17
 pdf: "https://ojs.aaai.org/index.php/AAAI/article/download/40531/44492"
 tags: ["query:luq"]
-score: 9.0
-evidence: 仅利用概率进行LLM不确定性估计
-tldr: 针对现有LLM不确定性估计方法需要多次采样或额外计算语义熵的问题，本文提出一种仅利用响应的top-K概率来近似预测熵的无训练方法。通过自适应机制确定K值并过滤低置信度概率，该方法在无需采样的情况下实现了高效的不确定性估计。实验表明其在幻觉检测任务上效果显著，为LLM可靠性评估提供了轻量级方案。
+score: 8.0
+evidence: 利用top-K概率高效估计LLM不确定性
+tldr: 该论文针对大语言模型幻觉问题，提出一种无需训练的不确定性估计方法，仅利用模型输出top-K概率近似预测熵，并通过自适应机制选择K以过滤低置信概率。在多个NLP任务上评估，该方法在计算效率与不确定性质量之间取得良好平衡，为LLM可信赖提供了轻量级工具。
 source: AAAI-2026-Accepted
 selection_source: conference_retrieval
-motivation: 现有LLM不确定性估计依赖多次采样或额外计算，效率低下。
-method: 基于top-K概率的预测熵近似，结合自适应K值选取与低置信度过滤。
-result: 在多个数据集上验证了方法的有效性，实现了高效且准确的不确定性估计。
-conclusion: 所提方法无需训练和采样，为LLM不确定性估计提供了实用方案。
+motivation: 现有不确定性估计需要多次采样或额外计算，效率低。
+method: 使用自适应top-K概率近似预测熵，无需训练和额外样本。
+result: 在多个基准上实现了与语义熵方法相当的准确性但更快。
+conclusion: 仅用概率即可有效估计LLM不确定性，方法简单高效，便于部署。
 ---
 
 ## Abstract

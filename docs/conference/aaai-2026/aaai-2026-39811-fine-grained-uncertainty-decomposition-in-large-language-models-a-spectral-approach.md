@@ -1,19 +1,19 @@
 ---
 title: "Fine-grained Uncertainty Decomposition in Large Language Models: A Spectral Approach"
-title_zh: 大语言模型精细不确定性分解：一种谱方法
+title_zh: 大语言模型中细粒度不确定性分解：一种谱方法
 authors: "Nassim Walha, Sebastian G. Gruber, Thomas Decker, Yinchong Yang, Alireza Javanmardi, Eyke Hüllermeier, Florian Buettner"
 date: 2026-03-17
 pdf: "https://ojs.aaai.org/index.php/AAAI/article/download/39811/43772"
 tags: ["query:luq"]
 score: 9.0
-evidence: 谱方法分解LLM不确定性为偶然与认知成分
-tldr: LLM的不确定性可靠度量至关重要，但现有方法难以区分偶然不确定性与认知不确定性。本文提出谱不确定性方法，利用量子信息论中的冯·诺依曼熵对总不确定性进行严格分解。该方法不仅在理论上提供了分离依据，并在多个LLM任务上展示了精细的不确定性量化能力，有助于提升模型可信度。
+evidence: 通过谱方法将LLM不确定性分解为偶然和认知不确定性
+tldr: 大型语言模型的不确定性来源多样，现有方法难以区分偶然不确定性（数据歧义）和认知不确定性（模型知识不足）。本文提出谱不确定性（Spectral Uncertainty），基于量子信息论中的冯·诺依曼熵，严格地将总不确定性分解为两类。实验表明该分解有助于针对性缓解不确定性来源，提升LLM在关键任务中的可信度。
 source: AAAI-2026-Accepted
 selection_source: conference_retrieval
-motivation: 需要区分LLM预测中的偶然与认知不确定性以分别处理。
-method: 利用冯·诺依曼熵从量子信息论角度进行不确定性分解。
-result: 在多种LLM任务上验证了分解的有效性和精度。
-conclusion: 提供了不确定性分解的理论框架，有助于理解模型局限性。
+motivation: 现有LLM不确定性量化方法无法细粒度地区分偶然和认知不确定性。
+method: 利用冯·诺依曼熵从量子信息论出发，通过谱分解分离不确定性成分。
+result: 在多个LLM任务上实现了有效的不确定性分解，并验证了其有助于改进模型校准。
+conclusion: 谱不确定性为理解和管理LLM不确定性提供了理论基础和实用方法。
 ---
 
 ## Abstract

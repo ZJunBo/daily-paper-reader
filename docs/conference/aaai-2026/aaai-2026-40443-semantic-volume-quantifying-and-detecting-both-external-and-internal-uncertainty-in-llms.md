@@ -1,19 +1,19 @@
 ---
 title: "Semantic Volume: Quantifying and Detecting Both External and Internal Uncertainty in LLMs"
-title_zh: 语义体积：量化与检测LLM中的外部和内部不确定性
+title_zh: 语义体积：量化并检测LLM中外部和内部不确定性
 authors: "Xiaomin Li, Zhou Yu, Ziji Zhang, Yingying Zhuang, Swair Shah, Narayanan Sadagopan, Anurag Beniwal"
 date: 2026-03-17
 pdf: "https://ojs.aaai.org/index.php/AAAI/article/download/40443/44404"
 tags: ["query:luq"]
 score: 9.0
-evidence: 量化LLM的外部与内部不确定性
-tldr: 现有方法主要关注LLM内部不确定性，忽略了外部不确定性（模糊查询导致）。本文提出语义体积（Semantic Volume）这一数学度量，同时量化两类不确定性。通过扰动输入并测量语义空间体积变化，该方法能更全面地检测幻觉。实验表明，语义体积在多个基准上优于现有不确定性估计方法，为LLM可靠部署提供了新工具。
+evidence: 通过语义体积量化LLM的内外部不确定性
+tldr: 大型语言模型容易产生幻觉，现有检测方法主要关注内部不确定性而忽略外部不确定性（如查询歧义）。本文提出语义体积（Semantic Volume），一种新的数学度量，能同时量化LLM的内部和外部不确定性。通过对输入进行扰动，该方法在幻觉检测任务中取得更优性能，为提升LLM可靠性提供了更全面的不确定性量化工具。
 source: AAAI-2026-Accepted
 selection_source: conference_retrieval
-motivation: 现有不确定性量化方法只关注内部知识冲突，忽视了输入模糊导致的外部不确定性。
-method: 提出Semantic Volume度量，通过对输入进行扰动并测量语义空间的体积变化来量化不确定性。
-result: 在多个基准上，Semantic Volume有效检测幻觉，优于现有方法。
-conclusion: 该工作为LLM不确定性提供了统一框架，改善了可靠性。
+motivation: 现有LLM幻觉检测方法只关注内部不确定性，忽略了外部不确定性（查询歧义）。
+method: 提出语义体积度量，通过扰动输入并测量语义空间中的变化来量化内部和外部不确定性。
+result: 在多个LLM幻觉检测基准上优于现有方法，能有效区分不同类型的不确定性。
+conclusion: 语义体积为LLM的不确定性量化提供了更全面的框架，有助于提升模型可靠性。
 ---
 
 ## Abstract

@@ -1,19 +1,19 @@
 ---
 title: Sampling-Free Uncertainty Quantification via Hidden State Dynamics in Language Models
-title_zh: 基于隐藏层动态的无采样不确定性量化
+title_zh: 通过隐藏状态动力学的无抽样不确定性量化
 authors: "Yixin Bu, Guanyun Zou, Renzhi Wang, Runze Xia, Cunjun Wang, Hongliang Dai, Xiaoqing Ma, Piji Li"
 date: 2026-03-17
 pdf: "https://ojs.aaai.org/index.php/AAAI/article/download/40259/44220"
 tags: ["query:luq"]
-score: 9.0
-evidence: 基于隐藏层动态的无采样不确定性量化
-tldr: 当前LLM不确定性量化方法因依赖大量采样或外部模型而存在计算瓶颈。本文提出一种创新的无采样不确定性量化框架，通过对隐藏层表示进行层次化内部语义动态建模，实现实时不确定性估计。该方法无需额外采样或模型调用，在保持准确性的同时大幅降低计算开销，为LLM可靠性评估提供了高效新思路。
+score: 8.0
+evidence: 利用隐藏状态动力学对LLM进行无抽样不确定性量化
+tldr: 当前LLM不确定性量化方法依赖大量抽样，计算效率低。本文提出一种无抽样框架，通过分析隐藏层表示的层级内部语义动态来实时量化不确定性。该方法避免了外部模型调用和多次抽样，在保持竞争性能的同时大幅降低计算成本，为LLM的部署应用提供实用的不确定性度量。
 source: AAAI-2026-Accepted
 selection_source: conference_retrieval
-motivation: 现有不确定性量化方法因依赖大量采样或外部模型调用而效率低下。
-method: 分析隐藏层内部语义动态，建模层次化表示以直接量化不确定性。
-result: 在多种任务上实现实时不确定性估计，兼顾准确性与效率。
-conclusion: 为LLM不确定性量化提供了一种高效、无采样的新范式。
+motivation: 现有LLM不确定性量化方法因依赖抽样而计算效率低，难以实时应用。
+method: 基于隐藏层表示分析，建模层级语义动态，实现无抽样不确定性量化。
+result: 在多个文本任务上，该方法在计算效率上显著优于基于抽样的方法，同时保持了可靠的校准性能。
+conclusion: 无抽样不确定性量化为LLM的实时可靠性评估提供了高效方案。
 ---
 
 ## Abstract

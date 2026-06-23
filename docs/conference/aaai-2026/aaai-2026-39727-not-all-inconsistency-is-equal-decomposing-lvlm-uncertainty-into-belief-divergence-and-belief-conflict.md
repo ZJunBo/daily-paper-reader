@@ -1,19 +1,19 @@
 ---
 title: "Not All Inconsistency Is Equal: Decomposing LVLM Uncertainty into Belief Divergence and Belief Conflict"
-title_zh: 并非所有不一致都相等：将LVLM不确定性分解为信念分歧与信念冲突
+title_zh: 并非所有不一致都一样：将LVLM不确定性分解为信念分歧和信念冲突
 authors: "Jie Shi, Xiaodong Yue, Wei Liu, Yufei Chen, Feifan Dong"
 date: 2026-03-17
 pdf: "https://ojs.aaai.org/index.php/AAAI/article/download/39727/43688"
 tags: ["query:luq"]
-score: 8.0
-evidence: 使用Dempster-Shafer理论分解不确定性，类似于证据语义熵方法
-tldr: 现有离散语义熵（DSE）无法区分良性语义歧义与严重信念冲突。本文基于Dempster-Shafer证据理论，将不确定性分解为信念分歧（度量歧义）和信念冲突（度量矛盾）。该方法在LVLM幻觉检测中显著优于DSE，提供了更细粒度的不确定性解释。
+score: 7.0
+evidence: 将LVLM不确定性分解为信念分歧和冲突
+tldr: 该论文针对视觉语言模型不确定性量化不准确的问题，提出基于Dempster-Shafer理论的分解框架。将不确定性区分为信念分歧（良性语义模糊）和信念冲突（严重矛盾），分别量化。实验表明新度量能更好检测幻觉，特别是区分不同性质的不一致，为多模态模型的可靠估计提供了细粒度工具。
 source: AAAI-2026-Accepted
 selection_source: conference_retrieval
-motivation: 现有离散语义熵在区分歧义与冲突时失效，导致幻觉检测不可靠。
-method: 基于Dempster-Shafer证据理论，将不确定性分解为信念分歧和信念冲突两个互补指标。
-result: 在LVLM幻觉检测任务上，方法优于离散语义熵，更准确区分歧义与冲突。
-conclusion: 细粒度不确定性分解提升了模型可靠性。
+motivation: 现有语义熵方法无法区分良性模糊和矛盾。
+method: 基于Dempster-Shafer理论分解不确定性为信念分歧和信念冲突。
+result: 在LVLM幻觉检测任务上优于离散语义熵。
+conclusion: 分解不确定性有助于更准确识别幻觉，提升多模态模型可靠性。
 ---
 
 ## Abstract
