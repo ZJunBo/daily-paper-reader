@@ -1,0 +1,1683 @@
+Title: 2025.emnlp-main.1671.pdf
+
+URL Source: https://aclanthology.org/2025.emnlp-main.1671.pdf
+
+Published Time: Sat, 03 Jan 2026 16:57:38 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+> Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing , pages 32912–32929 November 4-9, 2025 ©2025 Association for Computational Linguistics
+
+## SUE: Sparsity-based Uncertainty Estimation via Sparse Dictionary Learning 
+
+Tamás Ficsor and Gábor Berend 
+
+University of Szeged, Hungary 
+
+{ficsort,berendg}@inf.u-szeged.hu 
+
+Abstract 
+
+The growing deployment of deep learning mod-els in real-world applications necessitates not only high predictive accuracy, but also mech-anism to identify unreliable predictions, espe-cially in high-stakes scenarios where decision risk must be minimized. Existing methods esti-mate uncertainty by leveraging predictive confi-dence (e.g., Softmax Response), structural char-acteristics of representation space (e.g., Ma-halanobis distance), or stochastic variation in model outputs (e.g., Bayesian inference tech-niques such as Monte Carlo Dropout). In this work, we propose a novel uncertainty estima-tion (UE) framework based on sparse dictionary learning by identifying dictionary atoms asso-ciated with misclassified samples. We lever-age pointwise mutual information (PMI) to quantify the association between sparse fea-tures and predictive failure. Our method – Sparsity-based Uncertainty Estimation (SUE) – is computationally efficient, offers interpretabil-ity via atom-level analysis of the dictionary, has no assumption about the class distribu-tion (unlike Mahalanobis distance). We evalu-ated SUE on several NLU benchmarks (GLUE and ANLI tasks) and sentiment analysis bench-marks (Twitter, ParaDetox, and Jigsaw). In general, SUE outperforms or matches the per-formance of other methods. SUE performs par-ticularly well when there is considerable uncer-tainty in the model, i.e., when the model lacks high precision. 
+
+1 Introduction 
+
+The application of language models (LMs) in real-world applications is growing rapidly across many domains, including but not limited to health-care (Razzak et al., 2018), finance (Akoglu et al., 2024), law (Siino et al., 2025), and education (Xiao et al., 2023). Although these models achieve strong performance on various NLP tasks, they are in-herently prone to errors (Nguyen and O’Connor, 2015). These errors can be caused by several fac-tors, such as biased or noisy training data (Mukhoti et al., 2023), ambiguity in the task (such as opin-ions or sentiments), or limitations in the model’s training process (Geiping et al., 2022). A clear example of this is sentiment analysis, where the subjective nature of language can intro-duce high levels of uncertainty. To address this, it is crucial to identify uncertain instances and handle them differently, such as flagging them for human review, rather than treating all predictions as equally reliable (Geifman and El-Yaniv, 2017; Roberts, 2019). Further examples of applications where UE plays an important role include clinical decision support, where incorrect predictions can harm pa-tients; legal document analysis, where misinterpre-tations can lead to legal or compliance risks; con-tent moderation, where errors can suppress valid speech or overlook harmful content; automated customer service, where wrong answers may cause user frustration or financial mistakes; and educa-tional feedback systems, where misleading feed-back can negatively impact student learning. In such scenarios, selective classification (Geif-man and El-Yaniv, 2017) can be applied, which allows models to refrain from making predictions when their confidence (or certainty) in a particular instance is insufficient. The option to refrain from predicting can consequently reduce the ratio of mis-classified instances. This is typically achieved by associating a confidence (or uncertainty) score with each prediction and introducing a user-defined risk threshold that determines the subset of inputs for which the model’s decisions are considered reli-able. By doing so, the system effectively balances coverage – the proportion of samples on which predictions are made – with the overall decision risk. Thus, we can defer the high-risk samples to an expert or inform the user about potential conse-
+
+32912 Coverage (%)                     
+
+> Risk (%)
+> Threshold
+> Predict
+> Low Uncertainty
+> Abstain
+> High Uncertainty
+> Input Technical Billing Spam Uncertainty I was charged twice and now I can’t log in. 48.4% 51.2% 0.4% High I am unable to log in to my account. 92.5% 5.7% 1.8% Low I cannot enter. 47.5% 0.7% 51.8% High Do you want to lose weight? Download this app now! 1.2% 0.1% 98.7% Low
+
+Figure 1: An example of selective classification where the task is to identify and categorize user issues. Selective classification enables a model to assess uncertainty of each sample and abstain from predictions it deems unreliable, allowing those cases to be handled by human reviewers. 
+
+quences. We demonstrate such a scenario within the context of selective classification in Figure 1, where the task is to identify and categorize user issues. Several classical machine learning models, such as Gaussian processes and Bayesian models, in-herently provide uncertainty estimates as part of their framework (Liu et al., 2020). In contrast, deep learning models lack this intrinsic capability, ne-cessitating the development of auxiliary metrics to quantify predictive uncertainty. One of the simplest and most widely adopted method is the Softmax Re-sponse (SR; Geifman and El-Yaniv (2017)), which derives confidence scores directly from the output probabilities of the softmax layer. However, it has been well documented that soft-max probabilities are often poorly calibrated and tend to be overconfident (Guo et al., 2017). To address this limitation, alternative approaches have been proposed, such as leveraging the Mahalanobis Distance (MD; Lee et al. (2018a)) computed over the hidden representations of the network to pro-vide an uncertainty estimate. Recently, several other methods based on Bayesian inference (BI; Shen et al. (2021)) have also been introduced, and further methods that rely on auxiliary mod-els (Mukhoti et al., 2023) to obtain the desired estimates. Nevertheless, each of the aforementioned meth-ods presents specific limitations: SR tends to pro-duce overconfident predictions; MD relies on the assumption of a predefined mean and covariance structure for each class; and BI methods require considerable computational overhead, which may be impractical for large-scale deep models. In this work, we propose a novel framework for uncertainty estimation (UE), based on sparse dictio-nary learning. Our method imposes no assumptions regarding the spatial distribution of class-specific representations (such as mean or variance) and of-fers good scalability. Furthermore, the risk of over-estimation can be mitigated through the application of stronger regularization or by reducing the num-ber of dictionary atoms used during factorization. Our code is available on our GitHub repository 1.
+
+2 Related Work 
+
+Uncertainty estimates in deep neural networks can be derived from the variance in their predictive re-sponses. A natural way to capture this variability is through model ensembles, where each model or head provides an independent prediction for the same input sample (Lakshminarayanan et al., 2017). While ensemble methods are known for their uncer-tainty estimation capabilities, they introduce signif-icant computational overhead due to the need for training and storing multiple models. An alternative is to employ Bayesian infer-ence techniques within a single model. A widely adopted method in this context is Monte Carlo Dropout (MC), where stochasticity is introduced during inference by enabling dropout within lay-ers at evaluation time. By performing T stochas-tic forward passes on the same input, one can approximate the posterior predictive distribution and compute uncertainty estimates from the ag-gregated outputs. Common aggregation metrics include sampled maximum probability, predic-tive variance (Gal et al., 2017; Smith and Gal, 2018), and Bayesian Active Learning by Disagree-ment (Houlsby et al., 2011). Despite its practical appeal, MC Dropout remains computationally de-manding at inference time, as it requires multiple forward passes per instance to obtain reliable un-certainty estimates. A less computationally demanding alternative to ensemble or Bayesian approaches is to derive uncertainty metrics from already computed inter-nal representations or to train a lightweight auxil-
+
+> 1https://github.com/SzegedAI/sue
+
+32913 iary model on top of the model output. To extract meaningful information from the internal model states, one can utilize the Mahalanobis distance as a proxy for uncertainty, as it effectively cap-tures the structure of hidden representations. This method has been successfully applied in various recent works (Lee et al., 2018b; Podolskiy et al., 2021; Vazhentsev et al., 2022, 2023), demonstrat-ing its ability to identify out-of-distribution or low-confidence samples. Alternatively, auxiliary models trained on the hidden states or prediction outputs offer a flexible and generalizable means of modeling uncertainty. These models can be calibrated to estimate uncer-tainty (Kendall and Gal, 2017; Kail et al., 2022). 
+
+3 Background 
+
+In this section, we provide a detailed overview of the UE methods evaluated in this study. Given our focus on sequence classification tasks, all meth-ods operate exclusively on the representation of the [CLS] token or the corresponding output logits produced by the model. 
+
+3.1 Softmax Response (SR) 
+
+Softmax Response (Geifman and El-Yaniv, 2017) relies on the class probabilities generated by the softmax layer in the final classification head. It serves as a simple, yet effective UE baseline. The underlying intuition is that lower maximum soft-max probabilities correspond to higher uncertainty in the model prediction. The uncertainty estimate is formally defined as 
+
+USR = 1 − max  
+
+> c∈C
+
+p (y = c | x) ,
+
+where C denotes the set of all possible classes and 
+
+p (y = c | x) represents the softmax probability as-signed to class c given input x.
+
+3.2 Shannon Entropy (SE) 
+
+Shannon Entropy provides a natural and well-established measure of uncertainty, reflecting the amount of unpredictability in a probability distri-bution. In the context of classification, predictive entropy quantifies the spread of the model’s output distribution over the class labels. A high-entropy output indicates greater uncertainty, whereas low entropy reflects confident predictions concentrated on a single class (Malinin and Gales, 2018). SE is formally defined as 
+
+USE = − ∑
+
+> c∈C
+
+p (y = c | x) log p (y = c | x)
+
+3.3 Mahalanobis Distance (MD) 
+
+Mahalanobis distance (MD) is a specialized met-ric for measuring the distance between points in Euclidean space. In contrast to the Euclidean dis-tance, MD considers the structure of the feature space. Hence, it is a suitable metric for UE that has been used in several studies already (Lee et al., 2018b; Podolskiy et al., 2021; Vazhentsev et al., 2022, 2023). MD can be formalized as 
+
+UMD = min  
+
+> c∈C
+
+(h − μc) Σ −1 (h − μc) ,
+
+where h is the hidden state corresponding to the 
+
+[CLS] token of the input sequence, μc is the mean of all vectors associated with class c, and Σ−1 is the inverse of the covariance matrix of the train set. Mahalanobis++ (MD++; Müller and Hein, 2025) is such a recent extension of the vanilla MD, which applies unit normalization to the input vectors be-fore calculating the Mahalanobis distance. 
+
+3.4 Monte Carlo Dropout (MC) 
+
+In recent years, approaches based on Bayesian In-ference become widely used for uncertainty esti-mation. During MC, we perform inference with dropout enabled for T steps. Similar to Vazhentsev et al. (2022), we are going to conduct experiments with the following estimation methods: 
+
+Sampled Maximum Probability (SMP): 
+
+USMP = 1 − max 
+
+> c∈C
+
+1
+
+T
+
+> T
+
+∑
+
+> t=1
+
+p (y = c | xt) ,
+
+where p (y = c | xt) denotes the probability of class c given input x at stochastic step t.
+
+Probability Variance (PV; Gal et al. (2017); Smith and Gal (2018)): 
+
+UPV = 1
+
+C
+
+> C
+
+∑
+
+> c=1
+
+(
+
+1
+
+T
+
+> T
+
+∑
+
+> t=1
+
+(p (y = c | xt) − pc)
+
+)
+
+where pc = 1
+
+> T
+
+∑ 
+
+> t
+
+p (y = c | xt).32914 Bayesian Active Learning by Disagreement (BALD; Houlsby et al., 2011): 
+
+UBALD = −
+
+> C
+
+∑
+
+> c=1
+
+pc log pc
+
++ 1
+
+T
+
+∑
+
+> c,t
+
+p (y = c | xt) log p (y = c | xt) .
+
+4 Sparsity-based Uncertainty Estimation (SUE) 
+
+In this section, we introduce our approach for ob-taining UE scores. SUE consists of the following key steps: (1) constructing sparse representations, (2) measuring co-occurrence with pointwise mu-tual information, and (3) quantifying uncertainty estimate. We summarize the key steps of SUE in Figure 2. SUE is inspired by (Berend, 2020), which demonstrated the utility of relying on PMI statistics of sparse coding-derived features for the task of word sense disambiguation. 
+
+4.1 Determining Sparse Representation 
+
+A key component of our approach is the use of dictionary learning to represent hidden states in a compact and interpretable manner. Instead of work-ing directly with the dense [CLS] embeddings, we decompose them into a sparse linear combination of learned dictionary atoms. Intuitively, the dictio-nary atoms are fundamental building blocks that capture the most salient and recurring structures in the representation space. Formally, given the input matrix X ∈ RN ×d,where each row corresponds to the [CLS] token embedding of a sample, we learn the dictionary matrix D ∈ RK×d and the sparse coefficients 
+
+α ∈ RN ×K by solving the following optimization problem (Mairal et al., 2009): 
+
+min 
+
+> α,D
+
+12 ∥X − αD ∥2 
+
+> F
+
++ λ∥α∥1, (1) where K is the number of dictionary atoms, and 
+
+λ is the regularization coefficient of the sparsity-inducing regularization term ∥α∥1. Due to the reg-ularization, only a small fraction of the values in 
+
+α is positive, making the sparse representations more interpretable. To improve stability, we ap-ply ℓ1-normalization to each row of X prior to factorization, following a common practice during dictionary learning. We train D on a validation split disjoint from the model’s training data . At test time, the dictionary D remains fixed, and we infer only the coefficients αtest . This separation yields dictionary atoms in D with improved ability to generalize. An important design choice is which samples to use for training the dictionary matrix. Using all inputs might introduce noise from ambiguous samples, while class-specific dictionaries may un-derrepresent minority classes. To balance these issues, we only use the correctly classified sam-ples for constructing D, encouraging the dictionary atoms to reflect reliable patterns. We only rely on the set of filtered samples during dictionary learn-ing, and we rely on all samples – regardless of the prediction’s correctness – once the dictionary is fixed. 
+
+4.2 Identifying Dictionary Atoms Correlated with Prediction Uncertainty 
+
+The central idea of our method is to link sparse representations with the reliability of model predic-tions. Specifically, we aim to identify dictionary atoms that frequently co-occur with misclassified instances. These “uncertain atoms” serve as indica-tors of prediction failures, and by quantifying their contribution we can derive an uncertainty score. We measure this association using Pointwise Mutual Information (PMI) , which captures how strongly the activation of a given atom correlates with a correct or incorrect classification. Intuitively, PMI highlights atoms that appear disproportion-ately often in failures compared to what would be expected by chance. Formally, we construct a co-occurrence ma-trix C ∈ RK×2 between the activation of each dictionary atom and the binary correctness label 
+
+L ∈ { 0, 1}N (with 0 and 1 denoting incorrect and correct classification, respectively): 
+
+Ck,l =
+
+> N
+
+∑
+
+> n=1
+
+I[α(n,k )̸ = 0 ∧ L(n) = l], (2) where I[·] is the indicator function, α(n,k ) denotes the coefficient of the dictionary atom k in the sparse decomposition for sample n, and L(n) indicates the correctness of the prediction for sample n. From 
+
+C, we calculate the maximum likelihood estimates of the joint probability P (k, l ) and the marginals 
+
+P (k) and P (l). The PMI between the coefficient for the dictionary atom k being non-zero and the 32915 Input Xdev 
+
+Filter 
+
+Input Xtest 
+
+Train D via eq. (1) Obtain α
+
+αdev 
+
+αtest 
+
+Co-occurrence matrix C via eq. (2) 
+
+PMI matrix Φ via eq. (3) 
+
+USUE = −(αtest · Φ(: ,1) )USUE = −(αtest · Φ(: ,1) )
+
+Figure 2: An overview of our approach. X denotes the collection of [CLS] tokens, α and D refers to the matrix of sparse representations and the dictionary matrix, respectively. The matrix C includes the co-occurrence statistics between the active (non-zero) elements from α and the correctness of the model predictions. Φ denotes the Pointwise Mutual Information (PMI) matrix, and USUE is the final uncertainty estimation metric. In the figure, Filter refers to a special operation that selects from X only those samples that were correctly classified by the model. 
+
+correctness label l is then defined as: 
+
+Φk,l = log P (k, l )
+
+P (k)P (l) . (3) To estimate the uncertainty of a test instance i,we aggregate the PMI scores of its active atoms using the corresponding sparse representation α(i)
+
+> test
+
+:
+
+U (i) 
+
+> SUE
+
+= −(α(i) 
+
+> test
+
+· Φ(: ,1) 
+
+), (4) where Φ(: ,1) denotes the PMI values associated with correctly classified samples. The negative sign ensures that lower scores correspond to higher classification confidence, or alternatively, higher values of (4) indicate higher prediction uncertainty. This formulation yields an interpretable uncer-tainty estimate: the contribution of each dictionary atom to USUE can be directly inspected, allowing us to trace uncertainty back to specific building blocks of the representation space. 
+
+5 Experimental Setup 
+
+Models: We evaluated each method using fine-tuned BERT-Base and Large (Devlin et al., 2019), and RoBERTa-Base (Liu et al., 2019) models across a range of natural language understanding and sentiment classification tasks. We link the fine-tuned model checkpoints on our Github repository 1
+
+alongside with our source code. The classification performance of these checkpoints is presented in Table 1. While ANLI may look weak in terms of accuracy, it is important to remember that it was intentionally designed to be challenging. All of the checkpoints perform above the majority and random baseline of 0.33 for each task. However, these results are not directly comparable to the of-ficial metrics, since we are using a reduced set of data points, a detail we are going to discuss in the following paragraphs. We provide the fine-tuning hyperparameters in Appendix A. BERT-Base BERT-Large RoBERTa-Base ParaDetox 0.97( ±0.00) 0.97( ±0.00) 0.98( ±0.00)                
+
+> Twitter 0.90( ±0.00) 0.88( ±0.05) 0.90( ±0.00)
+> Jigsaw 0.93( ±0.00) 0.92( ±0.01) 0.92( ±0.01)
+> ANLI-R1 0.39( ±0.01) 0.39( ±0.01) 0.37( ±0.04)
+> ANLI-R2 0.40( ±0.01) 0.36( ±0.02) 0.36( ±0.03)
+> ANLI-R3 0.38( ±0.02) 0.38( ±0.02) 0.35( ±0.02)
+
+Table 1: The performance of models on the test split. 
+
+Datasets: We evaluated our UE approaches on three datasets: ParaDetox (Logacheva et al., 2022), Twitter Sentiment (Davidson et al., 2017), and the Jigsaw Toxic Comment Classification Challenge dataset (cjadams et al., 2017), all binarized for con-sistency, following (Vazhentsev et al., 2023). To further assess our method on harder tasks, we also include experiments on Adversarial NLI (ANLI; Nie et al. 2020; Williams et al. 2022). Ad-ditionally, we conducted experiments using BERT-Large using the following datasets from the GLUE benchmark (Wang et al., 2018): the Corpus of Linguistic Acceptability (CoLA; Warstadt et al. 2019), the Microsoft Research Paraphrase Cor-pus (MRPC; Dolan and Brockett 2005), the Ques-tion Natural Language Inference (QNLI; Rajpurkar et al. 2016), the Stanford Sentiment Treebank (SST-2; Socher et al. 2013), and the Quora Question Pairs (QQP; Iyer et al. 2017) dataset. We provide further information on the datasets in Appendix A. 
+
+Metrics: To evaluate the performance of differ-ent UE methods, we adopt the Excess Area Un-der the Risk-Coverage Curve (eAU-RCC; Geif-man et al., 2019). eAU-RCC is based on the Risk-Coverage Curve (RCC; El-Yaniv and Wiener, 2010), which is meant to assess the quality of a selective classifier, where the model is allowed to abstain from predictions considered as uncertain. 32916 RCC measures the extent to which the risk ac-cumulates as more samples – ranked by decreas-ing confidence – are included in the prediction set. eAU-RCC extends RRC by quantifying the addi-tional risk that incurs due to suboptimal uncertainty ranking compared to an oracle eAU-RC =
+
+∫ 10
+
+(R(c) − R∗(c)) dc, 
+
+where R(c) is the empirical risk at coverage level 
+
+c ∈ [0 , 1] , and R∗(c) is the oracle (optimal) risk at coverage level c. Lower eAU-RCC values indicate better uncertainty estimation, as they reflect lower excess risk across different coverage levels. While some tasks are typically evaluated using specialized metrics (e.g., Matthew’s Correlation Coefficient for CoLA), we report accuracy across all datasets to maintain consistency with our un-certainty estimation framework. This is because the empirical risk metric used in Risk-Coverage Curves is based on the zero-one loss. 
+
+Hyperparameters: We selected the final hyper-parameters based on a validation set performance specific to each task. As for the MC Dropout-related hyperparameters, we chose T ∈ { 10 , 25 , 50 } stochastic steps. Fol-lowing the findings of Shelmanov et al. (2021), we enabled dropout in all layers of our transformer model during inference time. Related to the dictionary learning component of SUE, we experimented with the regularization coefficient λ ∈ { 0.01 , 0.02 , 0.04 , 0.06 , 0.08 , 0.1}
+
+and the number of dictionary atoms K ∈{256 , 512 , 768 }. Additionally, for non-GLUE tasks, we selected 8,000 samples as a calibration set that we further split into two disjoint parts with a split ratio of sr ∈ { 0.2, 0.4, 0.6, 0.8}. For a cer-tain split ratio, we selected the given fraction of calibration set samples for performing dictionary learning, and used the remaining samples of the calibration set for calculating the co-occurrence matrix and the PMI statistics. 
+
+6 Results 
+
+6.1 Analyzing the Effects of Hyperparameters 
+
+We next analyze the effect of our hyperparameters, that is, the fraction of calibration set used for dictio-nary learning, the choice of regularization strength 
+
+λ, and the number of dictionary atoms K.0.01 0.02 0.04 0.06 0.08 0.1                                                                            
+
+> 256 512 768
+> K
+> 33.20 32.87 31.79 31.00 30.58 29.94
+> 32.30 31.84 30.76 30.31 29.93 30.14
+> 31.66 30.78 29.97 29.69 29.74 29.19
+> Calibration Set Split Ratio = 0.2
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256 512 768
+> K
+> 33.56 32.63 31.31 31.22 30.54 30.41
+> 33.10 32.00 30.85 29.83 29.41 29.41
+> 32.02 31.46 30.50 29.31 29.64 29.51
+> Calibration Set Split Ratio = 0.4
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256 512 768
+> K
+> 33.47 32.67 31.30 30.64 30.48 30.48
+> 32.71 32.00 30.71 29.79 29.59 29.59
+> 32.75 31.48 30.72 29.93 29.46 29.82
+> Calibration Set Split Ratio = 0.6
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256 512 768
+> K
+> 33.45 32.47 31.41 30.88 30.31 30.28
+> 32.55 31.94 30.63 29.77 29.54 30.22
+> 32.13 31.57 30.45 29.59 30.03 29.36
+> Calibration Set Split Ratio = 0.8
+> ANLI-R1
+
+Figure 3: The effect of the percentage of samples used from the calibration set during dictionary learning on BERT-Base model with respect to the regularization coefficient ( λ) and the number of dictionary atoms ( K). 
+
+First, we illustrate the joint effect of choosing our hyperparameters in Figure 3, evaluated on ANLI-R1 with fine-tuned BERT-Base models. While the proportion of calibration set used for dictionary learning did not influence the eAU-RCC scores substantially, the choice of λ and K had a more pronounced effect. To better understand the joint effects of λ and 
+
+K, we provide further results for their different combinations in Figure 4, where we fixed the frac-tion of calibration set samples used for dictionary learning to 20%, and allocated the remaining 80% of the calibration set for calculating the matrix of PMI values in Φ. We observe that on simpler tasks (ParaDetox, Twitter, Jigsaw), the effect of regular-ization differs compared to harder tasks (ANLI). In the case of simpler tasks, recurring atoms may overfit to the number of samples – that is, fewer atoms are sufficient – while for harder tasks, we can extract more unique atoms. 32917 ParaDetox Twitter Jigsaw ANLI-R1 ANLI-R2 ANLI-R3 BERT-Base SE 0.37( ±0.04) 1.84( ±0.15) 0.65( ±0.02) 37 .06( ±1.28) 39 .85( ±1.10) 36 .88( ±0.71) 
+
+SR 0.37( ±0.04) 1.85( ±0.15) 0.65( ±0.02) 37 .00( ±1.32) 39 .98( ±1.03) 37 .06( ±0.84) 
+
+MD 0.52( ±0.11) 4.00( ±0.18) 5.91( ±4.24) 46 .62( ±3.24) 43 .68( ±1.23) 44 .64( ±1.92) 
+
+MD++ 0.54( ±0.08) 3.88( ±0.16) 4.87( ±3.05) 46 .51( ±2.79) 43 .79( ±1.24) 43 .85( ±1.17) 
+
+MC-SMP 0.30( ±0.06) 1.73 (±0.12 ) 0.55( ±0.02) 36 .70( ±1.57) 39 .41( ±1.10) 36 .91( ±0.61) 
+
+MC-PV 0.27 (±0.04 ) 1.88( ±0.09) 0.58( ±0.03) 38 .52( ±1.40) 40 .11( ±0.97) 38 .88( ±0.91) 
+
+MC-BALD 0.29( ±0.04) 2.06( ±0.06) 0.67( ±0.04) 38 .91( ±1.38) 40 .39( ±1.14) 39 .51( ±0.93) 
+
+SUE 0.46( ±0.14) 1.95( ±0.23) 0.40 (±0.05 ) 29 .55 (±2.11 ) 31 .65 (±0.96 ) 32 .76 (±1.13 )
+
+BERT-Large SE 0.45( ±0.24) 2.18( ±0.89) 0.67( ±0.05) 38 .81( ±1.98) 41 .70( ±2.18) 39 .19( ±1.89) 
+
+SR 0.45( ±0.24) 2.17 (±0.90 ) 0.67( ±0.05) 38 .72( ±1.92) 41 .73( ±2.40) 39 .24( ±2.10) 
+
+MD 0.85( ±0.34) 9.82( ±11 .83) 5.08( ±4.67) 47 .20( ±3.95) 44 .41( ±1.97) 43 .26( ±2.50) 
+
+MD++ 0.75( ±0.30) 9.71( ±12 .00) 5.56( ±5.62) 45 .26( ±4.62) 43 .91( ±2.60) 43 .07( ±2.51) 
+
+MC-SMP 0.33( ±0.14) 2.24( ±1.11) 0.55( ±0.06) 38 .84( ±1.81) 40 .75( ±1.30) 38 .99( ±1.90) 
+
+MC-PV 0.31 (±0.12 ) 3.05( ±2.33) 0.69( ±0.13) 42 .24( ±1.28) 41 .32( ±1.06) 41 .01( ±2.74) 
+
+MC-BALD 0.34( ±0.12) 4.34( ±4.48) 0.89( ±0.20) 43 .13( ±1.50) 41 .85( ±1.14) 41 .12( ±2.81) 
+
+SUE 0.67( ±0.21) 2.50( ±1.11) 0.44 (±0.10 ) 30 .65 (±2.27 ) 37 .75 (±3.86 ) 32 .15 (±2.08 )
+
+RoBERTa-Base SE 0.17( ±0.03) 2.03( ±0.21) 0.64( ±0.09) 40 .21( ±4.64) 40 .75( ±1.82) 39 .79 (±3.07 )
+
+SR 0.17( ±0.03) 2.04( ±0.21) 0.64( ±0.09) 39 .67( ±4.01) 40 .51( ±1.52) 40 .61( ±2.42) 
+
+MD 0.49( ±0.12) 3.76( ±0.50) 6.45( ±3.36) 45 .47( ±1.40) 43 .53( ±1.65) 44 .50( ±2.25) 
+
+MD++ 0.28( ±0.06) 3.48( ±0.25) 3.91( ±1.83) 45 .24( ±1.98) 42 .96( ±1.64) 43 .89( ±2.85) 
+
+MC-SMP 0.12 (±0.01 ) 1.92 (±0.15 ) 0.51( ±0.06) 40 .35( ±4.65) 41 .76( ±2.05) 41 .24( ±3.10) 
+
+MC-PV 0.14( ±0.02) 2.27( ±0.25) 0.64( ±0.09) 41 .13( ±2.17) 42 .66( ±1.60) 42 .13( ±3.76) 
+
+MC-BALD 0.17( ±0.02) 2.55( ±0.38) 0.84( ±0.17) 41 .74( ±2.02) 42 .94( ±1.55) 42 .21( ±3.68) 
+
+SUE 0.38( ±0.29) 2.18( ±0.17) 0.38 (±0.03 ) 35 .73 (±10 .84 ) 39 .33 (±4.77 ) 40 .02( ±5.50) 
+
+Table 2: eAU-RCC scores (multiplied by 100) for each task-method pair, with lower scores indicating better UE performance. The best results are in bold and the second best results are underlined. For the individual MC-* approaches, we report the best result that we obtained over the different choices of T . We include the detailed MC-* results that we obtained for the different values of T in Table 7. 
+
+Compared to the theoretical recommendation 
+
+λ = 1 .2/√d, which is approximately 0.0433 for BERT-Base ( d = 768 ), we observe only minor differences in outcomes. This makes it a reasonable initial value for λ. However, selecting the number of atoms requires further investigation, and care should be taken to avoid overfitting. As a general rule, we suggest fixing λ to the theoretical value and choosing the number of atoms according to the number of available samples and the difficulty of the task at hand. Results for other model–task pairs are presented in Appendix A, showing similar trends. We relied on the validation set performance when selecting hyperparameters. In order to as-sess the sensitivity to hyperparameter choice, we provide the paired validation and test set perfor-mances for all tested hyperparameter combinations for BERT-Base in Figure 5. We can see that for the individual tasks, there is low variability in the performances along both axes and that the hyperpa-rameters that perform well on the validation set also perform well on the test set, indicating the robust-ness of SUE to hyperparameter choices. We report similar plots indicating the robustness of SUE to hyperparameter choices when used in conjunction with other models in Appendix B. 32918 0.01 0.02 0.04 0.06 0.08 0.1                
+
+> 256
+> 512
+> 768
+> K
+> 0.33 0.30 0.31 0.41 0.44 0.44
+> 0.36 0.31 0.45 0.39 0.43 0.44
+> 0.31 0.41 0.41 0.44 0.45 0.43
+
+ParaDetox                     
+
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256
+> 512
+> 768
+> K
+> 1.71 1.63 1.68 1.84 1.73 1.91
+> 1.66 1.71 1.75 1.82 1.94 1.94
+> 1.69 1.74 1.83 1.89 1.91 2.01
+
+Twitter                     
+
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256
+> 512
+> 768
+> K
+> 0.41 0.39 0.38 0.41 0.38 0.38
+> 0.39 0.40 0.39 0.39 0.39 0.39
+> 0.39 0.39 0.40 0.40 0.42 0.41
+
+Jigsaw                     
+
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256
+> 512
+> 768
+> K
+> 33.20 32.87 31.79 31.00 30.58 29.94
+> 32.30 31.84 30.76 30.31 29.93 30.14
+> 31.66 30.78 29.97 29.69 29.74 29.19
+
+ANLI-R1                     
+
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256
+> 512
+> 768
+> K
+> 36.31 35.61 34.25 33.42 32.70 32.93
+> 35.26 34.18 32.47 32.28 31.81 32.42
+> 34.35 33.31 32.26 31.70 31.72 31.44
+
+ANLI-R2                     
+
+> 0.01 0.02 0.04 0.06 0.08 0.1
+> 256
+> 512
+> 768
+> K
+> 36.51 35.98 35.02 34.35 33.34 33.33
+> 36.01 35.47 33.91 33.15 33.11 32.56
+> 35.33 34.69 33.48 33.05 32.86 32.83
+
+ANLI-R3 Figure 4: The effect of sparse factorization on BERT-Base model with respect to the regularization coefficient (λ) and the number of dictionary atoms ( K) on every task. 
+
+6.2 Quantitative Results 
+
+In this section, we compare the performance of various UE methods across a range of sequence classification tasks. Table 2 presents the eAU-RCC scores, where lower values indicate better uncer-tainty estimation (i.e., lower risk at increasing cov-erage levels). In general, we observe that baseline methods such as SE, SR, and MD(++) perform consistently worse than more advanced approaches. MC based methods achieve competitive results on simpler tasks like ParaDetox and Twitter, but their effec-tiveness diminishes on more challenging reasoning 0 10 20 30 40 50 
+
+> Validation
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Test
+> BERT-Base
+> Tasks
+> ParaDetox
+> Twitter
+> Jigsaw
+> ANLI-R1
+> ANLI-R2
+> ANLI-R3
+
+Figure 5: Relationship of development and test set eAU-RCC scores when applying SUE with different hyperpa-rameter choices for fine-tuned BERT-base models. 
+
+CoLA MRPC QNLI SST-2 QQP SR 4.04 17.04 11.80 1.04 7.39 SE 4.17 17.04 11.80 1.04 7.39 MD 8.25 28.85 13.73 9.05 10.27 MD++ 21.27 35.64 13.51 5.55 9.79 MC-SMP 4.51 29.59 8.10 0.97 7.81 MC-PV 4.17 30.47 8.11 0.90 6.26 MC-BALD 4.38 31.01 8.14 0.90 7.73 SUE 4.00 11.64 7.66 1.24 5.59 
+
+Table 3: eAU-RCC scores (multiplied by 100) for each GLUE task on BERT-large models. Each MC method were evaluated with T = 25 steps. 
+
+benchmarks such as ANLI. By contrast, our proposed SUE demonstrates ro-bust performance across all tasks and models, often achieving the best or second-best scores. Notably, SUE substantially outperforms alternative meth-ods on Jigsaw and ANLI, indicating its strength in handling harder tasks. These results highlight SUE’s stability and efficiency as a reliable alterna-tive to sampling-heavy approaches, particularly in scenarios where traditional MC methods become computationally expensive. Similar trends can be seen on GLUE as well which can be seen in Table 3. These results are lim-ited to BERT-large models only. The corresponding model performances can be seen in the Appendix (Table 5), which shows that SUE only performs worse on SST-2. 32919 These results suggest that SUE is particularly well-suited for tasks with higher overall uncertainty, i.e., tasks where the model has lower precision. In general, the harder the task, the more likely SUE is to outperform other methods – a trend consistently observed across GLUE, ANLI, and sentiment clas-sification benchmarks. 
+
+6.3 Interpretability of SUE 
+
+To better understand the behavior of SUE, we in-spected the distribution of the uncertainty scores of ParaDetox. During that inspection, we had a look at the most confident test samples according to their SUE score. We further filtered these instances to keep only those for which have been misclassified. These samples can be seen in Table 4. Some errors can be easily traced back to simple mistakes in the dataset, such as the second exam-ple in Table 4, where a similar sentence appears twice, with the only difference being that the word 
+
+"generation" was replaced with "gen" which – ac-cording to the annotation – changes the label to toxic. There are several other examples where no or unsubstantial modifications were made to the sentence. Additionally, other samples exhibit sim-ple ambiguities, which may stem from a lack of context or differences in personal tolerance. We can further explore why SUE assigns high confidence to certain misclassified samples. Fig-ure 6 visualizes the contribution of each atom contribute towards the final uncertainty estimate. These visualizations correspond to the same sam-ples listed in Table 4, shown in the same order. In the plot, each bar represents the influence of a dictionary atom. Red indicates a contribution towards confidence, while blue indicates a contri-bution towards uncertainty. This visualization can be interpreted as a force plot: red bars push the estimate towards higher confidence (left), and blue bars push towards greater uncertainty (right). The final SUE score is determined by the point at which these opposing forces meet. By observing Figure 6, we can make a few re-marks about the samples. The first six samples were chosen because they contain no uncertain atoms, while the remaining samples have only one or two atoms that push them toward uncertainty. 
+
+7 Conclusions 
+
+In this work, we introduced SUE, a sparse coding-based uncertainty estimation method and evalu-Text but screw everything else they do, especially canadian content. i had the new generation rondo as a rental and i agree, its crap. damn straight!! dd when you said it to me on saturday night i lost my mind lol rt when bored all the stupid things come to your head we are not totally stupid, we know she works for cnn. oh shit eddie izzard this night i forget vice just went full - retard. sometimes, i just sit here on twitter, thinking i am not stupid. eh! whoresnops for life! thanks for the warning. 
+
+Table 4: Misclassified instances of ParaDetox with high confidence according to the SUE scores. All instances have a neutral ground truth label. 0.015  0.010  0.005  0.000  0.005  
+
+> Contribution of dictionary atoms
+> Uncertainty Confidence
+
+Figure 6: We present the contribution of each atom towards the final SUE score. Each row in the plot corre-sponds to one of the samples listed in Table 4, presented in the same order. 
+
+ated it on sequence classification tasks. By lever-aging sparse representations of the final hidden states of transformer models, our approach effec-tively captures meaningful patterns aligned with the model’s confidence. Through extensive ex-periments on GLUE, ANLI and Sentiment bench-marks, we demonstrated that SUE consistently out-performs classical confidence-based methods such as Softmax Response and Shannon Entropy, as well as MC dropout variants. This is particularly the case in scenarios where model precision is low and uncertainty estimation becomes critical. Our method yields the best overall performance in terms of eAU-RCC, and offers more stable and interpretable risk-coverage behavior. We complemented our quantitative evaluation with qualitative analyzes, revealing how atoms con-tribute toward the final uncertainty scores, helping the identification of those cases where high or low model prediction confidence is unwarranted. Ad-ditionally, we linked the structure of the learned PMI matrix to downstream estimation quality, of-fering insight into potential failure cases. Overall, our results suggest that sparse representations pro-vide a powerful and interpretable foundation for uncertainty estimation. 32920 Limitations 
+
+Our approach relies on sparse dictionary learn-ing, which requires setting the hyperparameters related to the number of dictionary atoms ( K) and the sparsity-inducing regularization coefficient ( λ). However, our ablation study on the choice of these hyperparameters showed little variability in perfor-mance, and selecting theoretical values was suffi-cient to achieve the expected outcomes. We also note that alternative uncertainty estimators likewise involve hyperparameters in one form or another. 
+
+Acknowledgments 
+
+This paper was supported by the János Bolyai Re-search Scholarship of the Hungarian Academy of Sciences. The research received additional support from the European Union project RRF-2.3.1-21-2022-00004 within the framework of the Artifi-cial Intelligence National Laboratory and project no. 2024-1.2.3-HU-RIZONT-2024-00017, which has been implemented with the support provided by the Ministry of Culture and Innovation of Hun-gary from the National Research, Development and Innovation Fund, financed under the 2024-1.2.3-HU-RIZONT funding scheme. Additionally, we are grateful for the possibility to use ELKH Cloud (see Héder et al., 2022; https://science-cloud.hu/) which helped us achieve the results published in this paper. 
+
+References 
+
+Leman Akoglu, Nitesh V. Chawla, Josep Domingo-Ferrer, Eren Kurshan, Senthil Kumar, Vidyut M. Naware, José A. Rodríguez-Serrano, Isha Chaturvedi, Saurabh Nagrecha, Mahashweta Das, and Tanveer A. Faruquie. 2024. Machine learning in finance. In 
+
+KDD , page 6703. ACM. Gábor Berend. 2020. Sparsity makes sense: Word sense disambiguation using sparse contextualized word rep-resentations. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Process-ing (EMNLP) , pages 8498–8508, Online. Association for Computational Linguistics. cjadams, Jeffrey Sorensen, Julia Elliott, Lucas Dixon, Mark McDonald, nithum, and Will Cukierski. 2017. Toxic comment classification challenge. https://kaggle.com/competitions/ jigsaw-toxic-comment-classification-challenge .Kaggle. Thomas Davidson, Dana Warmsley, Michael Macy, and Ingmar Weber. 2017. Automated hate speech detec-tion and the problem of offensive language. Proceed-ings of the International AAAI Conference on Web and Social Media , 11(1):512–515. Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2019. BERT: Pre-training of deep bidirectional transformers for language under-standing. In Proceedings of the 2019 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Tech-nologies, Volume 1 (Long and Short Papers) , pages 4171–4186, Minneapolis, Minnesota. Association for Computational Linguistics. William B. Dolan and Chris Brockett. 2005. Automati-cally constructing a corpus of sentential paraphrases. In Proceedings of the Third International Workshop on Paraphrasing (IWP2005) .Ran El-Yaniv and Yair Wiener. 2010. On the founda-tions of noise-free selective classification. J. Mach. Learn. Res. , 11:1605–1641. Yarin Gal, Riashat Islam, and Zoubin Ghahramani. 2017. Deep Bayesian active learning with image data. In 
+
+Proceedings of the 34th International Conference on Machine Learning , volume 70 of Proceedings of Machine Learning Research , pages 1183–1192. PMLR. Yonatan Geifman and Ran El-Yaniv. 2017. Selec-tive classification for deep neural networks. In Ad-vances in Neural Information Processing Systems ,volume 30. Curran Associates, Inc. Yonatan Geifman, Guy Uziel, and Ran El-Yaniv. 2019. Bias-reduced uncertainty estimation for deep neural classifiers. In ICLR (Poster) . OpenReview.net. Jonas Geiping, Micah Goldblum, Phillip Pope, Michael Moeller, and Tom Goldstein. 2022. Stochastic train-ing is not necessary for generalization. In ICLR .OpenReview.net. Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Wein-berger. 2017. On calibration of modern neural net-works. In roceedings of the 34th International Con-ference on Machine Learning , volume 70, pages 1321–1330. PMLR. Mihály Héder, Ern˝ o Rigó, Dorottya Medgyesi, Róbert Lovas, Szabolcs Tenczer, Ferenc Török, Attila Farkas, Márk Em˝ odi, József Kadlecsik, György Mez˝ o, Ádám Pintér, and Péter Kacsuk. 2022. The past, present and future of the ELKH cloud. Információs Társadalom ,22(2):128. Neil Houlsby, Ferenc Huszar, Zoubin Ghahramani, and Máté Lengyel. 2011. Bayesian active learning for classification and preference learning. CoRR ,abs/1112.5745. Shankar Iyer, Nikhil Dandekar, and Kornél Csernai. 2017. First quora dataset release: Question pairs. 32921 Roman Kail, Kirill Fedyanin, Nikita Muravev, Alexey Zaytsev, and Maxim Panov. 2022. Scaleface: Uncertainty-aware deep metric learning. CoRR ,abs/2209.01880. Alex Kendall and Yarin Gal. 2017. What uncertainties do we need in bayesian deep learning for computer vision? In NIPS , pages 5574–5584. Balaji Lakshminarayanan, Alexander Pritzel, and Charles Blundell. 2017. Simple and scalable pre-dictive uncertainty estimation using deep ensembles. In NIPS , pages 6402–6413. Kimin Lee, Kibok Lee, Honglak Lee, and Jinwoo Shin. 2018a. A simple unified framework for detecting out-of-distribution samples and adversarial attacks. In 
+
+Advances in Neural Information Processing Systems ,volume 31. Curran Associates, Inc. Kimin Lee, Kibok Lee, Honglak Lee, and Jinwoo Shin. 2018b. A simple unified framework for detecting out-of-distribution samples and adversarial attacks. In NeurIPS , pages 7167–7177. Jeremiah Liu, Zi Lin, Shreyas Padhy, Dustin Tran, Tania Bedrax Weiss, and Balaji Lakshminarayanan. 2020. Simple and principled uncertainty estimation with de-terministic deep learning via distance awareness. In 
+
+Advances in Neural Information Processing Systems ,volume 33, pages 7498–7512. Curran Associates, Inc. Yinhan Liu, Myle Ott, Naman Goyal, Jingfei Du, Man-dar Joshi, Danqi Chen, Omer Levy, Mike Lewis, Luke Zettlemoyer, and Veselin Stoyanov. 2019. Roberta: A robustly optimized bert pretraining ap-proach. Cite arxiv:1907.11692. Varvara Logacheva, Daryna Dementieva, Sergey Ustyantsev, Daniil Moskovskiy, David Dale, Irina Krotova, Nikita Semenov, and Alexander Panchenko. 2022. ParaDetox: Detoxification with parallel data. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 6804–6818, Dublin, Ireland. Association for Computational Linguistics. Julien Mairal, Francis R. Bach, Jean Ponce, and Guillermo Sapiro. 2009. Online dictionary learn-ing for sparse coding. In ICML , volume 382 of ACM International Conference Proceeding Series , pages 689–696. ACM. Andrey Malinin and Mark Gales. 2018. Predictive uncertainty estimation via prior networks. In Ad-vances in Neural Information Processing Systems ,volume 31. Curran Associates, Inc. Jishnu Mukhoti, Andreas Kirsch, Joost van Amersfoort, Philip H. S. Torr, and Yarin Gal. 2023. Deep de-terministic uncertainty: A new simple baseline. In 
+
+CVPR , pages 24384–24394. IEEE. Maximilian Müller and Matthias Hein. 2025. Maha-lanobis++: Improving OOD detection via feature normalization. In Forty-second International Confer-ence on Machine Learning .Khanh Nguyen and Brendan O’Connor. 2015. Poste-rior calibration and exploratory analysis for natural language processing models. In EMNLP , pages 1587– 1598. The Association for Computational Linguistics. Yixin Nie, Adina Williams, Emily Dinan, Mohit Bansal, Jason Weston, and Douwe Kiela. 2020. Adversarial NLI: A new benchmark for natural language under-standing. In Proceedings of the 58th Annual Meeting of the Association for Computational Linguistics . As-sociation for Computational Linguistics. Alexander Podolskiy, Dmitry Lipin, Andrey Bout, Eka-terina Artemova, and Irina Piontkovskaya. 2021. Re-visiting mahalanobis distance for transformer-based out-of-domain detection. Proceedings of the AAAI Conference on Artificial Intelligence , 35(15):13675– 13682. Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and Percy Liang. 2016. SQuAD: 100,000+ questions for machine comprehension of text. In Proceedings of EMNLP , pages 2383–2392. Association for Compu-tational Linguistics. Muhammad Imran Razzak, Saeeda Naz, and Ahmad Zaib. 2018. Deep Learning for Medical Image Pro-cessing: Overview, Challenges and the Future , pages 323–350. Springer International Publishing, Cham. Sarah T. Roberts. 2019. Behind the Screen: Content Moderation in the Shadows of Social Media . Yale University Press. Artem Shelmanov, Evgenii Tsymbalov, Dmitri Puzyrev, Kirill Fedyanin, Alexander Panchenko, and Maxim Panov. 2021. How certain is your Transformer? In 
+
+Proceedings of the 16th Conference of the European Chapter of the Association for Computational Lin-guistics: Main Volume , pages 1833–1840, Online. Association for Computational Linguistics. Yilin Shen, Yen-Chang Hsu, Avik Ray, and Hongxia Jin. 2021. Enhancing the generalization for intent classification and out-of-domain detection in SLU. In Proceedings of the 59th Annual Meeting of the Association for Computational Linguistics and the 11th International Joint Conference on Natural Lan-guage Processing (Volume 1: Long Papers) , pages 2443–2453, Online. Association for Computational Linguistics. Marco Siino, Mariana Falco, Daniele Croce, and Paolo Rosso. 2025. Exploring llms applications in law: A literature review on current legal nlp approaches. 
+
+IEEE Access , 13:18253–18276. Lewis Smith and Yarin Gal. 2018. Understanding mea-sures of uncertainty for adversarial example detection. In UAI , pages 560–569. AUAI Press. 32922 Richard Socher, Alex Perelygin, Jean Wu, Jason Chuang, Christopher D Manning, Andrew Ng, and Christopher Potts. 2013. Recursive deep models for semantic compositionality over a sentiment treebank. In Proceedings of EMNLP , pages 1631–1642. Artem Vazhentsev, Gleb Kuzmin, Artem Shelmanov, Akim Tsvigun, Evgenii Tsymbalov, Kirill Fedyanin, Maxim Panov, Alexander Panchenko, Gleb Gusev, Mikhail Burtsev, Manvel Avetisian, and Leonid Zhukov. 2022. Uncertainty estimation of transformer predictions for misclassification detection. In Pro-ceedings of the 60th Annual Meeting of the Associa-tion for Computational Linguistics (Volume 1: Long Papers) , pages 8237–8252, Dublin, Ireland. Associa-tion for Computational Linguistics. Artem Vazhentsev, Gleb Kuzmin, Akim Tsvigun, Alexander Panchenko, Maxim Panov, Mikhail Burt-sev, and Artem Shelmanov. 2023. Hybrid uncer-tainty quantification for selective text classification in ambiguous tasks. In Proceedings of the 61st An-nual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 11659– 11681, Toronto, Canada. Association for Computa-tional Linguistics. Alex Wang, Amanpreet Singh, Julian Michael, Felix Hill, Omer Levy, and Samuel Bowman. 2018. GLUE: A multi-task benchmark and analysis platform for nat-ural language understanding. In Proceedings of the 2018 EMNLP Workshop BlackboxNLP: Analyzing and Interpreting Neural Networks for NLP , pages 353–355, Brussels, Belgium. Association for Com-putational Linguistics. Alex Warstadt, Amanpreet Singh, and Samuel R. Bow-man. 2019. Neural network acceptability judgments. 
+
+Transactions of the Association for Computational Linguistics , 7:625–641. Adina Williams, Tristan Thrush, and Douwe Kiela. 2022. Anlizing the adversarial natural language in-ference dataset. Changrong Xiao, Sean Xin Xu, Kunpeng Zhang, Yu-fang Wang, and Lei Xia. 2023. Evaluating read-ing comprehension exercises generated by LLMs: A showcase of ChatGPT in education applications. In 
+
+Proceedings of the 18th Workshop on Innovative Use of NLP for Building Educational Applications (BEA 2023) , pages 610–625, Toronto, Canada. Association for Computational Linguistics. 
+
+A Models and Datasets 
+
+For our ANLI and sentiment classification models, we considered the following hyperparamters: • Learning rate: {1e − 5, 2e − 5, 5e − 5, 1e −
+
+6, 2e − 6, 5e − 6},• Batch size: {8, 16 , 32 },• Weight decay: {0, 0.1, 0.01 }.
+
+|Dev | |T est | Test Accuracy CoLA 417 626 84.85 MRPC 163 245 87.99 QNLI 2,185 3,278 92.23 SST-2 348 524 93.46 QQP 16,172 24,258 91.07 
+
+Table 5: Basic statistics of the datasets and model perfor-mance. The test accuracy is the classification accuracy of the model that we evaluate from an UE perspective. 
+
+The optimal hyperparameters are saved along the checkpoints and can be seen on their corresponding repository on Huggingface. In case of GLUE, we rely on well established, publicly available check-points 2 where we opted to use BERT-Large models. Each model relies on a subset of the samples, which varies on a task-by-task bases: 
+
+ANLI: For each subset (R1, R2, R3), we take 8,000 samples for training and 8,000 for calibration from the official training set. The development and test sets stay the same. 
+
+ParaDetox: This dataset has about 19.7K sam-ples in a single split. We use 8,000 for training, 8,000 for calibration, 1,000 for development, and the rest for testing. 
+
+Twitter: Following the same setup as ParaDetox, we use 8,000 for training, 8,000 for calibration, 1,000 for development, and the rest for testing. 
+
+Jigsaw: From the official training set, we use 8,000 samples for training and 8,000 for calibra-tion. From the official test set, we take 1,000 for development and 3,000 for testing. We use the train set to fine-tune the models, the calibration set to make further experiments on the hyperparameter space of UE methods, validation set for model selection, and test for final evaluation. For the GLUE tasks, we use more constrained splits, since some of the GLUE tasks include much fewer samples compared to the sentiment analy-sis tasks that we experimented with. We left the train split intact and made our development and test splits from the official development split in a 40%-60% ratio. The statistics and model performances are provided in Table 5. 
+
+> 2https://huggingface.co/yoshitomo-matsubara
+
+32923 B Sparse Hyperparameter Choice 
+
+We present all hyperparameter combinations (Model, Task, Number of samples, Number of atoms, Regularization strength) in three figures: Figure 7 for BERT-Base, Figure 8 for BERT-Large, and Figure 9 for RoBERTa-Base. Across models, we observe similar behavior, sug-gesting that the task has a stronger influence on our UE score than the choice of model. We also con-firm our earlier finding that the number of dictio-nary atoms has little effect, and that the theoretical choice of λ tends to be a consistently good option. 
+
+C Interpretability 
+
+In Figure 11a, we observe that traditional confidence-based approaches such as Softmax Re-sponse (SR) and Shannon Entropy (SE) show sig-nificant risk variance at low coverage, especially when abstaining only from the most confident sam-ples. These early fluctuations suggest that a few misclassified instances are mistakenly considered high-confidence, although their absolute number remains small. We can observer this same phe-nomenon where SUE exhibits this behavior on MRPC (see Figure 11b). To better understand this behavior on MRPC, we inspected the distribution of the uncertainty scores. During that inspection, we had a look at the top-25% most confident test samples according to their SUE score. We further filtered these instances to keep only those for which the predicted label did not match the expected ground truth label. We provide these instances in Table 6, ordered by de-creasing confidence under SUE. Manual inspection confirms that several of these were mislabeled or ambiguous, further explaining the early rise in risk under SUE in MRPC. 32924 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.33 0.30 0.31 0.41 0.44 0.44 
+
+0.36 0.31 0.45 0.39 0.43 0.44 
+
+0.31 0.41 0.41 0.44 0.45 0.43 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.34 0.33 0.35 0.44 0.49 0.47 
+
+0.32 0.31 0.42 0.40 0.48 0.48 
+
+0.33 0.36 0.40 0.44 0.47 0.47 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.33 0.30 0.42 0.40 0.39 0.52 
+
+0.32 0.32 0.37 0.47 0.46 0.50 
+
+0.33 0.34 0.44 0.45 0.46 0.50 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.34 0.33 0.40 0.46 0.45 0.42 
+
+0.32 0.32 0.42 0.48 0.51 0.46 
+
+0.32 0.30 0.36 0.46 0.51 0.49 
+
+Calibration Set Split Ratio = 0.8 
+
+ParaDetox 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.71 1.63 1.68 1.84 1.73 1.91 
+
+1.66 1.71 1.75 1.82 1.94 1.94 
+
+1.69 1.74 1.83 1.89 1.91 2.01 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.81 1.65 1.70 1.71 1.77 1.81 
+
+1.70 1.67 1.71 1.77 1.81 1.89 
+
+1.67 1.71 1.75 1.88 1.91 1.93 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.78 1.66 1.68 1.78 1.76 1.84 
+
+1.72 1.65 1.74 1.84 1.83 1.85 
+
+1.70 1.68 1.80 1.84 1.94 1.99 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.80 1.68 1.70 1.74 1.79 1.88 
+
+1.74 1.66 1.77 1.84 1.84 1.89 
+
+1.72 1.65 1.75 1.86 1.89 1.88 
+
+Calibration Set Split Ratio = 0.8 
+
+Twitter 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.41 0.39 0.38 0.41 0.38 0.38 
+
+0.39 0.40 0.39 0.39 0.39 0.39 
+
+0.39 0.39 0.40 0.40 0.42 0.41 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.41 0.38 0.38 0.39 0.42 0.42 
+
+0.39 0.38 0.41 0.41 0.41 0.42 
+
+0.39 0.38 0.41 0.44 0.41 0.42 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.40 0.39 0.40 0.42 0.41 0.40 
+
+0.38 0.39 0.39 0.39 0.42 0.44 
+
+0.39 0.39 0.41 0.41 0.41 0.48 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.40 0.39 0.39 0.41 0.46 0.45 
+
+0.39 0.39 0.43 0.42 0.45 0.50 
+
+0.38 0.38 0.40 0.42 0.47 0.51 
+
+Calibration Set Split Ratio = 0.8 
+
+Jigsaw 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+33.20 32.87 31.79 31.00 30.58 29.94 
+
+32.30 31.84 30.76 30.31 29.93 30.14 
+
+31.66 30.78 29.97 29.69 29.74 29.19 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+33.56 32.63 31.31 31.22 30.54 30.41 
+
+33.10 32.00 30.85 29.83 29.41 29.41 
+
+32.02 31.46 30.50 29.31 29.64 29.51 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+33.47 32.67 31.30 30.64 30.48 30.48 
+
+32.71 32.00 30.71 29.79 29.59 29.59 
+
+32.75 31.48 30.72 29.93 29.46 29.82 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+33.45 32.47 31.41 30.88 30.31 30.28 
+
+32.55 31.94 30.63 29.77 29.54 30.22 
+
+32.13 31.57 30.45 29.59 30.03 29.36 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R1 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.31 35.61 34.25 33.42 32.70 32.93 
+
+35.26 34.18 32.47 32.28 31.81 32.42 
+
+34.35 33.31 32.26 31.70 31.72 31.44 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.29 35.45 34.08 34.08 33.32 32.93 
+
+35.89 34.62 33.04 32.84 32.08 31.99 
+
+34.98 33.32 32.60 31.90 32.43 32.33 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.16 34.68 33.52 33.18 33.42 33.19 
+
+36.13 33.74 33.16 32.47 32.76 32.29 
+
+34.69 33.28 32.96 32.12 32.31 32.35 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.08 34.72 33.88 33.00 32.41 32.84 
+
+35.06 34.27 32.52 32.21 32.03 31.88 
+
+34.85 33.14 31.83 31.86 32.20 31.98 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R2 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.51 35.98 35.02 34.35 33.34 33.33 
+
+36.01 35.47 33.91 33.15 33.11 32.56 
+
+35.33 34.69 33.48 33.05 32.86 32.83 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.89 36.05 34.52 34.12 33.52 33.18 
+
+36.58 35.09 34.13 33.21 33.54 33.37 
+
+35.96 34.52 33.67 33.43 33.14 32.97 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+37.46 35.79 34.91 34.23 33.24 32.71 
+
+36.38 35.32 34.09 33.59 33.17 33.21 
+
+35.67 34.97 33.54 33.11 33.18 33.11 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+37.58 35.93 34.35 33.65 32.71 32.76 
+
+36.16 35.13 34.62 33.92 33.08 33.31 
+
+36.04 34.34 33.96 33.76 33.35 33.91 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R3 Figure 7: Effect of parameters on the final score with BERT-Base. 
+
+Sentence Expected label But I would rather be talking about high standards than low standards . " Equivalent " I would rather be talking about positive numbers rather than negative . " Overwhelmingly the Windows brand really resonated with them . " Equivalent " Windows was the part of the experience that really resonated with people . " " They ’ve been in the stores for over six weeks , " says Carney . Equivalent The quarterlies usually stay in stores for between six to eight weeks , " Carney added . Its closest living relatives are a family frogs called sooglossidae that are found only in the Seychelles in the Indian Ocean . Equivalent Its closest relative is found in the Seychelles Archipelago , near Madagascar in the Indian Ocean . About 10 percent of high school and 16 percent of elementary students must be proficient at math . Equivalent In math , 16 percent of elementary and middle school students and 9.6 percent of high school students must be proficient . The additional contribution brings total U.S. food aid to North Korea this year to 100,000 tonnes . Equivalent The donation of 60,000 tons brings the total of U.S. contributions for the year to 100,000 . 
+
+Table 6: Misclassified instances of MRPC with high confidence by SUE scores. 32925 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.38 0.46 0.52 0.55 0.72 0.68 
+
+0.45 0.48 0.45 0.59 0.68 0.67 
+
+0.46 0.48 0.51 0.56 0.58 0.61 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.42 0.36 0.45 0.75 0.69 0.69 
+
+0.41 0.38 0.54 0.71 0.60 0.65 
+
+0.42 0.44 0.55 0.61 0.65 0.67 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.42 0.38 0.50 0.70 0.66 0.74 
+
+0.41 0.42 0.50 0.58 0.75 0.73 
+
+0.42 0.46 0.55 0.65 0.71 0.78 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.40 0.37 0.47 0.60 0.78 0.67 
+
+0.41 0.40 0.49 0.74 0.73 0.71 
+
+0.42 0.44 0.56 0.65 0.61 0.68 
+
+Calibration Set Split Ratio = 0.8 
+
+ParaDetox 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+2.36 2.24 2.24 2.23 2.22 2.26 
+
+2.25 2.12 2.20 2.29 2.34 2.63 
+
+2.19 2.23 2.25 2.37 2.39 2.47 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+2.50 2.29 2.25 2.37 2.28 2.31 
+
+2.34 2.19 2.26 2.49 2.37 2.36 
+
+2.28 2.20 2.28 2.42 2.41 2.38 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+2.49 2.30 2.23 2.26 2.35 2.35 
+
+2.42 2.26 2.24 2.31 2.42 2.36 
+
+2.31 2.28 2.36 2.34 2.43 2.48 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+2.47 2.29 2.30 2.31 2.35 2.30 
+
+2.42 2.27 2.28 2.32 2.42 2.47 
+
+2.40 2.25 2.23 2.39 2.41 2.50 
+
+Calibration Set Split Ratio = 0.8 
+
+Twitter 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.40 0.38 0.38 0.39 0.37 0.37 
+
+0.39 0.38 0.38 0.37 0.47 0.44 
+
+0.38 0.37 0.38 0.38 0.40 0.45 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.40 0.38 0.38 0.37 0.37 0.38 
+
+0.38 0.38 0.37 0.38 0.40 0.48 
+
+0.38 0.38 0.39 0.40 0.42 0.47 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.39 0.38 0.37 0.39 0.38 0.43 
+
+0.38 0.38 0.40 0.40 0.40 0.42 
+
+0.38 0.37 0.37 0.37 0.42 0.53 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.40 0.38 0.38 0.38 0.38 0.40 
+
+0.38 0.39 0.38 0.43 0.44 0.41 
+
+0.39 0.38 0.39 0.41 0.43 0.43 
+
+Calibration Set Split Ratio = 0.8 
+
+Jigsaw 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+33.60 32.85 32.33 31.83 31.61 31.44 
+
+32.94 32.37 31.66 31.54 31.12 31.08 
+
+31.85 31.56 31.00 31.00 30.83 30.81 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+33.76 33.29 32.41 31.76 31.57 31.46 
+
+33.25 32.75 31.78 31.46 31.04 31.17 
+
+32.80 32.30 30.86 31.03 30.91 30.77 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+33.90 33.07 32.53 31.85 32.04 31.74 
+
+33.32 32.49 31.91 31.21 31.35 30.79 
+
+32.99 32.10 31.26 30.39 31.27 30.71 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+34.01 33.03 32.26 31.94 31.71 31.50 
+
+33.20 32.65 31.71 31.18 30.94 31.03 
+
+33.11 32.13 31.42 30.90 30.37 30.88 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R1 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.21 38.84 38.42 37.66 37.74 37.63 
+
+38.58 37.73 37.11 37.00 37.64 36.89 
+
+38.22 37.59 37.14 36.98 37.40 37.58 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.74 38.74 38.28 38.09 37.90 37.32 
+
+38.66 38.00 37.11 37.39 37.53 37.15 
+
+38.57 37.75 37.61 37.11 37.27 37.39 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.71 39.02 38.36 37.79 37.39 37.53 
+
+38.56 37.96 37.43 37.33 37.57 37.78 
+
+38.54 37.63 37.30 37.24 37.87 37.20 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.33 39.21 38.33 37.68 37.77 37.73 
+
+38.69 38.08 37.60 37.45 37.16 37.85 
+
+37.86 37.49 37.29 36.66 37.33 38.18 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R2 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+34.25 33.86 33.37 32.99 32.78 33.04 
+
+33.86 33.10 32.67 32.29 32.61 32.43 
+
+32.63 32.58 32.02 32.20 31.86 32.28 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+34.42 33.77 33.17 32.92 32.92 32.77 
+
+33.93 32.89 32.50 32.14 32.60 32.76 
+
+33.42 32.81 32.03 31.91 32.06 32.32 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+34.59 33.79 32.80 32.70 32.28 32.38 
+
+33.83 32.91 32.38 32.38 32.32 32.39 
+
+33.57 32.46 32.32 31.86 31.87 31.90 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+34.45 34.16 33.13 32.67 32.66 32.42 
+
+33.85 32.92 32.14 32.05 32.28 32.26 
+
+33.39 32.67 32.42 32.39 32.29 32.16 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R3 Figure 8: Effect of parameters on the final score with BERT-Large. 32926 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.14 0.14 0.17 0.21 0.27 0.27 
+
+0.15 0.16 0.18 0.22 0.23 0.23 
+
+0.14 0.14 0.17 0.23 0.26 0.27 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.15 0.14 0.15 0.30 0.35 0.40 
+
+0.14 0.14 0.21 0.34 0.42 0.45 
+
+0.14 0.17 0.21 0.37 0.38 0.46 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.15 0.14 0.19 0.26 0.22 0.36 
+
+0.14 0.17 0.27 0.33 0.43 0.46 
+
+0.14 0.18 0.33 0.31 0.46 0.46 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.14 0.14 0.19 0.18 0.40 0.32 
+
+0.14 0.16 0.32 0.30 0.39 0.45 
+
+0.14 0.15 0.29 0.39 0.33 0.37 
+
+Calibration Set Split Ratio = 0.8 
+
+ParaDetox 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.88 1.91 2.03 1.90 2.01 1.97 
+
+1.89 1.99 2.03 2.07 2.03 2.09 
+
+1.89 1.97 1.91 1.99 2.03 2.02 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.89 1.90 1.92 1.98 1.99 2.06 
+
+1.89 1.90 1.93 1.94 2.01 1.99 
+
+1.93 1.83 1.95 2.01 2.08 2.21 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.86 1.88 1.97 2.02 2.01 2.06 
+
+1.85 1.86 1.93 1.93 1.98 2.18 
+
+1.92 1.96 1.96 2.02 2.09 2.08 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+1.87 1.85 1.91 1.96 2.00 2.08 
+
+1.83 1.86 1.94 1.95 2.00 2.07 
+
+1.86 1.86 1.94 2.06 2.14 2.13 
+
+Calibration Set Split Ratio = 0.8 
+
+Twitter 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.42 0.39 0.37 0.38 0.36 0.37 
+
+0.39 0.37 0.37 0.37 0.37 0.37 
+
+0.38 0.37 0.36 0.36 0.36 0.37 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.41 0.39 0.37 0.37 0.36 0.36 
+
+0.39 0.38 0.37 0.37 0.40 0.39 
+
+0.38 0.38 0.37 0.37 0.37 0.38 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.42 0.39 0.38 0.37 0.37 0.39 
+
+0.39 0.38 0.38 0.39 0.39 0.36 
+
+0.38 0.39 0.38 0.38 0.38 0.38 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+0.42 0.38 0.37 0.40 0.39 0.38 
+
+0.39 0.38 0.37 0.42 0.37 0.38 
+
+0.38 0.37 0.37 0.39 0.37 0.39 
+
+Calibration Set Split Ratio = 0.8 
+
+Jigsaw 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+37.39 36.53 35.10 35.33 34.94 35.40 
+
+36.41 35.78 35.39 34.58 34.67 35.08 
+
+34.97 35.50 35.27 35.41 34.80 34.82 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.87 36.68 35.75 34.92 34.78 35.14 
+
+36.49 36.18 35.33 35.53 34.56 35.05 
+
+36.67 35.89 34.94 34.54 35.78 35.77 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+36.40 36.23 35.53 35.00 34.85 34.50 
+
+37.65 35.25 34.95 34.86 35.33 35.46 
+
+36.33 36.03 35.41 35.23 35.36 35.72 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+37.07 35.84 35.10 34.75 34.97 35.07 
+
+36.84 35.69 35.38 34.71 34.57 35.06 
+
+36.20 35.59 35.16 34.40 35.26 34.72 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R1 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.28 38.61 38.86 39.43 38.88 39.33 
+
+39.74 38.91 38.51 38.44 39.01 39.72 
+
+38.95 38.44 38.52 38.71 38.98 39.81 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.92 38.81 39.13 39.58 38.49 39.95 
+
+38.73 38.81 38.81 38.83 39.01 39.38 
+
+38.52 38.61 39.06 38.98 38.75 39.98 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+40.03 39.68 39.50 39.78 38.68 39.47 
+
+39.38 38.58 38.36 38.51 38.73 39.01 
+
+38.89 38.85 38.92 39.17 38.97 38.97 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.28 39.78 38.95 38.78 39.07 38.70 
+
+38.86 39.10 38.59 39.20 39.50 38.73 
+
+39.81 38.39 38.66 38.48 40.27 39.56 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R2 0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+38.81 38.85 38.88 39.28 38.79 39.14 
+
+39.14 39.16 38.72 39.21 39.62 39.55 
+
+39.26 39.38 39.42 39.16 39.65 40.00 
+
+Calibration Set Split Ratio = 0.2 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+38.53 39.08 38.11 38.14 39.05 39.10 
+
+38.88 38.52 39.42 39.13 39.85 39.47 
+
+39.75 38.94 38.70 38.86 40.05 39.13 
+
+Calibration Set Split Ratio = 0.4 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.05 38.58 38.88 38.40 39.04 39.65 
+
+38.61 38.92 39.10 39.52 39.17 39.39 
+
+39.45 38.94 39.76 39.66 39.37 40.07 
+
+Calibration Set Split Ratio = 0.6 
+
+0.01 0.02 0.04 0.06 0.08 0.1 
+
+> 256 512 768
+> K
+
+39.51 38.33 38.73 38.82 38.95 38.34 
+
+39.15 38.57 38.25 39.17 39.24 39.41 
+
+39.40 39.34 39.30 39.56 39.30 39.13 
+
+Calibration Set Split Ratio = 0.8 
+
+ANLI-R3 Figure 9: Effect of parameters on the final score with RoBERTa-Base. 32927 ParaDetox Twitter Jigsaw ANLI-R1 ANLI-R2 ANLI-R3 BERT-Base SE 0.37( ±0.04) 1.84( ±0.15) 0.65( ±0.02) 37 .06( ±1.28) 39 .85( ±1.10) 36 .88( ±0.71) 
+
+SR 0.37( ±0.04) 1.85( ±0.15) 0.65( ±0.02) 37 .00( ±1.32) 39 .98( ±1.03) 37 .06( ±0.84) 
+
+MD 0.52( ±0.11) 4.00( ±0.18) 5.91( ±4.24) 46 .62( ±3.24) 43 .68( ±1.23) 44 .64( ±1.92) 
+
+MD++ 0.54( ±0.08) 3.88( ±0.16) 4.87( ±3.05) 46 .51( ±2.79) 43 .79( ±1.24) 43 .85( ±1.17) 
+
+MC-SMP (T = 10) 0.31( ±0.04) 1.73 (±0.12 ) 0.56( ±0.02) 36 .74( ±1.59) 39 .55( ±1.19) 36 .94( ±0.71) 
+
+MC-SMP (T = 25) 0.31( ±0.06) 1.74( ±0.12) 0.56( ±0.02) 36 .70( ±1.57) 39 .41( ±1.10) 37 .00( ±0.59) 
+
+MC-SMP (T = 50) 0.30( ±0.06) 1.75( ±0.13) 0.55( ±0.02) 36 .71( ±1.53) 39 .44( ±1.07) 36 .91( ±0.61) 
+
+MC-PV (T = 10) 0.30( ±0.04) 1.95( ±0.10) 0.61( ±0.03) 39 .45( ±1.23) 40 .11( ±0.97) 39 .42( ±0.94) 
+
+MC-PV (T = 25) 0.28( ±0.04) 1.91( ±0.12) 0.59( ±0.02) 38 .81( ±1.09) 40 .25( ±0.94) 39 .18( ±0.65) 
+
+MC-VP (T = 50) 0.27 (±0.04 ) 1.88( ±0.09) 0.58( ±0.03) 38 .52( ±1.40) 40 .33( ±0.66) 38 .88( ±0.91) 
+
+MC-BALD (T = 10) 0.32( ±0.04) 2.22( ±0.13) 0.73( ±0.04) 39 .90( ±1.10) 40 .39( ±1.14) 40 .15( ±0.93) 
+
+MC-BALD (T = 25) 0.29( ±0.04) 2.12( ±0.11) 0.69( ±0.04) 39 .29( ±1.01) 40 .40( ±1.12) 39 .82( ±0.73) 
+
+MC-BALD (T = 50) 0.29( ±0.04) 2.06( ±0.06) 0.67( ±0.04) 38 .91( ±1.38) 40 .44( ±0.83) 39 .51( ±0.93) 
+
+SUE 0.46( ±0.14) 1.95( ±0.23) 0.40 (±0.05 ) 29 .55 (±2.11 ) 31 .65 (±0.96 ) 32 .76 (±1.13 )
+
+BERT-Large SE 0.45( ±0.24) 2.18( ±0.89) 0.67( ±0.05) 38 .81( ±1.98) 41 .70( ±2.18) 39 .19( ±1.89) 
+
+SR 0.45( ±0.24) 2.17 (±0.90 ) 0.67( ±0.05) 38 .72( ±1.92) 41 .73( ±2.40) 39 .24( ±2.10) 
+
+MD 0.85( ±0.34) 9.82( ±11 .83) 5.08( ±4.67) 47 .20( ±3.95) 44 .41( ±1.97) 43 .26( ±2.50) 
+
+MD++ 0.75( ±0.30) 9.71( ±12 .00) 5.56( ±5.62) 45 .26( ±4.62) 43 .91( ±2.60) 43 .07( ±2.51) 
+
+MC-SMP (T = 10) 0.35( ±0.17) 2.33( ±1.25) 0.56( ±0.05) 38 .84( ±1.81) 40 .75( ±1.30) 39 .03( ±1.95) 
+
+MC-SMP (T = 25) 0.34( ±0.16) 2.29( ±1.19) 0.55( ±0.06) 38 .91( ±1.75) 41 .02( ±1.51) 39 .05( ±1.88) 
+
+MC-SMP (T = 50) 0.33( ±0.14) 2.24( ±1.11) 0.55( ±0.06) 38 .94( ±1.74) 40 .81( ±1.35) 38 .99( ±1.90) 
+
+MC-PV (T = 10) 0.34( ±0.15) 3.19( ±2.49) 0.71( ±0.13) 42 .24( ±1.28) 41 .86( ±1.45) 41 .01( ±2.74) 
+
+MC-PV (T = 25) 0.34( ±0.15) 3.09( ±2.40) 0.69( ±0.13) 42 .26( ±1.12) 41 .37( ±1.14) 41 .11( ±2.70) 
+
+MC-VP (T = 50) 0.31 (±0.12 ) 3.05( ±2.33) 0.69( ±0.13) 42 .25( ±1.08) 41 .32( ±1.06) 41 .03( ±2.63) 
+
+MC-BALD (T = 10) 0.40( ±0.17) 5.34( ±6.21) 0.92( ±0.21) 43 .13( ±1.50) 42 .37( ±1.58) 41 .12( ±2.81) 
+
+MC-BALD (T = 25) 0.38( ±0.16) 4.95( ±5.64) 0.89( ±0.20) 43 .20( ±1.36) 42 .00( ±1.30) 41 .25( ±2.85) 
+
+MC-BALD (T = 50) 0.34( ±0.12) 4.34( ±4.48) 0.89( ±0.20) 43 .25( ±1.42) 41 .85( ±1.14) 41 .13( ±2.73) 
+
+SUE 0.67( ±0.21) 2.50( ±1.11) 0.44 (±0.10 ) 30 .65 (±2.27 ) 37 .75 (±3.86 ) 32 .15 (±2.08 )
+
+RoBERTa-Base SE 0.17( ±0.03) 2.03( ±0.21) 0.64( ±0.09) 40 .21( ±4.64) 40 .75( ±1.82) 39 .79 (±3.07 )
+
+SR 0.17( ±0.03) 2.04( ±0.21) 0.64( ±0.09) 39 .67( ±4.01) 40 .51( ±1.52) 40 .61( ±2.42) 
+
+MD 0.49( ±0.12) 3.76( ±0.50) 6.45( ±3.36) 45 .47( ±1.40) 43 .53( ±1.65) 44 .50( ±2.25) 
+
+MD++ 0.28( ±0.06) 3.48( ±0.25) 3.91( ±1.83) 45 .24( ±1.98) 42 .96( ±1.64) 43 .89( ±2.85) 
+
+MC-SMP (T = 10) 0.14( ±0.02) 1.94( ±0.15) 0.52( ±0.06) 40 .89( ±5.51) 42 .15( ±2.49) 41 .76( ±3.59) 
+
+MC-SMP (T = 25) 0.13( ±0.03) 1.92 (±0.16 ) 0.51( ±0.06) 40 .70( ±5.02) 42 .12( ±2.62) 41 .70( ±3.51) 
+
+MC-SMP (T = 50) 0.12 (±0.01 ) 1.92 (±0.15 ) 0.51( ±0.06) 40 .35( ±4.65) 41 .76( ±2.05) 41 .24( ±3.10) 
+
+MC-PV (T = 10) 0.17( ±0.04) 2.37( ±0.21) 0.68( ±0.11) 41 .13( ±2.17) 42 .66( ±1.60) 42 .99( ±3.80) 
+
+MC-PV (T = 25) 0.16( ±0.04) 2.29( ±0.23) 0.65( ±0.10) 42 .02( ±2.94) 43 .11( ±2.56) 42 .13( ±3.76) 
+
+MC-VP (T = 50) 0.14( ±0.02) 2.27( ±0.25) 0.64( ±0.09) 42 .05( ±3.31) 43 .14( ±2.91) 42 .58( ±4.24) 
+
+MC-BALD (T = 10) 0.21( ±0.04) 2.72( ±0.33) 0.95( ±0.23) 41 .74( ±2.02) 42 .94( ±1.55) 43 .23( ±3.54) 
+
+MC-BALD (T = 25) 0.19( ±0.04) 2.58( ±0.35) 0.86( ±0.18) 42 .58( ±2.53) 43 .50( ±2.45) 42 .21( ±3.68) 
+
+MC-BALD (T = 50) 0.17( ±0.02) 2.55( ±0.38) 0.84( ±0.17) 42 .64( ±2.93) 43 .50( ±2.78) 42 .67( ±4.16) 
+
+SUE 0.38( ±0.29) 2.18( ±0.17) 0.38 (±0.03 ) 35 .73 (±10 .84 ) 39 .33 (±4.77 ) 40 .02( ±5.50) 
+
+Table 7: eAU-RCC scores (multiplied by 100) for each task-method pair, lower the score indicates better UE performance. We indicate the best performing approach with bold text and the second one with underline. 32928 0
+
+> 10
+> 20
+> 30
+> 40
+> 50
+> Test
+
+BERT-Base 
+
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Test
+
+BERT-Large      
+
+> 010 20 30 40 50
+> Validation
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> Test
+
+RoBERTa-Base 
+
+> Tasks
+> ParaDetox
+> Twitter
+> Jigsaw
+> ANLI-R1
+> ANLI-R2
+> ANLI-R3
+
+Figure 10: Relationship of test and development eAU-RCC score when applying SUE. 0.0 0.2 0.4 0.6 0.8 1.0 
+
+Coverage 
+
+0.00 
+
+0.05 
+
+0.10 
+
+0.15 
+
+0.20 
+
+0.25 
+
+> Risk
+
+SR 
+
+SE 
+
+MD 
+
+MC SMP 
+
+MC PV 
+
+MC BALD 
+
+SUE 
+
+(a) Twitter 0.0 0.2 0.4 0.6 0.8 1.0 
+
+Coverage 
+
+0.0 
+
+0.1 
+
+0.2 
+
+0.3 
+
+0.4 
+
+0.5 
+
+> Risk
+
+SR 
+
+SE 
+
+MD 
+
+MC SMP 
+
+MC PV 
+
+MC BALD 
+
+SUE 
+
+(b) MRPC 
+
+Figure 11: Risk-Coverage Curve of two tasks. 32929

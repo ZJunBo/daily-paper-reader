@@ -1,21 +1,21 @@
 ---
 title: "Seeing is Believing, but How Much? A Comprehensive Analysis of Verbalized Calibration in Vision-Language Models"
-title_zh: 眼见为实，但有多可靠？视觉语言模型中口头校准的综合分析
+title_zh: 眼见为实，但有多可靠？视觉语言模型中口头校准的全面分析
 authors: "Weihao Xuan, Qingcheng Zeng, Heli Qi, Junjue Wang, Naoto Yokoya"
 date: 2025-11-01
 pdf: "https://aclanthology.org/2025.emnlp-main.74.pdf"
-tags: ["query:luq"]
-score: 7.0
-evidence: 聚焦视觉语言模型中的口头不确定性，与LLM不确定性量化相关
-tldr: 口头不确定性（模型用自然语言表达置信度）是一种轻量级可解释方法，但在视觉语言模型（VLM）中的有效性尚未充分研究。本文对三类VLM、四个任务域进行系统评估，发现当前VLM普遍存在校准不良现象，且视觉推理模型表现尤为突出。该工作揭示了LLM与VLM在不确定性量化上的差异，为提升多模态模型可信度提供了参考。
+tags: ["query:uq-safety"]
+score: 6.0
+evidence: VLM口头不确定性全面评估
+tldr: 不确定性量化对AI系统可靠性重要。本文全面评估视觉语言模型的口头置信度，覆盖三类模型、四个任务域。发现VLM普遍存在校准不佳，特别是视觉推理模型。该研究为VLM不确定性研究提供基准。
 source: EMNLP-2025-Main
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.74/fig-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1621, \"height\": 497, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.74/fig-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 714, \"height\": 604, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.74/fig-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 790, \"height\": 557, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.74/fig-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 778, \"height\": 799, \"label\": \"Figure\"}]"
 tables_json: "[{\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1651, \"height\": 1118, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 1647, \"height\": 696, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 1310, \"height\": 1590, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 656, \"height\": 392, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 1407, \"height\": 214, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 659, \"height\": 342, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-007.webp\", \"caption\": \"\", \"page\": 0, \"index\": 7, \"width\": 846, \"height\": 356, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-008.webp\", \"caption\": \"\", \"page\": 0, \"index\": 8, \"width\": 761, \"height\": 251, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-009.webp\", \"caption\": \"\", \"page\": 0, \"index\": 9, \"width\": 1648, \"height\": 1974, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-010.webp\", \"caption\": \"\", \"page\": 0, \"index\": 10, \"width\": 1652, \"height\": 2166, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-011.webp\", \"caption\": \"\", \"page\": 0, \"index\": 11, \"width\": 1000, \"height\": 2152, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-012.webp\", \"caption\": \"\", \"page\": 0, \"index\": 12, \"width\": 1642, \"height\": 2209, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-013.webp\", \"caption\": \"\", \"page\": 0, \"index\": 13, \"width\": 1041, \"height\": 2091, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-014.webp\", \"caption\": \"\", \"page\": 0, \"index\": 14, \"width\": 1661, \"height\": 1065, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.74/table-015.webp\", \"caption\": \"\", \"page\": 0, \"index\": 15, \"width\": 1661, \"height\": 625, \"label\": \"Table\"}]"
-motivation: 口头不确定性在LLM中有效，但在VLM中的适用性和准确性尚不明确。
-method: 在多个模型类别和任务域上评估VLM的口头置信度校准情况。
-result: 发现VLM普遍存在校准不良，视觉推理模型的偏差尤为严重。
-conclusion: 该工作强调了多模态模型不确定性量化的独特挑战。
+motivation: VLM中口头置信度的有效性尚未充分研究。
+method: 在多任务多模型上系统评估口头置信度的校准性。
+result: 发现VLM校准普遍不足，视觉推理模型问题突出。
+conclusion: 揭示了VLM口头校准的局限性，呼吁改进。
 ---
 
 ## Abstract

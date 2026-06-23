@@ -1,21 +1,21 @@
 ---
 title: "Unconditional Truthfulness: Learning Unconditional Uncertainty of Large Language Models"
-title_zh: 无条件真实性：学习大型语言模型的无条件不确定性
+title_zh: 无条件真实性：学习大语言模型的无条件不确定性
 authors: "Artem Vazhentsev, Ekaterina Fadeeva, Rui Xing, Gleb Kuzmin, Ivan Lazichny, Alexander Panchenko, Preslav Nakov, Timothy Baldwin, Maxim Panov, Artem Shelmanov"
 date: 2025-11-01
 pdf: "https://aclanthology.org/2025.emnlp-main.1807.pdf"
-tags: ["query:luq"]
-score: 7.0
-evidence: 从注意力特征学习LLM的无条件不确定性
-tldr: 针对自回归LLM生成步骤间条件依赖导致不确定性难以建模的问题，该论文提出从注意力特征学习无条件的UQ分数。使用回归模型结合当前步信息及循环历史不确定性，采用两阶段训练。在十个数据集上证明该方法优于现有基线，有效检测幻觉。
+tags: ["query:uq-safety"]
+score: 9.0
+evidence: 从注意力特征学习LLM无条件不确定性
+tldr: 现有LLM不确定性量化受生成步骤条件依赖困扰。本文提出通过学习注意力特征和循环不确定性分数来获得无条件不确定性，采用两阶段训练。实验表明该方法在十个数据集上有效检测幻觉。该方法为LLM可靠性评估提供了新途径。
 source: EMNLP-2025-Main
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1807/fig-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1559, \"height\": 332, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1807/fig-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 757, \"height\": 664, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1807/fig-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 1655, \"height\": 332, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1807/fig-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 1325, \"height\": 487, \"label\": \"Figure\"}]"
 tables_json: "[{\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1650, \"height\": 677, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 803, \"height\": 567, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 805, \"height\": 367, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 798, \"height\": 682, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 1651, \"height\": 681, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 1651, \"height\": 679, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-007.webp\", \"caption\": \"\", \"page\": 0, \"index\": 7, \"width\": 1651, \"height\": 663, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-008.webp\", \"caption\": \"\", \"page\": 0, \"index\": 8, \"width\": 1649, \"height\": 660, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-009.webp\", \"caption\": \"\", \"page\": 0, \"index\": 9, \"width\": 1651, \"height\": 660, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-010.webp\", \"caption\": \"\", \"page\": 0, \"index\": 10, \"width\": 836, \"height\": 430, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-011.webp\", \"caption\": \"\", \"page\": 0, \"index\": 11, \"width\": 1000, \"height\": 197, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-012.webp\", \"caption\": \"\", \"page\": 0, \"index\": 12, \"width\": 1654, \"height\": 207, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-013.webp\", \"caption\": \"\", \"page\": 0, \"index\": 13, \"width\": 1250, \"height\": 240, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-014.webp\", \"caption\": \"\", \"page\": 0, \"index\": 14, \"width\": 1083, \"height\": 142, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-015.webp\", \"caption\": \"\", \"page\": 0, \"index\": 15, \"width\": 1653, \"height\": 190, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-016.webp\", \"caption\": \"\", \"page\": 0, \"index\": 16, \"width\": 1643, \"height\": 162, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-017.webp\", \"caption\": \"\", \"page\": 0, \"index\": 17, \"width\": 1653, \"height\": 136, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-018.webp\", \"caption\": \"\", \"page\": 0, \"index\": 18, \"width\": 1641, \"height\": 121, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-019.webp\", \"caption\": \"\", \"page\": 0, \"index\": 19, \"width\": 1641, \"height\": 122, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-020.webp\", \"caption\": \"\", \"page\": 0, \"index\": 20, \"width\": 1002, \"height\": 580, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1807/table-021.webp\", \"caption\": \"\", \"page\": 0, \"index\": 21, \"width\": 1652, \"height\": 461, \"label\": \"Table\"}]"
-motivation: LLM生成步骤间的条件依赖使得不确定性量化复杂，现有方法难以显式建模。
-method: 训练回归模型，利用注意力图、概率和循环不确定性得分，采用两阶段训练学习无条件不确定性。
-result: 在多个数据集上，该方法在幻觉检测任务中取得最优结果。
-conclusion: 为LLM提供了一种无需条件分解的UQ方法，提高了模型自我评估能力。
+motivation: 现有UQ方法难以建模自回归LLM生成步骤间的条件依赖。
+method: 训练回归模型，利用注意力图、当前概率和先前token的递归不确定性分数，采用两阶段训练。
+result: 在十个数据集上的实验验证了方法的有效性。
+conclusion: 提出无条件的LLM不确定性学习方法，优于基线。
 ---
 
 ## Abstract

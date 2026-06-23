@@ -1,21 +1,21 @@
 ---
 title: Evaluating Uncertainty Quantification Methods in Argumentative Large Language Models
-title_zh: 评估论辩型大语言模型中的不确定性量化方法
+title_zh: 评估论证性大语言模型中的不确定性量化方法
 authors: "Kevin Zhou, Adam Dejl, Gabriel Freedman, Lihu Chen, Antonio Rago, Francesca Toni"
 date: 2025-11-01
 pdf: "https://aclanthology.org/2025.findings-emnlp.1184.pdf"
 tags: ["query:luq"]
 score: 8.0
-evidence: 评估论辩型大语言模型中的不确定性量化方法
-tldr: 针对论辩型大语言模型（ArgLLMs）在声明验证任务中的不确定性量化方法进行系统性评估。现有UQ方法在复杂争议性场景下的有效性缺乏研究。本文通过集成多种UQ方法到ArgLLM框架，提出了一种新颖的评估流程。实验表明不同UQ方法在论辩场景下表现差异显著，为UQ方法的适用性提供了新见解。该工作推动了不确定性量化在可解释决策中的应用。
+evidence: 在论证性LLM中评估UQ方法用于声明验证
+tldr: 不确定性量化对LLM可靠性至关重要。本文在论证性LLM框架中评估多种UQ方法在声明验证任务上的表现，并提出一种评估UQ有效性的新实验流程。结果表明UQ方法在复杂争论场景中的表现。该工作为UQ方法选择提供指导。
 source: EMNLP-2025-Findings
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/emnlp-2025-findings/anthology-2025.findings-emnlp.1184/fig-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 793, \"height\": 659, \"label\": \"Figure\"}]"
 tables_json: "[{\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.1184/table-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1652, \"height\": 466, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.1184/table-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 667, \"height\": 284, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.1184/table-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 1207, \"height\": 563, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.1184/table-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 1668, \"height\": 465, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.1184/table-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 1208, \"height\": 564, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.1184/table-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 1204, \"height\": 563, \"label\": \"Table\"}]"
-motivation: 不确定性量化对保证大语言模型可靠性至关重要，尤其是在涉及争议性陈述的决策场景中。
-method: 将多种UQ方法集成到论辩型LLM框架中，通过声明验证任务评估其有效性。
-result: 实验揭示了不同UQ方法在论辩场景下的性能差异，提供了评估方法有效性的新途径。
-conclusion: 该工作为UQ方法在复杂文本推理中的评估提供了新视角。
+motivation: 论证性LLM中UQ的作用尚需系统评估。
+method: 在ArgLLM框架中集成不同UQ方法，通过声明验证任务评估。
+result: 实验揭示了不同UQ方法在争论性声明上的效果差异。
+conclusion: 提出一种评估UQ方法的新方法，并给出实证结果。
 ---
 
 ## Abstract

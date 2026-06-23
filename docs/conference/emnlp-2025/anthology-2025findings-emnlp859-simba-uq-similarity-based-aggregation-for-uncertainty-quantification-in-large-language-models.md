@@ -1,21 +1,21 @@
 ---
 title: "SIMBA UQ: Similarity-Based Aggregation for Uncertainty Quantification in Large Language Models"
-title_zh: SIMBA UQ：基于相似性聚合的大型语言模型不确定性量化
+title_zh: SIMBA UQ：用于大语言模型的不确定性量化的基于相似性的聚合方法
 authors: "Debarun Bhattacharjya, Balaji Ganesan, Junkyu Lee, Radu Marinescu, Katya Mirylenka, Michael Glass, Xiao Shou"
 date: 2025-11-01
 pdf: "https://aclanthology.org/2025.findings-emnlp.859.pdf"
-tags: ["query:luq"]
-score: 7.0
-evidence: 基于相似性聚合的LLM黑盒不确定性量化
-tldr: 论文研究黑盒环境下LLM的不确定性量化方法，重点分析基于生成输出与采样替代之间一致性的技术。提出SIMBA UQ框架，利用相似性聚合来估计不确定性，无需访问模型内部。实验表明该方法在多个LLM和数据集上鲁棒且有效，适用于实际部署。
+tags: ["query:uq-safety"]
+score: 9.0
+evidence: 基于相似性聚合的黑盒不确定性量化
+tldr: 黑盒不确定性量化方法无需访问模型内部信息，具有实际优势。本文系统研究了基于生成输出与其他样本一致性进行不确定性估计的黑盒UQ技术。通过相似性聚合，SIMBA UQ在多个LLM上实现了稳健的置信度估计，且计算高效。该工作为黑盒场景下的LLM可靠性评估提供了实用方案。
 source: EMNLP-2025-Findings
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/emnlp-2025-findings/anthology-2025.findings-emnlp.859/fig-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1290, \"height\": 329, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-findings/anthology-2025.findings-emnlp.859/fig-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 1589, \"height\": 374, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-findings/anthology-2025.findings-emnlp.859/fig-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 1568, \"height\": 377, \"label\": \"Figure\"}]"
 tables_json: "[{\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.859/table-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1485, \"height\": 1582, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.859/table-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 1645, \"height\": 388, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-findings/anthology-2025.findings-emnlp.859/table-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 1654, \"height\": 559, \"label\": \"Table\"}]"
-motivation: 黑盒UQ方法不需要模型内部信息，对实际应用更有利，但现有方法效果不明确。
-method: 提出SIMBA UQ框架，通过计算生成输出与多个采样输出之间的相似性来聚合不确定性。
-result: 在多个黑盒LLM上，SIMBA UQ在准确性和校准度上优于现有黑盒方法。
-conclusion: 为黑盒场景下的LLM不确定性量化提供了有效且实用的解决方案。
+motivation: 探索不依赖模型内部信息的黑盒不确定性量化方法。
+method: 利用生成的多个输出之间的相似性进行聚合，估计不确定性。
+result: 在多个LLM上表现出稳健的不确定性估计能力。
+conclusion: 黑盒UQ方法兼具实用性和有效性。
 ---
 
 ## Abstract

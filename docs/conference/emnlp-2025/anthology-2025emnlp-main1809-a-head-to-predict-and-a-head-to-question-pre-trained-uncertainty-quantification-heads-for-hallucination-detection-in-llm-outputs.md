@@ -1,21 +1,21 @@
 ---
 title: "A Head to Predict and a Head to Question: Pre-trained Uncertainty Quantification Heads for Hallucination Detection in LLM Outputs"
-title_zh: 预测头与质疑头：用于LLM输出幻觉检测的预训练不确定性量化头
+title_zh: 用于预测和提问的头：预训练的不确定性量化头用于大语言模型输出中的幻觉检测
 authors: "Artem Shelmanov, Ekaterina Fadeeva, Akim Tsvigun, Ivan Tsvigun, Zhuohan Xie, Igor Kiselev, Nico Daheim, Caiqi Zhang, Artem Vazhentsev, Mrinmaya Sachan, Preslav Nakov, Timothy Baldwin"
 date: 2025-11-01
 pdf: "https://aclanthology.org/2025.emnlp-main.1809.pdf"
-tags: ["query:luq"]
-score: 8.0
-evidence: 用于LLM幻觉检测的预训练不确定性量化头
-tldr: 该论文提出预训练的不确定性量化（UQ）头，作为LLM的辅助模块，利用注意力图和logits等特征，显著增强模型捕获不确定性的能力。相比无监督UQ方法，该监督方法在多个幻觉检测任务上取得更优性能，为提升LLM输出可靠性提供了有效工具。
+tags: ["query:uq-safety"]
+score: 9.0
+evidence: 预训练的监督UQ头用于LLM幻觉检测
+tldr: 大语言模型容易产生幻觉。本文提出预训练的不确定性量化头作为监督辅助模块，从注意力图和logits提取特征，显著提升LLM捕捉不确定性的能力。实验表明方法优于无监督UQ方法。该工作为LLM输出可靠性提供实用工具。
 source: EMNLP-2025-Main
 selection_source: conference_retrieval
 figures_json: "[{\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1809/fig-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1127, \"height\": 765, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1809/fig-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 779, \"height\": 762, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1809/fig-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 792, \"height\": 478, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1809/fig-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 1634, \"height\": 648, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1809/fig-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 735, \"height\": 481, \"label\": \"Figure\"}, {\"url\": \"assets/figures/emnlp-2025-main/anthology-2025.emnlp-main.1809/fig-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 883, \"height\": 507, \"label\": \"Figure\"}]"
 tables_json: "[{\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-001.webp\", \"caption\": \"\", \"page\": 0, \"index\": 1, \"width\": 1650, \"height\": 474, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-002.webp\", \"caption\": \"\", \"page\": 0, \"index\": 2, \"width\": 813, \"height\": 384, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-003.webp\", \"caption\": \"\", \"page\": 0, \"index\": 3, \"width\": 653, \"height\": 322, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-004.webp\", \"caption\": \"\", \"page\": 0, \"index\": 4, \"width\": 598, \"height\": 316, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-005.webp\", \"caption\": \"\", \"page\": 0, \"index\": 5, \"width\": 1267, \"height\": 231, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-006.webp\", \"caption\": \"\", \"page\": 0, \"index\": 6, \"width\": 1648, \"height\": 363, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-007.webp\", \"caption\": \"\", \"page\": 0, \"index\": 7, \"width\": 1200, \"height\": 485, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-008.webp\", \"caption\": \"\", \"page\": 0, \"index\": 8, \"width\": 521, \"height\": 426, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-009.webp\", \"caption\": \"\", \"page\": 0, \"index\": 9, \"width\": 703, \"height\": 240, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-010.webp\", \"caption\": \"\", \"page\": 0, \"index\": 10, \"width\": 486, \"height\": 181, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-011.webp\", \"caption\": \"\", \"page\": 0, \"index\": 11, \"width\": 674, \"height\": 210, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-012.webp\", \"caption\": \"\", \"page\": 0, \"index\": 12, \"width\": 1328, \"height\": 195, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-013.webp\", \"caption\": \"\", \"page\": 0, \"index\": 13, \"width\": 1512, \"height\": 386, \"label\": \"Table\"}, {\"url\": \"assets/tables/emnlp-2025-main/anthology-2025.emnlp-main.1809/table-014.webp\", \"caption\": \"\", \"page\": 0, \"index\": 14, \"width\": 1321, \"height\": 593, \"label\": \"Table\"}]"
-motivation: LLM易产生幻觉，现有无监督UQ方法效果有限，需要更准确的检测工具。
-method: 设计基于Transformer架构的预训练UQ头，从注意力图和logits中提取特征进行监督训练。
-result: 实验表明，预训练UQ头在幻觉检测准确率上大幅优于现有无监督方法。
-conclusion: 为LLM提供了一种高效的、可泛化的不确定性量化模块，有助于识别幻觉输出。
+motivation: LLM产生幻觉难以检测，现有无监督UQ方法不足。
+method: 设计基于Transformer的预训练UQ头，利用注意力图和logits特征。
+result: 实验证明预训练UQ头显著优于无监督方法。
+conclusion: 提出监督式UQ头增强LLM不确定性估计。
 ---
 
 ## Abstract
