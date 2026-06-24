@@ -1,0 +1,935 @@
+Title: Right Knowledge, Wrong Answer: Test-Time Steering for Temporal Fact Conflicts in Open-Weight Language Models
+
+URL Source: https://arxiv.org/pdf/2606.20959v1
+
+Published Time: Tue, 23 Jun 2026 00:21:21 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+# Right Knowledge, Wrong Answer: Test-Time Steering for Temporal Fact Conflicts in Open-Weight Language Models 
+
+Elias Hossain 1†, Sourav Saha 1†, Umesh Chandra Biswas 2, Sanjeda Sara Jennifer 11University of Central Florida 2Mississippi State University 
+
+mdelias.hossain@ucf.edu 
+
+#  
+
+> Project Dataset
+
+# §
+
+> Code
+
+Abstract 
+
+Large language models often retain both out-dated facts and newer superseding facts in para-metric memory, yet standard prompting can still elicit the outdated answer. We formal-ize this phenomenon as Parametric Temporal Conflict (PTC) and introduce TAS 1 (Tempo-ral Attractor Steering), a three-stage test-time intervention that detects likely conflicts, local-izes a conflict-critical layer, and steers hid-den states toward newer-fact representations without retraining or external retrieval. We construct an 8,746 -record verified benchmark spanning five Wikidata relations and evalu-ate four open-weight LMs across three fami-lies: Qwen-2.5-1.5B/7B, Mistral-7B-v0.3, and Llama-3.1-8B. Single-layer activation patching achieves answer-flip rates of 0.72 –0.85 across all models. End-to-end TAS recovers 29 –57% 
+
+of PTC cases while preserving 85 –99% accu-racy on non-conflict queries, and outperforms a matched ITI baseline on three of four mod-els. These results provide a mechanism-first, retrieval-free account of how outdated paramet-ric knowledge can be selectively overridden at inference time. 
+
+1 Introduction 
+
+Language models are trained on corpora spanning many years, during which facts naturally change. Consequently, a model may encode both an earlier fact and its later replacement, such as an older CEO and a newer CEO, an earlier head of state and a       
+
+> †Equal contribution.
+> 1Code is available at https://github.com/ eliashossain001/temporal-attractor-steering
+> and the verified PTC benchmark at https://huggingface. co/datasets/EliasHossain/ptc-benchmark .
+
+later one, or a deprecated API and its successor. Un-der standard prompting, however, the model may still surface the outdated fact, even when a tempo-ral cue such as “As of 2024, who is. . . ” reveals that the updated fact is internally recoverable (Ka-sai et al., 2023; Vu et al., 2024; Zhao et al., 2024; Herel et al., 2024). This suggests a distinct failure mode: the newer fact is stored in parametric mem-ory, but standard prompting preferentially elicits the outdated one. 
+
+Existing work addresses related temporal knowl-edge issues, but not this specific setting. Time-sensitive QA and temporal benchmarks (Chen et al., 2021; Zhang and Choi, 2021; Kasai et al., 2023; Vu et al., 2024; Zhao et al., 2024; Herel et al., 2024; Chu et al., 2024; Uddin et al., 2025; Zhu et al., 2025) measure temporal correctness, but do not distinguish knowledge absence from recoverable knowledge already stored in the model. Continual-learning methods (Dhingra et al., 2022; Zhao et al., 2022; Kim et al., 2024; Fierro et al., 2024) update model weights over time, but do not provide a test-time mechanism for selecting between coexisting fact versions. Work on knowledge conflicts (Xu et al., 2024) identifies temporal misalignment as a source of intra-memory conflict, yet retrieval-free inference-time resolution remains underexplored. Concurrent activation-engineering work for tempo-ral alignment (Govindan et al., 2025) steers queries unconditionally, without separating knowledge ab-sence from conflict or evaluating preservation on non-conflict records. We study this phenomenon as Parametric Tempo-ral Conflict (PTC): a setting in which the updated fact is recoverable from the model, but the default response favors an outdated alternative. Our goal    
+
+> arXiv:2606.20959v1 [cs.LG] 18 Jun 2026 Who is the CEO of X?
+> Pretrained LLM
+> (weights frozen)
+> Transformer layers
+> LM Head
+> Static knowledge
+> Outdated fact retrieval
+> Question pair
+> As of 2024, who is
+> the CEO of X?
+> Frozen LLM
+> repeated passes
+> Compare
+> outputs
+> Activation patching
+> across layers
+> No gradient update
+> No retraining
+> Frozen LLM Baseline
+> (Standard prompt inference)
+> Temporal Conflict
+> Localization
+> Detect factual
+> conflict
+> (Standard vs. temporal prompt)
+> Standard prompt
+> Temporal-aware correction
+> Newer fact recovery
+> Temporal Steering
+> Frozen LLM
+> Inject steering at layer
+> Steered hidden state
+> LM Head
+> (Recover newer fact)
+> Layer 1 Layer 2 Layer L
+> Outdates answer
+> Identify conflict-critical layer
+> Recover answer
+
+Figure 1: Overview of Parametric Temporal Conflict (PTC) and Temporal Attractor Steering ( TAS ). (A) Standard prompting retrieves an outdated answer from parametric memory. (B) Conflict localization compares standard and temporally cued prompts and identifies a conflict-critical layer ℓ∗ through activation patching. (C) Temporal steering shifts the hidden state toward the newer-fact representation without retrieval or retraining. 
+
+is to determine whether such conflicts can be de-tected, localized, and resolved at inference time without retrieval, retraining, or modifying model weights. To address this problem, we introduce TAS 
+
+(Temporal Attractor Steering), an inference-time framework operating on residual-stream activa-tions. As illustrated in Figure 1, TAS follows a 
+
+detect → locate → steer pipeline: it identifies ver-ified PTC cases, localizes conflict-critical layers through activation patching, and applies a steer-ing direction that shifts the model toward the up-dated fact. This design enables conflict-gated inter-vention while preserving behavior on non-conflict queries. We further provide theoretical intuition for when such steering interventions succeed. We make three contributions: • Formalization and filtering. We formalize 
+
+Parametric Temporal Conflict (PTC; Defini-tion 2) and introduce a knowledge-recovery filter (Section 2 and Appendix D) that sep-arates true temporal conflict from simple knowledge absence. • Temporal Attractor Steering. We introduce 
+
+TAS (Temporal Attractor Steering; Section 3), a retrieval-free and training-free inference-time framework that detects, localizes, and steers recoverable temporal conflicts through residual-stream activations. We also provide sufficient conditions under which TAS flips the preference inequality defining PTC (Sec-tion 4). • Verified multi-model evaluation. We eval-uate TAS on an 8,746 -record verified bench-mark spanning five Wikidata relations and four open-weight language models: Qwen-2.5-1.5B, Qwen-2.5-7B, Mistral-7B-v0.3, and Llama-3.1-8B (Section 5). TAS recovers 
+
+29 –57% of PTC cases while preserving non-conflict behavior with 85 –99% accuracy, out-performing ITI (Li et al., 2023) on three of four models. Across models, PTC rates increase from 0.041 
+
+to 0.103 , while activation patching achieves 0.72 –
+
+0.85 answer-flip rates. These results show that temporal conflicts are measurable, localized, and resolvable through retrieval-free inference-time in-tervention. 
+
+2 Preliminaries and Problem Formulation 
+
+2.1 Definitions 
+
+Let θ denote a pretrained autoregressive LM, 
+
+Pθ(y | x) its probability for completion y given prompt x, and hℓ(x) ∈ Rd the residual-stream rep-resentation at layer ℓ.
+
+Definition 1 (Temporal Fact Quadruple) . A tuple 
+
+Q = ( q, a old , a new , t update ) contains a query q, an answer aold correct before tupdate , and a supersed-ing answer anew correct after tupdate .
+
+Definition 2 (Parametric Temporal Conflict) . An LLM θ exhibits PTC on Q if 
+
+Pθ(aold | q) > P θ(anew | q), (1) 
+
+Pθ(anew | q, c temp ) ≫ Pθ(aold | q, c temp ), (2) where ctemp is a temporal cue and both answers are verified as parametrically plausible completions. 
+
+Knowledge-recovery filter. To ensure that PTC reflects conflict rather than knowledge absence, we retain a record only if log P θ(anew | q, c temp ) ≥
+
+τrec , with τrec = −3. Records below this threshold are marked knowledge-absent for that model and excluded from filtered PTC rates. We report both raw and filtered rates throughout (Fig. 3; full per-model effect in Appendix D). 
+
+2.2 Frequency-Recency Hypothesis 
+
+Older facts may form stronger attractors because they receive more pre-training exposure over time (Kim et al., 2024; Fierro et al., 2024). We there-fore test whether preference for aold increases with the cumulative co-occurrence advantage of (q, a old )
+
+over (q, a new ). We evaluate this indirectly by vary-ing model scale and family on the same benchmark (Section 6.1); within-model checkpoint analysis is left to future work. Complementary evidence that temporal information is geometrically structured in weight space comes from Nylund et al. (2024), who show that fine-tuning on time-specific data produces weight-space vectors that encode the tar-get time period and support interpolation across adjacent time windows. Their result suggests that temporal signals separable at the weight level are plausibly also separable at the residual-stream level, motivating TAS ’s activation-level intervention de-sign. 
+
+3 Temporal Attractor Steering 
+
+TAS is a three-stage inference-time pipeline for open-weight models. Detect (Stage 1): alightweight probe scores whether a query likely exhibits PTC. Locate (Stage 2): a conflict-critical layer ℓ∗ is identified once per model family via causal activation patching. Steer (Stage 3): if the detector score exceeds a threshold τ , the hidden state at ℓ∗ is perturbed toward the newer-fact direc-tion using a precomputed steering vector ∆. The method requires no retraining and no external re-trieval. The full algorithm is in Appendix B. 
+
+Stage 1: Detection. For a query q, we compute 
+
+c = s(hℓ∗ (q)) ∈ [0 , 1] via a linear probe trained on verified PTC positives and matched non-conflict negatives. If c ≤ τ the query is left unchanged; if 
+
+c > τ it is passed to the steering stage. We calibrate the probe with isotonic regression on a held-out fold and evaluate via AUPRC , in-pipeline detector recall, and downstream preservation accuracy. 
+
+Stage 2: Layer Localization. On a held-out set of verified PTC tuples we compute, for each layer ℓ, the answer-flip rate AFR( ℓ) induced by patching hℓ from the temporal-prompt forward pass into the standard-prompt forward pass at the last prompt token. The conflict-critical layer is 
+
+ℓ∗ = arg max ℓ AFR( ℓ). We also report the con-tiguous plateau width (layers with AFR within 
+
+0.05 of peak). 
+
+Stage 3: Steering. At ℓ∗ we construct a steering direction 
+
+∆ = mean q
+
+hℓ∗ (q, c temp ) − hℓ∗ (q)
+
+averaged over verified PTC instances. Three vari-ants differ in averaging granularity: V1 (global, single ∆), V2 (per-relation, one ∆ per Wikidata relation), V3 (per-domain). The intervention is 
+
+h′ 
+
+> ℓ∗
+
+(q) = hℓ∗ (q) + α · c · ∆, (3) where α > 0 controls intervention strength. V2 dominates V1 and V3 on a pilot ablation (Ap-pendix H); we use V2 throughout the main results. 
+
+4 Theoretical Motivation 
+
+Two sufficient-condition results motivate the em-pirical study. Under Parametric Co-encoding ( aold 
+
+and anew both encoded; temporal elicitation re-covers anew ), Local Separability ( hℓ∗ (q, c temp ) −
+
+hℓ∗ (q) lies in an identifiable direction in a neigh-bourhood of the conflict instances), and a Bounded-Steering condition, there exists α∗ > 0 such that on any verified PTC instance TAS yields 
+
+Pθ(anew | q, TAS ) > P θ(aold | q, TAS ) (TAS 
+
+Correctness); and for any query with detector score 
+
+c ≤ τ , TAS leaves the forward pass unchanged (No-Op Preservation). Full statements, assump-tions, and local-margin proof outlines are deferred to Appendix A. Both results are operationalised empirically: Local Separability is witnessed by the Stage 2 locator (Section 6.3); the existence of 
+
+α∗ is witnessed by the oracle α-sweep on the V2 vector (Section 6.4); and preservation accuracy on matched non-conflict records (Section 6.5) corre-sponds to No-Op Preservation. 
+
+5 Benchmark and Experimental Setup 
+
+Benchmark. We construct a verified 8,746 -record benchmark by mining superseding factual updates from Wikidata. Each record contains a verified (aold , a new , t update ) triple with a stan-dard prompt ( “Who is the ⟨role ⟩ of ⟨subject ⟩?” )and a temporal prompt ( “As of ⟨t⟩, who was the 
+
+⟨role ⟩ of ⟨subject ⟩?” ) where t falls inside the new fact’s validity window. Records are admit-ted only if all of the following hold: (i) the update is superseding rather than additive; (ii) the aold 
+
+and anew validity windows are non-overlapping; (iii) both answers are grammatically and factu-ally plausible completions; and (iv) the model under test satisfies the knowledge-recovery filter 
+
+log P θ(anew | q, c temp ) ≥ τrec on the record. Con-dition (iv) is model-specific by construction; we therefore report both raw (all records) and filtered 
+
+(model-recoverable) PTC rates as a pair throughout (Fig. 3). Full construction details and verification conditions are in Appendix E. 
+
+Relation distribution. The benchmark spans five Wikidata relations across three domains (Fig. 2). The distribution is intentionally unbalanced and re-flects the size of each position-holder population at source: head of state (P35) and CEO (P169) are the smallest, head of government (P6), head coach (P286), and chairperson (P488) are the largest. Per-relation analysis (Section 6.2) shows that the small-est two relations carry the largest per-record PTC signal, so the unbalanced distribution is a feature rather than a confound. 
+
+Models. We evaluate four open-weight, base (non-instruct) LMs spanning three families. Qwen-2.5-1.5B and Qwen-2.5-7B share architecture, training data, and tokenizer and isolate the effect of parameter count. Mistral-7B-v0.3 and Llama-3.1-8B provide two additional families at the matched 
+
+7–8B-parameter class, allowing us to disentangle scale from family-specific properties. All four models are evaluated under identical prompting and scoring protocols. We exclude instruction-tuned variants because chat alignment is known to alter temporal recall in ways that confound the parametric-memory signal we wish to measure (Herel et al., 2024). 
+
+Operational metrics. For each instance, we com-pute 
+
+s(a, x ) = log P θ(a | x)= 1
+
+|a|
+
+> |a|
+
+X
+
+> i=1
+
+log Pθ(ai | x, a <i ). (4) We report five metrics: • OPR : fraction where s(aold , q ) >s(anew , q ).• Recovery : fraction that flips under the tempo-ral cue or TAS .• PTC rate : conjunction defined in Defini-tion 2. • EG : mean difference s(anew , q, c temp ) −
+
+s(anew , q ).• PA : fraction of matched non-conflict records whose argmax over {aold , a new } is un-changed. Full definitions and the ITI baseline construction are in Appendix C. 
+
+6 Results 
+
+6.1 PTC Screening and Recovery Filtering 
+
+Three patterns dominate the headline screening (Fig. 3). First, OPR is essentially family-invariant (0.530 –0.544 ). Second, EG is positive on every model ( +0 .090 to +0 .180 nats), so the temporal cue moves probability mass toward anew univer-sally. Third, filtered PTC scales strictly monoton-ically with capacity ( 0.041 < 0.071 < 0.085 <
+
+0.103 ). The knowledge-recovery filter is essen-tial: raw PTC is partly driven by coverage differ-ences (Qwen-1.5B retains 28 .2% vs. Llama-3.1-8B’s 66 .1% ), and only the filtered rate separates the four models. The monotonic capacity scaling on the filtered subset matches the frequency–recency hypothesis at the inter-model scale and falsifies the alternative that PTC is a small-model artefact, motivating the mechanistic analysis in Sections 6.3 and 6.4. 
+
+6.2 Relation, Domain, and Era Effects 
+
+Per-relation PTC (Fig. 7) is unevenly concentrated: head of state (P35) dominates every model ( 0.066 –
+
+0.235 , 2–3× the next-strongest relation), CEO (P169) is the secondary capacity-scaling relation, and the three high-volume relations contribute most of the records but only moderate per-record sig-nal. This motivates V2 (per-relation) steering (Sec-tion 3): a relation-conditional ∆ avoids diluting 1000 0 1000 2000 3000 4000 
+
+Records in benchmark 
+
+> 183 (2.1%) P35: head of state
+> 208 (2.4%) P169: chief exec. officer
+> 2,391 (27.3%) P286: head coach
+> 2,381 (27.2%) P488: chairperson
+> 3,583 (41.0%) P6: head of government
+
+Benchmark relation distribution ( N=8,746 records)   
+
+> politics corporate sports
+
+Figure 2: Benchmark relation distribution ( N =8 ,746 records, five Wikidata relations, three domains). The two smallest relations, P35 (head of state, n=183 ) and P169 (CEO, n=208 ), carry the strongest per-record PTC signal across all four models (Section 6.2). Qwen-2.5 
+
+> 1.5B
+> Qwen-2.5
+> 7B
+> Mistral-7B
+> v0.3
+> Llama-3.1
+> 8B
+
+0.50 
+
+0.51 
+
+0.52 
+
+0.53 
+
+0.54 
+
+0.55 
+
+0.56 
+
+0.57 
+
+0.58   
+
+> OPR (outdated-preference rate)
+> 0.530
+> 0.544 0.540 0.540
+
+(a) OPR is family-invariant 
+
+> 0.530--0.544 band
+> Qwen-2.5
+> 1.5B
+> Qwen-2.5
+> 7B
+> Mistral-7B
+> v0.3
+> Llama-3.1
+> 8B
+
+0.00 
+
+0.02 
+
+0.04 
+
+0.06 
+
+0.08 
+
+0.10 
+
+0.12 
+
+> PTC rate
+> 0.041
+> 0.071
+> 0.085
+> 0.103
+> 0.024
+> 0.036
+> 0.060
+> 0.073
+
+(b) Filtered PTC scales monotonically with capacity 
+
+> raw
+> filtered
+
+Figure 3: Phase 1 screening on the 8,746 -record benchmark. (a) The outdated-preference rate ( OPR ) is approx-imately family-invariant across the four models, all within the [0 .530 , 0.544] band. (b) The filtered PTC rate 
+
+increases monotonically with parameter count ( 0.041 → 0.071 → 0.085 → 0.103 ), where Kept is the fraction of records passing the knowledge-recovery filter ( log P (anew | q, c temp ) ≥ − 3; 28 .2% on Qwen-1.5B up to 66 .1% on Llama-3.1-8B). The elicitation gap is positive on every model ( EG ∈ [+0 .090 , +0 .180] nats). 
+
+the strong-signal P35/P169 directions with noisier high-volume ones. 
+
+Temporal era. Bucketing by tupdate year (Fig. 4) gives an inverted-U with [2020 , 2021] as the peak for all three 7–8B models (Qwen-7B 0.046 , Mis-tral 0.079 , Llama-3.1-8B 0.089 ); the three fami-lies locate the same temporal sweet spot, suggest-ing convergence rather than single-model artefact. Llama-3.1-8B uniquely retains a substantial 2022 –
+
+2024 rate ( 0.079 ), consistent with its more recent training cutoff. 
+
+Domain. At the domain level (politics > corpo-rate > sports across all models; Appendix F), the ordering is preserved by the underlying relation distribution (P35 and P6 are both political) rather than by domain-specific representational structure. 2015      
+
+> (n= 1879)
+> 2016--2019
+> (n= 2741)
+> 2020--2021
+> (n= 2417)
+> 2022--2024
+> (n= 1697)
+> Update era ( tupdate bucket)
+> 0.00
+> 0.02
+> 0.04
+> 0.06
+> 0.08
+> 0.10
+> Raw PTC rate
+> marks the 2020--2021 peak (7--8B class)
+> Qwen-2.5-1.5B
+> Qwen-2.5-7B
+> Mistral-7B-v0.3
+> Llama-3.1-8B
+
+Figure 4: Per-era raw PTC rate. The 2020 –2021 bucket is the peak for the three 7–8B-class models (stars); Llama-3.1-8B uniquely retains a substantial 2022 –2024 
+
+rate, consistent with its more recent training cutoff. 
+
+6.3 Layer Localization via Patching 
+
+Table 1 reports the Stage 2 locator output. Single-layer single-token activation patching, drawn from the temporal-prompt forward pass and injected into the standard-prompt forward pass at the last prompt Model L ℓ∗ Peak AFR Plateau Range                               
+
+> Qwen-2.5-1.5B 28 23 0.723 622–27 Qwen-2.5-7B 28 23 0.851 622–27 Mistral-7B-v0.3 32 30 0.824 14 18–31 Llama-3.1-8B 32 31 0.816 923–31
+> Table 1: Stage 2 layer localisation. L: model depth; ℓ∗:conflict-critical layer; Peak AFR : answer-flip rate at ℓ∗
+> for a single-token activation patch from the temporal-prompt into the standard-prompt forward pass; Plateau :contiguous layers with AFR within 0.05 of peak; Range :layer indices of that plateau. The two Qwens share a tight 6-layer mid-network plateau, Mistral’s plateau is unusually wide ( 14 layers), and Llama’s is concentrated at the final decoder layers.
+
+token, flips the answer argmax on 72 .3–85 .1% of verified PTC instances. This is direct empirical ev-idence for the existence of a conflict-critical layer and for the local separability precondition that The-orem 1 relies on (Assumption 2). All four mod-els satisfy this precondition on this benchmark, al-though peak AFR varies somewhat across models (0.72 –0.85 ). The conflict-resolution circuit lives in the upper half of every architecture but at family-specific lay-ers ( ℓ∗ ∈ { 23 , 23 , 30 , 31 }) and with very different plateau widths ( 6–14 layers); the two Qwens share both, while Mistral’s broad 14 -layer plateau and Llama’s narrower end-network band indicate dis-tributed vs. concentrated readout. Per-layer profiles are in Appendix G. 
+
+6.4 End-to-End TAS Performance 
+
+End-to-end TAS (V2 per-relation ∆; Table 2) re-covers 0.288 –0.569 of verified PTC cases on the full benchmark with preservation accuracy 0.849 –
+
+0.987 on non-conflict records. The strongest pair is Qwen-2.5-7B ( 0.569 /0.948 at τ =0 .15 ); Mis-tral and Llama maintain PA of 0.936 and 0.849 
+
+at τ =0 .30 at lower Recovery. 
+
+Why Qwen-2.5-7B does best, and oracle gap. 
+
+Qwen-2.5-7B combines strong-but-not-saturated middle-era coverage (filtered PTC 0.071 , 39 .8% 
+
+recoverable), a tight 6-layer mid-network plateau, and a small per-instance steering norm, so α∗=2 
+
+crosses the argmax boundary without overshooting. Table 3 compares V2 oracle Recovery (always-on) to detector-gated end-to-end Recovery: the gap is 
+
+≤ 0.01 on Mistral and Llama (the detector catches essentially every steerable case), 0.048 on Qwen-7B, and 0.123 on Qwen-1.5B, the latter tracking the weaker detector AUPRC (0.258 ; Appendix I). 
+
+6.5 Detector Threshold Trade-offs 
+
+Sweeping τ ∈ { 0.15 , 0.20 , 0.30 } (Table 4) shows two regimes rather than a smooth curve. Aggres-sive τ =0 .15 fires on 21 –100% of records: Qwen-7B reaches 0.569 /0.948 but Mistral/Llama over-steer (PA 0.84 –0.94 ). Conservative τ =0 .30 keeps PA above 0.93 for all four models at lower Recov-ery (Qwen-7B again strongest at 0.487 /0.987 ). The two-regime behaviour likely reflects the small isotonic calibration fold rather than the steer-ing signal itself (Section 8). 
+
+6.6 TAS vs. ITI Baseline 
+
+We compare TAS against an ITI (Li et al., 2023) baseline that shares ℓ∗, single-direction parameteri-sation, and identical α sweep with operating point chosen to maximise J = Recovery − (1 − PA) ,so that only the construction of ∆ varies. ∆ITI 
+
+is the prefers-new minus prefers-old mean of hℓ∗
+
+under the standard prompt; the contrast pair is al-ready PTC-relevant (not the truthful/deceptive con-trast of the original ITI), making the comparison a strong test of verified-conflict vs. population-level construction. 
+
+TAS ’s verified-conflict ∆ outperforms ITI’s behavioural-contrast ∆ on three of four models (Table 5). On the two Qwens, TAS gains +0 .142 
+
+and +0 .152 Recovery at PA within 0.010 of ITI, in-dicating that constructing ∆ from instances where the model demonstrably defaults to outdated under standard prompting and recovers the newer fact under temporal elicitation retains conflict-relevant geometry that a population-level contrast loses. On Llama-3.1-8B the gain is smaller ( +0 .050 ) and on Mistral-7B-v0.3 the ordering reverses ( −0.056 ), so we frame the comparison as a controlled per-model ablation of ∆ construction rather than a sweeping superiority claim. Where TAS leads, it does so be-cause verified PTC instances align ∆ more sharply with the recovery axis; where ITI leads (Mistral), the behavioural-contrast direction happens to be better aligned with that axis at this model’s ℓ∗, an interesting failure mode of verified-conflict averag-ing that we leave to future work. 
+
+6.7 Cross-Model Agreement and Transfer 
+
+Fig. 5 reports pairwise PTC-positive intersections on the 8,734 records common to all four runs. Model τ α Det. AUPRC Det. recall Steered Recovery PA (clean)                                    
+
+> Qwen-2.5-1.5B 0.15 20.258 0.804 21.0% 0.392 0.987 Qwen-2.5-7B 0.15 20.356 0.997 97.2% 0.569 0.948 Qwen-2.5-7B 0.30 20.356 0.830 20.6% 0.487 0.987 Mistral-7B-v0.3 0.30 60.525 0.962 65.6% 0.288 0.936 Llama-3.1-8B 0.30 60.511 0.994 95.8% 0.374 0.849
+
+Table 2: End-to-end TAS on the full 8,746 -record benchmark (V2 per-relation ∆). Two operating points are shown for Qwen-2.5-7B (aggressive τ =0 .15 vs. conservative τ =0 .30 ) to illustrate the Recovery / PA trade-off. The full τ
+
+sweep across all four models is in Table 4.                
+
+> Model Oracle V2 Full TAS Gap
+> Qwen-2.5-1.5B 0.515 0.392 0.123
+> Qwen-2.5-7B 0.617 0.569 0.048
+> Mistral-7B-v0.3 0.293 0.288 0.005
+> Llama-3.1-8B 0.382 0.374 0.008
+
+Table 3: Oracle vs. full-pipeline Recovery gap at each model’s best operating point. Oracle V2 applies the V2 per-relation steering unconditionally to every verified PTC instance; Full TAS adds the detector gate at the model’s selected τ , so cases the detector fails to flag are not steered. The Gap column quantifies how much Recovery the detector sacrifices vs. an unconditional oracle. The gap is tiny for Mistral ( 0.005 ) and Llama (0.008 ), indicating their detectors catch almost every steerable case; the larger gap for Qwen-2.5-1.5B ( 0.123 )tracks its weaker detector AUPRC ( 0.258 ; Fig. 9). 
+
+Only 6 records are flagged by all four models simultaneously (union 1,287 ): each model has its own characteristic PTC subset within a shared phe-nomenon. The Mistral ∩ Llama overlap ( 193 ) is more than 5× the two-Qwen overlap ( 38 ), even though the two Qwens share architecture and train-ing data, suggesting that at matched scale training-data recency is more predictive of PTC-instance alignment than tokenizer family or architectural lineage. Cross-family steering-vector transfer is deferred to Appendix J. 
+
+7 Related Work 
+
+Temporal QA and knowledge updating. LMs degrade on time-anchored recall (Chen et al., 2021; Zhang and Choi, 2021; Kasai et al., 2023) and on temporal reasoning more broadly (Chu et al., 2024; Tan et al., 2024; Zhu et al., 2023, 2025; Zhang et al., 2024; Uddin et al., 2025; Fatemi et al., 2024); re-trieval and year-conditioning fixes (Vu et al., 2024; Zhao et al., 2024; Herel et al., 2024) and continual-learning methods (Dhingra et al., 2022; Zhao et al., 2022; Kim et al., 2024) only partially close the                                         
+
+> Model τRec. PA Steered
+> Qwen-2.5-1.5B 0.15 0.392 0.987 21.0% 0.20 0.354 0.994 15.6% 0.30 0.158 0.998 6.0% Qwen-2.5-7B 0.15 0.569 0.948 97.2% 0.20 0.503 0.979 39.4% 0.30 0.487 0.987 20.6% Mistral-7B-v0.3 0.15 0.290 0.924 78.4% 0.20 0.290 0.924 78.3% 0.30 0.288 0.936 65.6% Llama-3.1-8B 0.15 0.379 0.844 99.6% 0.20 0.379 0.844 99.5% 0.30 0.374 0.849 95.8%
+
+Table 4: Full τ sweep of end-to-end TAS . PA is the clean non-conflict subset. The pattern is two regimes (aggressive τ ≤ 0.20 vs. conservative τ ≥ 0.30 ) rather than a smooth curve, reflecting the isotonic calibrator’s discrete-output behaviour on a small held-out training fold. 
+
+gap, and none isolates the parametric coexistence 
+
+targeted by PTC. 
+
+Knowledge conflicts and steering. Xu et al. (2024) identify temporal misalignment as the pri-mary driver of intra-memory conflict; Dynam-icQA (Marjanovi´ c et al., 2024) mixes temporal with disputable facts; MuLan (Fierro et al., 2024) shows hidden states encode a mutable/immutable distinction; Dey et al. (2026) reconcile both; Ba-jpai et al. (2024) probe consistency but not out-dated preference. Nylund et al. (2024) structure temporal signals in fine-tuned weight space; TAS 
+
+makes the analogous claim for the pretrained resid-ual stream at inference time. Li et al. (2025) (J UICE) intervene on attention heads for context-memory conflict; Pham et al. (2026) concurrently locate intra-memory conflicts via activation patch-ing on synthetic biographies but provide no steer-ing, no recovery filter, and no verified real-world evaluation. Among activation-steering methods, ITI (baseline) TAS V2 (oracle) Model α∗ Recovery PA α∗ Recovery PA ∆ Rec. 
+
+Qwen-2.5-1.5B 6 0.373 0.940 2 0.515 0.930 +0 .142 
+
+Qwen-2.5-7B 8 0.465 0.895 2 0.617 0.940 +0 .152 
+
+Mistral-7B-v0.3 8 0.349 0.910 6 0.293 0.870 −0.056 
+
+Llama-3.1-8B 6 0.332 0.915 6 0.382 0.850 +0 .050 
+
+Table 5: TAS V2 (oracle) vs. ITI on all four open-weight models, at each model’s J-optimal operating point (J = Recovery − λ(1 −PA) on the same matched control set, with the same α grid). Only the construction of ∆
+
+varies. Highest Recovery per model in cream. TAS leads on the two Qwens and Llama-3.1-8B; on Mistral-7B-v0.3 the ordering reverses, so we frame the comparison as a controlled per-model ablation of ∆ construction. ITI numbers come from the ITI evaluation under the same sweep protocol; TAS numbers from the oracle V2 evaluation. 0 50 100 150 200        
+
+> Pairwise PTC-positive overlap (record count)
+> 193 Mistral Llama-3.1-8B
+> 98 Qwen-7B Llama-3.1-8B
+> 95 Qwen-7B Mistral
+> 38 Qwen-1.5B Qwen-7B
+> 37 Qwen-1.5B Llama-3.1-8B
+> 27 Qwen-1.5B Mistral
+> 193 (largest)
+> Cross-model PTC-positive overlap (four-way intersection = 6; union = 1, 287)
+
+Figure 5: Pairwise and four-way PTC-positive overlap on the 8,734 records common to all four runs. The Mis-tral ∩ Llama-3.1-8B intersection ( 193 ) is the largest pair-wise overlap and substantially exceeds the two-Qwen overlap ( 38 ), even though the two Qwens share archi-tecture and training data. 
+
+Govindan et al. (2025) steer unconditionally with-out separating knowledge absence from conflict or reporting PA; Kang et al. (2026)’s TTSV tar-gets general task adaptation; Li et al. (2026) use a structurally analogous locate-then-steer pipeline for Theory-of-Mind alignment. ITI (Li et al., 2023) is our matched conflict-agnostic baseline. ROME/MEMIT (Meng et al., 2022a,b) edit weights via causal tracing (Geva et al., 2021; Hase et al., 2023) rather than acting at query time. 
+
+Positioning of TAS. TAS is the first method that (i) builds ∆ from verified per-instance PTC 
+
+conflicts rather than a behavioural contrast (ITI), weight edit (ROME/MEMIT), or synthetic patch (Pham et al., 2026; Govindan et al., 2025; Fatemi et al., 2024; Nylund et al., 2024); (ii) is conflict-gated rather than always-on (Govindan et al., 2025; Kang et al., 2026; Li et al., 2026); and (iii) lo-calises on real superseding facts . The combination yields 29 –57% Recovery at 85 –99% PA and beats a matched ITI baseline on three of four models with Recovery gains of +0 .05 –+0 .15 (Table 5). 
+
+8 Conclusion 
+
+Parametric Temporal Conflict is a distinct fail-ure mode: the newer answer is recoverable from parametric memory under a temporal cue, yet the model defaults to the outdated one under standard prompting, separating PTC from both knowledge absence and generic temporal-recall degradation and making it a target for test-time intervention without retrieval or weight updates. Across a veri-fied 8,746 -record benchmark and four open-weight LMs from three families, filtered PTC scales mono-tonically with capacity ( 4–10% ); single-layer ac-tivation patching achieves AFR ≥ 0.72 ; and end-to-end TAS recovers 29 –57% of PTC at 85 –99% 
+
+PA, beating a matched ITI baseline on three of four models with Recovery gains of +0 .05 –+0 .15 and underperforming on Mistral-7B-v0.3 by 0.056 , a controlled per-model ablation of ∆ construction rather than a sweeping superiority claim. 
+
+Practical takeaways. Three implications follow. First, when an open-weight model appears to hold outdated facts, the key question is whether the newer fact is already recoverable from paramet-ric memory ; the knowledge-recovery filter pro-vides a cheap diagnostic without retraining or re-trieval. Second, the conflict-critical layer ℓ∗ is family-specific but stable and consistently located in the upper half of the network, so it can be reused once identified. Third, ∆ from verified conflicts works best for most models, but not universally: on Mistral, the behavioural-contrast direction aligns better with recovery. Thus, unfamiliar architec-tures should test both constructions and select the one with higher J. Future work includes relation-conditional α∗, multi-layer steering, and larger held-out detector calibration. Limitations 
+
+TAS is evaluated on single-hop superseding up-dates with two mutually exclusive answers, uses one relation-specific ∆ rather than per-instance di-rections, and requires residual-stream access (so it applies to open-weight models, not API-only sys-tems). Open extensions include multi-hop reason-ing with TAS as a single-hop correction module, per-instance steering to close the oracle gap, larger held-out calibration to sharpen detector threshold-ing, broader evaluation on additional families (e.g. Gemma, Pythia), the full-benchmark ITI re-run, and LLM-judge cross-verification on top of the current structural and date-window filters. 
+
+References 
+
+Ashutosh Bajpai, Aaryan Goyal, Atif Anwer, and Tan-moy Chakraborty. 2024. Temporally consistent factu-ality probing for large language models. In Proceed-ings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 15864–15881. Wenhu Chen, Xinyi Wang, and William Yang Wang. 2021. A dataset for answering time-sensitive ques-tions. arXiv preprint arXiv:2108.06314 .Zheng Chu, Jingchang Chen, Qianglong Chen, Weijiang Yu, Haotian Wang, Ming Liu, and Bing Qin. 2024. Timebench: A comprehensive evaluation of tempo-ral reasoning abilities in large language models. In 
+
+Proceedings of the 62nd Annual Meeting of the As-sociation for Computational Linguistics (Volume 1: Long Papers) , pages 1204–1228. Ritajit Dey, Iadh Ounis, Graham McDonald, and Yashar Moshfeghi. 2026. Temporal fact conflicts in llms: Reproducibility insights from unifying dynamicqa and mulan. arXiv preprint arXiv:2603.15892 .Bhuwan Dhingra, Jeremy R Cole, Julian Martin Eisenschlos, Daniel Gillick, Jacob Eisenstein, and William W Cohen. 2022. Time-aware language mod-els as temporal knowledge bases. Transactions of the Association for Computational Linguistics , 10:257– 273. Bahare Fatemi, Mehran Kazemi, Anton Tsitsulin, Karishma Malkan, Jinyeong Yim, John Palowitch, Sungyong Seo, Jonathan Halcrow, and Bryan Per-ozzi. 2024. Test of time: A benchmark for evaluating LLMs on temporal reasoning. In The Thirteenth In-ternational Conference on Learning Representations .ArXiv:2406.09170. Constanza Fierro, Nicolas Garneau, Emanuele Bugliarello, Yova Kementchedjhieva, and Anders Søgaard. 2024. Mulan: A study of fact mutability in language models. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 2: Short Papers) ,pages 762–771. Mor Geva, Roei Schuster, Jonathan Berant, and Omer Levy. 2021. Transformer feed-forward layers are key-value memories. In Proceedings of the 2021 Conference on Empirical Methods in Natural Lan-guage Processing , pages 5484–5495. Sanjay Govindan, Maurice Pagnucco, and Yang Song. 2025. Temporal alignment of time sensitive facts with activation engineering. In Findings of the Asso-ciation for Computational Linguistics: EMNLP 2025 ,pages 7640–7657, Suzhou, China. Association for Computational Linguistics. Peter Hase, Mohit Bansal, Been Kim, and Asma Ghan-deharioun. 2023. Does localization inform editing? surprising differences in causality-based localization vs. knowledge editing in language models. Advances in Neural Information Processing Systems , 36:17643– 17668. David Herel, Vojtech Bartek, Jiri Jirak, and Tomas Mikolov. 2024. Time awareness in large language models: benchmarking fact recall across time. arXiv preprint arXiv:2409.13338 .Xinyue Kang, Diwei Shi, and Li Chen. 2026. Model whisper: Steering vectors unlock large language models’ potential in test-time. In Proceedings of the AAAI Conference on Artificial Intelligence .ArXiv:2512.04748; accepted AAAI 2026. Jungo Kasai, Keisuke Sakaguchi, yoichi takahashi, Ro-nan Le Bras, Akari Asai, Xinyan Yu, Dragomir Radev, Noah Smith, Yejin Choi, and Kentaro Inui. 2023. Realtime qa: What's the answer right now? In 
+
+Advances in Neural Information Processing Systems ,volume 36, pages 49025–49043. Curran Associates, Inc. Yujin Kim, Jaehong Yoon, Seonghyeon Ye, Sangmin Bae, Namgyu Ho, Sung Ju Hwang, and Se-Young Yun. 2024. Carpe diem: On the evaluation of world knowledge in lifelong language models. In Proceed-ings of the 2024 Conference of the North American Chapter of the Association for Computational Lin-guistics: Human Language Technologies (Volume 1: Long Papers) , pages 5401–5415. Gaotang Li, Yuzhong Chen, and Hanghang Tong. 2025. Taming knowledge conflicts in language models. In 
+
+Forty-second International Conference on Machine Learning . ArXiv:2503.10996. Kenneth Li, Oam Patel, Fernanda Viégas, Hanspeter Pfister, and Martin Wattenberg. 2023. Inference-time intervention: Eliciting truthful answers from a lan-guage model. In Advances in Neural Information Processing Systems .Mengfan Li, Xuanhua Shi, and Yang Deng. 2026. Cos-tom: Causal-oriented steering for intrinsic theory-of-mind alignment in large language models. arXiv preprint arXiv:2604.10031 .Sara Vera Marjanovi´ c, Haeun Yu, Pepa Atanasova, Maria Maistro, Christina Lioma, and Isabelle Augen-stein. 2024. Dynamicqa: Tracing internal knowledge conflicts in language models. In Findings of the Asso-ciation for Computational Linguistics: EMNLP 2024 ,pages 14346–14360. Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov. 2022a. Locating and editing factual as-sociations in gpt. Advances in neural information processing systems , 35:17359–17372. Kevin Meng, Arnab Sen Sharma, Alex Andonian, Yonatan Belinkov, and David Bau. 2022b. Mass-editing memory in a transformer. arXiv preprint arXiv:2210.07229 .Kai Nylund, Suchin Gururangan, and Noah A. Smith. 2024. Time is encoded in the weights of finetuned language models. In Proceedings of the 62nd Annual Meeting of the Association for Computational Lin-guistics (Volume 1: Long Papers) , pages 2571–2587, Bangkok, Thailand. Association for Computational Linguistics. Minh Vu Pham, Hsuvas Borkakoty, and Yufang Hou. 2026. Where knowledge collides: A mechanistic study of intra-memory knowledge conflict in lan-guage models. arXiv preprint arXiv:2601.09445 .Qingyu Tan, Hwee Tou Ng, and Lidong Bing. 2024. Towards robust temporal reasoning of large lan-guage models via a multi-hop qa dataset and pseudo-instruction tuning. In Findings of the Association for Computational Linguistics: ACL 2024 , pages 6272– 6286. Md Nayem Uddin, Amir Saeidi, Divij Handa, Agastya Seth, Tran Cao Son, Eduardo Blanco, Steven Cor-man, and Chitta Baral. 2025. Unseentimeqa: Time-sensitive question-answering beyond llms’ memoriza-tion. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 1873–1913. Tu Vu, Mohit Iyyer, Xuezhi Wang, Noah Constant, Jerry Wei, Jason Wei, Chris Tar, Yun-Hsuan Sung, Denny Zhou, Quoc Le, and Thang Luong. 2024. Freshllms: Refreshing large language models with search engine augmentation. In Findings of the Association for Computational Linguistics: ACL 2024 , pages 13697– 13720. Rongwu Xu, Zehan Qi, Zhijiang Guo, Cunxiang Wang, Hongru Wang, Yue Zhang, and Wei Xu. 2024. Knowledge conflicts for llms: A survey. In Proceed-ings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 8541–8565. Michael Zhang and Eunsol Choi. 2021. Situatedqa: In-corporating extra-linguistic contexts into qa. In Pro-ceedings of the 2021 Conference on Empirical Meth-ods in Natural Language Processing , pages 7371– 7387. Siyue Zhang, Yuxiang Xue, Yiming Zhang, Xiaobao Wu, Anh Tuan Luu, and Chen Zhao. 2024. Mrag: A modular retrieval framework for time-sensitive question answering. Preprint at https://arxiv. org/abs/2412.15540 .Bowen Zhao, Zander Brumbaugh, Yizhong Wang, Han-naneh Hajishirzi, and Noah A Smith. 2024. Set the clock: Temporal alignment of pretrained language models. In Findings of the Association for Computa-tional Linguistics: ACL 2024 , pages 15015–15040. Ruilin Zhao, Feng Zhao, Guandong Xu, Sixiao Zhang, and Hai Jin. 2022. Can language models serve as temporal knowledge bases? In Findings of the Asso-ciation for Computational Linguistics: EMNLP 2022 ,pages 2024–2037. Xinyu Zhu, Cheng Yang, Bei Chen, Siheng Li, Jian-Guang Lou, and Yujiu Yang. 2023. Question an-swering as programming for solving time-sensitive questions. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing ,pages 12775–12790. Zhiyuan Zhu, Yusheng Liao, Zhe Chen, Yuhao Wang, Yunfeng Guan, Yanfeng Wang, and Yu Wang. 2025. Evolvebench: A comprehensive benchmark for as-sessing temporal awareness in llms on evolving knowledge. In Proceedings of the 63rd Annual Meet-ing of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 16173–16188. Appendix 
+
+This supplementary material provides the mathematical foundations, algorithmic details, extended em-pirical results, ablations, and reproducibility information that support the main paper. To help readers navigate, the appendices are grouped thematically rather than listed flat. 
+
+Method foundations. 
+
+• Appendix A : standing assumptions, theorem statements, and local-margin proof outlines for TAS .• Appendix B : the inference-time algorithm with per-stage rationale. • Appendix C : baselines (standard / temporal / RAG / ITI / contrastive decoding), metric definitions, and the ITI construction. 
+
+Benchmark and screening. 
+
+• Appendix D : knowledge-recovery filter mechanics and per-model dropout (visualised in Fig. 6). • Appendix E : benchmark construction, prompt templates, and admission conditions. • Appendix F : extended Phase 1 screening: prob-space EG , per-relation breakdown (Fig. 7), per-domain table. 
+
+Locator, variants, and end-to-end diagnostics. 
+
+• Appendix G : per-layer AFR profiles (Fig. 8) and plateau geometry. • Appendix H : V1 / V2 / V3 steering-vector ablation. • Appendix I : detector PR curves (Fig. 9), oracle α-sweep (Fig. 10), τ -Pareto frontier (Table 4), false-alarm diagnostics. • Appendix J : cross-family generalisation at matched scale. 
+
+Reproducibility and ethics. 
+
+• Appendix K : hardware, compute, storage, and reproducibility provisions. • Appendix L : AI usage statement. 
+
+Principle. appendix at a glance 
+
+Five new figures distil the appendix tables into single-glance views: per-layer AFR (Fig. 8), detector PR curves (Fig. 9), τ -Pareto frontier (Table 4), oracle α-sweep (Fig. 10), per-relation PTC rate (Fig. 7), and the knowledge-recovery filter trajectory (Fig. 6). Every figure is rendered directly from the released per-model JSON outputs; no aggregated number in this appendix is independent of the released data. A Mathematical Foundations of TAS 
+
+These results establish local sufficient conditions for TAS . They are not intended as global guarantees for arbitrary transformer dynamics. 
+
+Principle. geometric intuition behind TAS TAS treats temporally outdated and temporally recovered behaviours as two locally separable residual-stream trajectories at a single intermediate layer ℓ∗. The temporal-cue forward pass exposes the direction along which the newer-fact trajectory diverges from the outdated-preference trajectory; 
+
+TAS adds a scaled multiple of that direction back into the standard-prompt forward pass so the residual state crosses the local decision boundary between the two basins, without modifying any model parameter. 
+
+A.1 Standing Assumptions Assumption 1 (Parametric Co-encoding) . For a verified PTC quadruple Q = ( q, a old , a new , t update ),both aold and anew are encoded in parametric memory. Formally, there exists a prompting variant c such that 
+
+log P θ(anew | q, c ) ≥ τrec ,
+
+where scores are measured using length-normalized log-probability (i.e., the per-token mean of log Pθ
+
+over the tokens of anew ). In our benchmark, c = ctemp and τrec = −3.
+
+Assumption 2 (Local Separability) . At layer ℓ∗, outdated-preference and newer-fact trajectories are locally separable within the conflict region. Formally, there exists a unit vector u ∈ Rd and margin δ > 0 such that 
+
+D
+
+hℓ∗ (q, c temp ) − hℓ∗ (q), u 
+
+E
+
+≥ δ
+
+for every verified PTC instance q.Geometrically, this assumption states that temporal elicitation moves the residual trajectory along a locally identifiable direction in representation space. 
+
+Assumption 3 (Bounded Steering) . For an appropriate steering scale α, the perturbation αc ∆ modifies the conflict-relevant residual-stream trajectory without causing catastrophic distortion of downstream computation. 
+
+A.2 Theoretical Results 
+
+We first state a structural proposition characterizing sufficient conditions for PTC, followed by the two principal TAS results. 
+
+Proposition 1 (Sufficient Condition for PTC) . Assume Parametric Co-encoding. If there exists a layer ℓ∗
+
+such that 
+
+hℓ∗ (q)
+
+lies in a region favoring aold while 
+
+hℓ∗ (q, c temp )
+
+lies in a region favoring anew , then θ exhibits PTC on Q as defined in Definition 2. Proof sketch. The standard-prompt trajectory yields outdated preference, satisfying the first PTC con-dition. The temporally elicited trajectory yields current-fact recovery, satisfying the second condition. Together these establish the defining two-part structure of PTC. Theorem 1 (TAS Correctness) . Under Assumptions 1–3, there exists a finite steering scale α∗ > 0 such that, for any verified PTC instance in the local separability regime, applying the TAS update from Eq. (3) 
+
+at layer ℓ∗ yields 
+
+Pθ(anew | q, TAS ) > P θ(aold | q, TAS ).
+
+Proof outline with local margin derivation. Let snew (h) and sold (h) denote the length-normalized log-probability scores (as defined in Eq. (4)) assigned to anew and aold when the layer-ℓ∗ residual stream is h,and define the local margin 
+
+m(h) = snew (h) − sold (h).
+
+For a verified PTC instance with hidden state h := hℓ∗ (q) and temporally elicited hidden state htmp := 
+
+hℓ∗ (q, c temp ), the PTC definition together with Parametric Co-encoding gives m(h) < 0 and m(htmp ) >
+
+0.Apply the TAS update h′ = h + αc ∆ (Eq. (3)). Under a local linearization of m around h,
+
+m(h′) ≈ m(h) + αc ∇m(h)⊤∆.
+
+Local Separability (Assumption 2) ensures that ∆ shares the separating direction u with htmp − h in expectation, so ∇m(h)⊤∆ > 0 in the local neighborhood. For detector-positive queries ( c > τ and therefore c > 0), choosing any 
+
+α > − m(h)
+
+c ∇m(h)⊤∆ > 0
+
+yields m(h′) > 0, hence Pθ(anew | q, TAS ) > P θ(aold | q, TAS ). Bounded Steering (Assumption 3) guarantees that this transition occurs within a regime where downstream computation is not catastrophi-cally distorted, so the sign of the local margin is preserved through the remaining L − ℓ∗ layers. This is a local sufficient condition that holds in a neighborhood of h where the linearization is valid; it is not a global guarantee over arbitrary transformer dynamics. The existence of α∗ is established empirically by the oracle α sweep (Section 6.4). Empirically, this local transition corresponds to the observed reversal from outdated-preference behavior to newer-fact recovery in verified PTC instances. 
+
+Theorem 2 (No-Op Preservation) . For any query satisfying c ≤ τ , TAS applies no perturbation. Consequently, the output distribution is identical to that of the unsteered model. Proof sketch. From Eq. (3) , the steering term vanishes whenever c ≤ τ . The forward pass therefore reduces exactly to the original model computation. 
+
+Limitation of scope. These results are intentionally local: they establish sufficient conditions for successful steering in the verified PTC regime, rather than global guarantees over arbitrary transformer dynamics. 
+
+Takeaway. theorem → test, in one line 
+
+Local Separability (Assumption 2) is witnessed by the Stage 2 locator: a successful single-layer single-token activation patch is exactly the linear separator the assumption requires (Fig. 8). The existence of α∗ in Theorem 1 is witnessed by the oracle α-sweep on the V2 vector (Fig. 10). The No-Op Preservation theorem (Theorem 2) is operationalised by preservation accuracy on matched non-conflict records (Table 4). 
+
+B Algorithm 
+
+TAS is built around a single design principle. Principle. intervene only on evidence; otherwise pass through TAS is a conditional residual intervention: the steering signal is applied only when a calibrated detector identifies the current trajectory as a likely PTC regime. Detector-negative queries therefore receive a bit-identical forward pass to the unmodified model (Theorem 2), and detector-positive queries pay only a single residual-stream addition at layer ℓ∗.
+
+All Stage 2 and Stage 3 components (the conflict-critical layer ℓ∗, the steering vector ∆, and the calibrated detector s(·)) are precomputed once per model family. The deployment-time forward pass therefore differs from the unmodified model only at a single residual-stream location, and only on queries the detector flags. The full procedure is given in Algorithm 1. 
+
+Algorithm 1 TAS : T EMPORAL ATTRACTOR STEERING (inference-time, single residual-stream addition at ℓ∗, gated by a per-query detector s(·) trained once per model family). 
+
+Require: Query q; model θ with L layers; conflict-critical layer ℓ∗ ∈ { 1, . . . , L }; steering vector ∆ ∈ Rd
+
+(V2 per-relation; Appendix H); detector s : Rd → [0 , 1] ; threshold τ ; scale α > 0.
+
+Ensure: Token distribution P TAS  
+
+> θ
+
+( · | q). 
+
+> 1:
+
+hℓ∗ (q) ← FORWARD 1: ℓ∗ 
+
+> θ
+
+(q) // run forward pass up to ℓ∗ 
+
+> 2:
+
+c ← s hℓ∗ (q) // calibrated conflict score ∈ [0 , 1]  
+
+> 3:
+
+if c > τ then  
+
+> 4:
+
+hℓ∗ (q) ← hℓ∗ (q) + α c ∆ // confidence-scaled steering update (Eq. (3)) 5: else  
+
+> 6:
+
+no-op // identical to unmodified θ (Theorem 2) 7: end if  
+
+> 8:
+
+logits ← FORWARD ℓ∗+1: Lθ
+
+ hℓ∗ (q) // resume forward pass to logits 9: return softmax( logits )
+
+Per-line design rationale. 
+
+• Detector s(·) (line 2). A calibrated linear probe on hℓ∗ that prevents unnecessary intervention on non-conflict queries; this conditional gate is what allows preservation accuracy to remain in 
+
+[0 .85 , 0.99] across models (Table 4). • Steering layer ℓ∗ (line 1). Identified via activation patching (Table 1, Fig. 8) because temporal preference reversals emerge sharply at specific intermediate locations rather than uniformly across depth. • Steering vector ∆ (line 4). Constructed from activation differences hℓ∗ (q, c temp ) − hℓ∗ (q) averaged within each Wikidata relation. Relation-conditioned averaging (V2) isolates the shared geometric structure of temporal recovery within a relation family (Appendix H). • Confidence-scaled magnitude α c ∆ (line 4). Detector confidence modulates the perturbation strength so the largest interventions land on the most-confident conflicts; this is what enables the favourable Recovery / PA trade-off in Fig. 10. 
+
+Takeaway. at deployment, TAS is one residual addition 
+
+On a detector-positive query, the only operation TAS performs beyond the unmodified forward pass is a single rank-zero residual addition at one layer. There is no decoding-time loop, no beam-rescoring, no retrieval call, and no extra forward pass over θ.C Baselines, Metrics, and Reporting Conventions 
+
+This appendix collects the operational definitions of the metrics reported throughout the paper and documents the baselines we compare against. The exposition prioritizes reproducibility : every metric can be recomputed from the per-record screening output, and the ITI baseline construction is given in enough detail that an independent implementation should produce numerically identical results to ours. 
+
+C.1 Baseline Methods 
+
+We compare against: (i) Standard prompting (no intervention); (ii) Temporal prompting (“As of ⟨t⟩,
+
+⟨q⟩”, a strong baseline since PTC is defined relative to it); (iii) RAG ; (iv) ITI (Li et al., 2023) as an activation-engineering comparator; (v) Contrastive decoding . ROME / MEMIT (Meng et al., 2022a,b) are discussed as conceptual weight-editing comparators only (they modify model parameters rather than resolve conflicts at query time). 
+
+C.2 Metric Definitions 
+
+OPR (↓). OPR = |{ q ∈ B : Pθ(aold | q) > P θ(anew | q)}| /|B| .
+
+Recovery ( ↑). Fraction of records where the intervention (temporal cue or TAS ) makes log P θ(anew |·) > log P θ(aold | · ).
+
+PTC rate ( ↑). Conjunction of OPR= 1 under standard prompting AND Recovery = 1 under temporal cue (Definition 2). 
+
+Filtered PTC rate ( ↑). PTC rate computed only on records that pass the model-side knowledge-recovery filter (Appendix D). 
+
+Elicitation Gap ( EG , ↑). EG = Eq[log P (anew | q, intervention) − log P (anew | q)] . Reported in log-probability and per-token probability. 
+
+PA (↑). Fraction of matched non-conflict records whose argmax over {aold , a new } is unchanged by the intervention. 
+
+Detector AUPRC / AUROC ( ↑). Area under the precision–recall / ROC curve on a held-out test split of the binary PTC prediction task. 
+
+C.3 ITI Baseline Construction 
+
+For each model we construct an ITI direction at the same ℓ∗ as TAS , using a prefers-new vs. prefers-old contrast on the full screening set under the standard prompt: 
+
+∆ITI = mean  hℓ∗(q) | θ prefers anew 
+
+ − mean  hℓ∗(q) | θ prefers aold 
+
+.
+
+This is intentionally a strong baseline: the contrast pair is already PTC-relevant (not the generic truth-ful/deceptive contrast), so the comparison isolates the value added by TAS ’s verified-conflict construction over a population-level behavioral one. Each side of the contrast is approximated by a stratified random sample of at most 500 screening records (seed 0); the prefers-old side is the verified PTC subset itself, and the prefers-new side is sampled from screening records where the model’s argmax over {aold , a new } under the standard prompt is anew . Each sampled instance contributes one forward pass through the standard prompt at ℓ∗. We then sweep α ∈ { 0.5, 1, 2, 3, 4, 6, 8} identically to TAS , against the same 200 -instance non-conflict control set (seed 0), and select the operating point that maximises J = Recovery −λ(1 −PA) 
+
+with λ = 1 .0. Only the construction of ∆ differs between TAS V2 oracle and ITI: every other knob ( ℓ∗,
+
+α grid, control set, J objective) is shared. 
+
+D Knowledge-Recovery Filter 
+
+The knowledge-recovery filter is the key methodological device that distinguishes true PTC from knowl-edge absence . Without this filter, the headline PTC metric would silently aggregate two failure modes that look identical under raw measurements but have opposite implications for any test-time intervention. Mechanics. A record is retained for a given model only if 
+
+log P θ(anew | q, c temp ) ≥ τrec ,
+
+that is, only if the model assigns at least eτrec per-token probability to the newer answer when given the temporal elicitation cue. We use τrec = −3 throughout the paper, corresponding to roughly a 5% per-token probability floor on the newer answer. Records that fail this threshold are flagged as knowledge-absent for that model and excluded from filtered PTC-rate computations (but retained in the raw PTC computations for honesty about the benchmark’s composition). 
+
+Model-specificity. Because the filter depends on the model’s actual probability assignment, the kept-record set is different for each model . A record may belong to the PTC regime for one model but the knowledge-absence regime for another. We therefore always report raw and filtered PTC as a pair (Fig. 6), never collapsing them into a single number. 
+
+Reading the filter as a knowledge-breadth measure. The fraction of the benchmark each model retains as recoverable is itself an indirect measure of that model’s parametric knowledge breadth on the benchmark’s relation distribution: a larger or more recent model retains a larger fraction. Fig. 6 visualises the joint trajectory of the four models in (kept-fraction, filtered PTC) space. 0.3 0.4 0.5 0.6 0.7  
+
+> Fraction of records kept (knowledge-recovery filter)
+> 0.03
+> 0.04
+> 0.05
+> 0.06
+> 0.07
+> 0.08
+> 0.09
+> 0.10
+> 0.11
+> Filtered PTC rate
+> Qwen-2.5-1.5B
+> Qwen-2.5-7B
+> Mistral-7B-v0.3
+> Llama-3.1-8B
+> marker size parameter count
+
+Figure 6: Capacity-scaling of the knowledge-recovery filter. Each point is a model placed at its measured (kept-fraction, filtered PTC) coordinate, where kept-fraction is the share of the 8,746 -record benchmark that passes 
+
+log P θ (anew | q, c temp ) ≥ τrec at τrec = −3, and filtered PTC is the PTC rate on that retained subset. Marker size scales with parameter count. Both axes climb together, monotonically: smaller models retain less of the benchmark as recoverable and accumulate a smaller outdated-preference margin on what they retain, while larger models retain more and accumulate a proportionally larger margin. This is the headline empirical pattern that motivates reporting filtered PTC alongside raw PTC throughout the paper. Numbers are recomputed directly from per-instance log-probabilities and reproduce Fig. 3 in the main body. 
+
+Finding. filtered PTC scales strictly monotonically 
+
+Kept fraction climbs from 28 .2% (Qwen-1.5B) to 66 .1% (Llama-3.1-8B) while filtered PTC rises in lockstep 0.041 → 0.071 → 0.085 → 0.103 . The two move together: larger models retain more of the benchmark and accumulate a proportionally larger outdated-preference margin on what they retain. 
+
+Why. report raw and filtered PTC as a pair, never alone Because the filter depends on the model’s own probability assignment, the kept-record set differs across models. Reporting only raw PTC silently aggregates true conflict with knowledge absence; reporting only filtered PTC hides the benchmark-composition shift across models. We therefore report both throughout the paper (Fig. 6). 
+
+E Benchmark Construction and Verification 
+
+This appendix documents how the 8,746 -record benchmark was constructed and verified. The construction pipeline is intentionally simple and reproducible: every record can be traced back to a specific Wikidata statement, and every verification condition is expressible as a deterministic filter over the resulting record. 
+
+Source and mining. We mine superseding factual updates from Wikidata across five position-holder relations: head of state (P35), chief executive officer (P169), head coach (P286), chairperson (P488), and head of government (P6). For each subject entity with at least two distinct holders of the relation across non-overlapping time spans, we form one candidate quadruple per pairwise transition between consecutive holders. The relation distribution is intentionally unbalanced; see Fig. 2 in the main paper for the per-relation record counts. 
+
+Prompt construction. For each candidate (q, a old , a new , t update ) tuple, we generate a standard prompt (“Who is the ⟨role ⟩ of ⟨subject ⟩?” ) and a temporal prompt ( “As of ⟨t⟩, who was the ⟨role ⟩ of ⟨subject ⟩?” )where t is chosen inside the new fact’s validity window. The temporal prompt uses past-tense “who was” for grammatical alignment with a specified past year. 
+
+Verification conditions. A tuple is admitted only if all of the following hold: (1) under standard prompting the model prefers aold ; (2) under temporal elicitation the model recovers anew ; (3) both answers are grammatically and factually plausible completions; (4) the update is verified to be superseding rather than additive; (5) knowledge-recoverability: the model satisfies the recovery filter (Appendix D). Condition (5) is model-specific by construction; we report both raw (all records) and filtered (model-recoverable) PTC rates as a pair, never collapsing them into a single number. 
+
+F Extended Phase 1 Results 
+
+This appendix reports two extended Phase 1 views that the main paper’s headline tables compress: the 
+
+full headline table including the elicitation gap in both log-probability and per-token-probability form (Table 6), and the per-domain breakdown that aggregates relations into broad domains (Table 7). The per-relation and per-era tables are already in the main body (Figs. 4 and 7); the per-domain view here completes the three-way stratification. 
+
+Reading the elicitation gap. The elicitation gap (EG) measures how much probability mass the temporal cue moves toward anew on each record, in log-probability space and again expressed as a per-token probability difference. A positive EG is the direction-of-effect signal that motivates TAS : the temporal cue moves the model in the right direction in every one of the four models, even on the records where it fails to fully flip the argmax. The log-probability gap is in a narrow +0 .09 to +0 .18 nat band; the per-token probability gap ranges from +0 .015 (Qwen-2.5-1.5B, where the model’s prior on anew is low enough that the cue’s effect remains modest in absolute terms) to +0 .049 (Llama-3.1-8B, where the model’s better coverage means the same shift translates to a larger absolute change). Model OPR Recovery PTC EG (log-prob) EG (prob)                     
+
+> Qwen-2.5-1.5B 0.530 0.475 0.024 +0 .180 +0 .015
+> Qwen-2.5-7B 0.544 0.476 0.036 +0 .090 +0 .018
+> Mistral-7B-v0.3 0.540 0.497 0.060 +0 .148 +0 .040
+> Llama-3.1-8B 0.540 0.505 0.073 +0 .179 +0 .049
+
+Table 6: Extended Phase 1 screening on the full 8,746 -record benchmark across all four models, with the elicitation gap (EG) reported in both log-probability and per-token probability form; the main body reports only the log-probability form. OPR is the fraction of records on which the model’s argmax over {aold , a new } under the standard prompt is aold ; Recovery is the fraction on which the same argmax flips to anew when the temporal cue ctemp is added to the prompt; raw PTC is the conjunction of OPR and Recovery on a per-instance basis (Definition 2); 
+
+EG (log-prob) is the mean log P (anew | q, c temp ) − log P (anew | q) over the benchmark, and EG (prob) is the same quantity exponentiated back to per-token probability space. Cream-highlighted cells mark Llama-3.1-8B’s leading raw PTC and per-token EG values, both consistent with its more recent training cutoff. The narrow band of OPR values ( 0.530 –0.544 ) across all four models, despite substantial differences in capacity, family, and training corpus, is what we mean when we describe the outdated-preference rate as “family-invariant” in the main body: even though larger models score both candidates more confidently in absolute terms, the relative preference for aold 
+
+over anew under the standard prompt is essentially the same across the four models. P35    
+
+> head of state
+> P169
+> CEO
+> P286
+> head coach
+> P488
+> chairperson
+> P6
+> head of government
+> 0.00
+> 0.05
+> 0.10
+> 0.15
+> 0.20
+> 0.25
+> Raw PTC rate
+> Qwen-1.5B Qwen-7B Mistral-7B Llama-8B
+
+Figure 7: Per-relation raw PTC rate across the four models. Each bar shows the fraction of records of a given Wikidata relation on which the model both prefers aold under standard prompting and recovers anew under the temporal cue. The ordering P35 > P169 > {P286, P488, P6} is preserved across all four models, making the small-but-dense P35 (head of state, n=183 ) and P169 (CEO, n=208 ) relations the dominant per-record PTC signal: together they hold 4.5% of the benchmark but contribute the strongest conflict rate, while the three high-volume relations contribute most of the absolute record count yet only moderate per-record signal. This is what motivates the V2 (per-relation) construction of ∆ in the main body: a single global average would dilute the strong P35 and P169 signal with noisier high-volume contributions, while a per-relation ∆ recovers it. Capacity scaling is visible within each relation: Llama-3.1-8B has the highest per-relation rate on three of five relations. 
+
+Finding. small relations carry the strongest PTC signal per record 
+
+Head of state (P35, n=183 ) and CEO (P169, n=208 ) together hold 4.5% of the benchmark but exhibit the largest per-record PTC rates in every model (P35 reaches 0.235 on Llama-3.1-8B, roughly 3× the rate of any high-volume relation). The unbalanced relation distribution is therefore a feature, not a confound. 
+
+Reading the domain view. Table 7 aggregates the five Wikidata relations into three broad domains: 
+
+politics (P35 head of state + P6 head of government), corporate_leadership (P169 CEO + P488 chairper-son), and sports (P286 head coach). The domain ordering matches the per-relation ordering reported in the main body (Fig. 7): politics carries the strongest per-record PTC signal in every model, corporate leadership is intermediate, and sports is lowest. The domain ordering is preserved across all four models, suggesting the effect is driven primarily by the underlying relation distribution (P35 alone accounts for most of the political PTC signal at the 7–8B scale) rather than by any domain-specific representational structure.                     
+
+> Domain nQwen-1.5B Qwen-7B Mistral-7B Llama-3.1-8B
+> politics 3,766 0.028 0.043 0.061 0.072 corporate_leadership 2,589 0.026 0.036 0.053 0.073 sports 2,391 0.015 0.026 0.066 0.076
+
+Table 7: Per-domain raw PTC rate on the full 8,746 -record benchmark, aggregating the five Wikidata relations into three domains: politics (P35 head-of-state + P6 head-of-government), corporate leadership (P169 CEO + P488 chairperson), and sports (P286 head-coach). Politics is the strongest PTC domain across all four models, corporate leadership is intermediate, and sports is lowest. Cream highlights mark the per-model leading domain. The ordering politics > corporate > sports is preserved across all four models. Combined with the per-relation analysis (Fig. 7), this indicates that the apparent domain effect is driven primarily by the underlying relation composition (P35 and P6 are both political and together contribute the dominant per-record PTC signal) rather than by any domain-specific representational structure in the residual stream. 
+
+G Layer Localization Details 
+
+This appendix expands on the Stage 2 locator results summarized in the main paper (Table 1). The headline table reports only peak AFR and plateau width; here we additionally report the full per-layer AFR profile (Fig. 8) and the per-instance mean log-probability shifts the patch induces on anew and aold 
+
+at ℓ∗, which together characterize how the patched activation flips the answer. 0.0 0.2 0.4 0.6 0.8 1.0     
+
+> Relative network depth /( L1)
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Answer-flip rate (AFR)
+> marks *(peak AFR)
+> Qwen-2.5-1.5B
+> Qwen-2.5-7B
+> Mistral-7B-v0.3
+> Llama-3.1-8B
+
+Figure 8: Per-layer answer-flip rate (AFR) for all four models, with the x-axis normalised by network depth (ℓ/ (L − 1) ) so the four architectures (28, 28, 32, 32 layers) share a common frame. AFR (ℓ) is the fraction of verified PTC instances on which a single-token activation patch at layer ℓ from the temporal-prompt forward pass into the standard-prompt forward pass flips the answer argmax. Stars mark each model’s conflict-critical layer 
+
+ℓ∗ = arg max ℓ AFR( ℓ). Three observations: (i) all four curves are near-zero below relative depth ≈ 0.6, indicating that conflict-relevant information accumulates only in the second half of the network; (ii) each curve shows a sharp transition followed by a relatively flat plateau, supporting the Local Separability precondition of Theorem 1; (iii) the two Qwens transition at the same relative depth, while Mistral and Llama-3.1-8B transition slightly later, consistent with the family-specific ℓ∗ values in Table 1. 
+
+Finding. a sharp transition, not a slow ramp On every model the AFR profile is essentially flat below ℓ/ (L−1) ≈ 0.6 and then climbs to its peak inside a narrow late-network band. This is the causal signature Theorem 1 relies on: a single, localised separating direction that single-token activation patching can exploit. 
+
+Mean ∆ log-probability shifts. At ℓ∗, ∆log P (anew ) is the average gain in length-normalized log-probability the patched activation produces for the newer answer, and ∆log P (aold ) is the corresponding shift for the older answer (typically negative when the patch successfully redirects probability mass). The pattern across models is informative. On Qwen-2.5-1.5B, the patch yields a very large positive shift for anew (+0 .880 nats), but also a positive shift for aold (+0 .263 nats), suggesting that the patched representation increases probability on both candidates relative to baseline (just more strongly on the newer one). On all three 7–8B-class models the aold shift is negative ( −0.148 to −0.302 ), indicating a cleaner zero-sum redirection of probability mass between the two candidates at ℓ∗.
+
+Plateau geometry. The plateau is the contiguous block of layers with AFR within 0.05 of peak that contains ℓ∗. The two Qwens share both ℓ∗ = 23 and a 6-layer plateau, consistent with shared architecture and tokenizer. Mistral’s plateau is the widest in our study ( 14 layers, ℓ ∈ [18 , 31] ), suggesting that the conflict-resolution computation in Mistral is distributed across roughly the upper half of the network. Llama-3.1-8B’s plateau is a 9-layer end-network band ( ℓ ∈ [23 , 31] ), with the peak at the final decoder layer. A sublayer (attention vs. MLP) decomposition is a natural follow-up that we do not include here. 
+
+H Steering Vector Variants (V1 / V2 / V3) 
+
+The TAS framework defines three steering-vector averaging granularities for estimating the conflict direction ∆ at layer ℓ∗. In the first variant, V1, a single global direction is computed by averaging ∆ over all verified PTC instances. This is the simplest construction, since the same direction is applied to every query regardless of relation or domain. The second variant, V2, computes a separate direction for each Wikidata relation in the benchmark. Each relation-specific ∆ is averaged only over the verified PTC instances associated with that relation. This design is intended to preserve relation-conditioned activation geometry, which may otherwise be diluted when all instances are collapsed into a single global average. The third variant, V3, uses an intermediate level of granularity by computing one direction per broad domain, such as politics, corporate leadership, and sports. Thus, V3 lies between the global construction of V1 and the fine-grained relation-specific construction of V2. Table 8 reports a pilot ablation comparing the three variants at their respective α∗ values on Mistral-7B-v0.3. The oracle activation-patch setting, which is instance-specific and requires temporal-prompt access at inference time, is included only as an upper bound because it is not a deployable method. Overall, the three variants form a monotonic Pareto-improving ladder: V1 (global) < V3 (per-domain) 
+
+< V2 (per-relation). The largest improvement occurs from V3 to V2, where Recovery increases by 0.130 ,compared with a smaller gain of 0.018 from V1 to V3. At each step, the Recovery/PA frontier moves upward and to the right. Although V2 incurs a small PA reduction relative to V3 ( 0.040 points), it achieves a substantially larger Recovery gain ( 0.130 points). For this reason, V2 is used as the default variant in the main-body experiments. This pilot ablation was conducted on a 500 -record subset; full-benchmark V1 and V3 results are not reported here. 
+
+Why. V2 chosen for relation-level signal alignment 
+
+The V1 →V3 →V2 jump in Recovery ( +0 .018 , then +0 .130 ) is not linear in granularity. The large V3 →V2 step indicates that the conflict direction ∆ varies meaningfully within broad domains (e.g. politics splits into head-of-state vs. head-of-government with different directions), while V3’s 3
+
+vectors collapse this distinction. V2’s 5 vectors recover it; V1’s single direction averages it away entirely. Variant α∗ Recovery PA J
+
+V1 global 6 0.389 0.875 +0 .264 
+
+V3 per-domain ( 3 ∆ ) 4 0.407 0.875 +0 .282 
+
+V2 per-relation ( 5 ∆ ) 6 0.537 0.835 +0 .372 
+
+Oracle activation patch (upper bound) n/a 0.929 n/a n/a 
+
+Table 8: Pilot ablation comparing the three steering-vector averaging granularities (V1 global, V3 per-domain, V2 per-relation) on Mistral-7B-v0.3 over a 500 -record subset of the screening set. α∗ is the steering-strength scale selected by maximising J = Recovery − (1 − PA) on the verified PTC subset; Recovery is the fraction of verified PTC instances flipped by steering; PA is preservation accuracy on the matched non-conflict control set. V1 global 
+
+uses a single ∆ averaged over all verified PTC instances; V3 per-domain partitions instances into three broad domains (politics, corporate leadership, sports) and averages within each; V2 per-relation partitions into the five Wikidata relations and averages within each. The bottom row is an oracle upper bound from instance-specific activation patching (a different ∆ per instance, taken from that instance’s own temporal-prompt forward pass); it is not a deployable method because it requires the temporal cue at inference time. The gap between V2 and the oracle bound is the structural cost of using a single shared direction per relation rather than per-instance directions. The cream-highlighted V2 row is the variant we adopt throughout the main paper; the V1 →V3 →V2 improvement is non-linear in granularity ( +0 .018 , then +0 .130 Recovery), indicating that the conflict direction ∆
+
+varies meaningfully within broad domains but is well-captured at the relation level. 
+
+I Extended TAS Diagnostics 
+
+This appendix expands the headline end-to-end TAS results with three complementary views drawn from the same per-model JSONs as Tables 2 and 4: detector PR curves (Fig. 9), the oracle steering-scale sweep (Fig. 10), and the τ -Pareto frontier (Table 4). Together they trace each model’s behaviour across the three knobs (detector quality, α, τ ) that govern TAS ’s operating point. 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> Recall
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Precision
+> Detector PR curves (held-out)
+> Qwen-2.5-1.5B (AUPRC=0.26)
+> Qwen-2.5-7B (AUPRC=0.36)
+> Mistral-7B-v0.3 (AUPRC=0.52)
+> Llama-3.1-8B (AUPRC=0.51)
+> Q1.5B
+> Q7B
+> Mistral
+> Llama
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> AUPRC
+> 0.26
+> 0.36
+> 0.52 0.51
+> AUPRC
+
+Figure 9: Stage 1 detector precision-recall curves on each model’s held-out evaluation fold. Each detector is a calibrated linear probe trained on layer-ℓ∗ activations to discriminate verified PTC positives from matched non-conflict negatives, then evaluated on the held-out fold to produce these curves. The AUPRC values reproduce the 
+
+Det. AUPRC column of Table 2. Mistral-7B-v0.3 and Llama-3.1-8B train substantially stronger detectors (AUPRC 
+
+0.525 and 0.511 ) than the two Qwens ( 0.258 and 0.356 ), which is the empirical explanation for the larger oracle vs. full-pipeline Recovery gap on Qwen-2.5-1.5B reported in Table 3: when the detector is weak, the conflict-gated pipeline misses cases the oracle would have caught, leaving Recovery on the table. The curves also explain the two-regime τ behaviour (Table 4): aggressive thresholds keep operating-point recall high but at the cost of precision, while conservative thresholds restrict steering to the detector’s confidence tail. 2 4 6 8   
+
+> Steering scale
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> Recovery on verified PTC
+> (a) Recovery vs
+> Qwen-2.5-1.5B
+> Qwen-2.5-7B
+> Mistral-7B-v0.3
+> Llama-3.1-8B
+> 2468
+> Steering scale
+> 0.80
+> 0.85
+> 0.90
+> 0.95
+> 1.00
+> Preservation accuracy (oracle control set)
+> (b) PA vs
+
+Figure 10: Oracle α-sweep at ℓ∗ with the V2 per-relation ∆ and no detector gate (steering is applied to every instance). (a) Recovery on the verified PTC subset rises monotonically with the steering scale α on all four models and saturates by α ≈ 4 on the two Qwens; Mistral and Llama-3.1-8B keep climbing more slowly. Stars mark each model’s α∗ = arg max α [Recovery − λ(1 − PA)] with λ = 1 .0. (b) Preservation accuracy on the matched non-conflict control set declines smoothly with α, as expected because a stronger steering perturbation distorts more of the residual-stream trajectory. The α∗ values lie at the knee of each model’s Recovery-vs-α curve where the marginal Recovery gain begins to be outweighed by the marginal PA loss; this is the empirical witness for the existence of a finite α∗ > 0 required by Theorem 1. 
+
+False-alarm rate at headline operating points. The in-pipeline false-alarm rate (steered fraction of non-PTC records) at τ ∈ { 0.15 , 0.20 , 0.30 } is, per model: Qwen-2.5-1.5B 0.189 / 0.143 / 0.055 ; Qwen-2.5-7B 0.971 / 0.376 / 0.183 ; Mistral-7B-v0.3 0.772 / 0.771 / 0.637 ; Llama-3.1-8B 0.996 / 0.995 / 0.955 .The two large models’ high false-alarm rates at all swept τ reflect the calibrator-cliff issue discussed in Sections 6.5 and 8. 
+
+Finding. the three knobs do different things 
+
+The PR curves (Fig. 9) set the ceiling on what the detector can sort. The α-sweep (Fig. 10) shows where the steering vector itself starts overshooting (Recovery flattens). The τ -frontier (Table 4) is where operators trade Recovery for PA at deployment. Qwen-2.5-7B is the strongest model on all three because its detector AUPRC ( 0.36 ) is adequate, α∗=2 is on the rising part of its Recovery curve, and its τ -frontier sits clearly upper-right of every other model. 
+
+Per-relation Recovery. A per-relation breakdown of end-to-end TAS Recovery is a useful future diagnostic for testing whether the P35-dominant screening pattern (Fig. 7) also appears after steering, and would inform the relation-conditional α∗ extension noted in Section 8. 
+
+J Cross-Family Generalization 
+
+This appendix consolidates the cross-family evidence presented piecemeal across Sections 6.1, 6.3 and 6.7 and frames it as a single generalization claim : the PTC phenomenon and the TAS intervention are not artefacts of any single training pipeline. 
+
+Quantitative cross-family agreement at 7–8B. At the 7–8B parameter class, three different families (Qwen-2.5-7B, Mistral-7B-v0.3, Llama-3.1-8B), trained on different corpora with different tokenizers, agree on every headline metric within a few percentage points: OPR all ∈ [0 .540 , 0.544] , EG all 
+
+∈ [+0 .090 , +0 .179] nats, filtered PTC all ∈ [0 .071 , 0.103] , peak AFR all ∈ [0 .816 , 0.851] . The PTC pattern is therefore not a quirk of any single training pipeline. Cross-family steering-vector transfer (applying a Mistral-derived ∆ to Llama-3.1-8B at matched relative depth) is left to future work and is motivated by the relatively large pairwise Mistral ∩ Llama overlap in Fig. 5. Takeaway. PTC is not a single-pipeline artefact 
+
+At the 7–8B scale, three families with different corpora and tokenizers agree on every headline metric within a few percentage points ( OPR ∈ [0 .540 , 0.544] , filtered PTC ∈ [0 .071 , 0.103] ,peak AFR ∈ [0 .816 , 0.851] ). The phenomenon is real, measurable, and capacity-sensitive across pipelines; it is not a quirk of any single corpus or tokenizer family. 
+
+K Implementation and Reproducibility 
+
+This appendix documents the hardware, compute footprint, and reproducibility provisions of our imple-mentation. Everything is deterministic given the model checkpoints, the benchmark JSONL, and the per-model (ℓ∗, α ∗, τ ∗) values reported throughout; no random initialization beyond the detector’s stratified train/test split (which we seed) affects the headline numbers. 
+
+Hardware. All Phase 1 screening and TAS experiments were run on a workstation with 2 × NVIDIA TITAN RTX (24 GB each). Phase 1 screening on the full 8,746 -record benchmark takes approximately 
+
+25 –30 minutes per model in fp16 single-GPU mode. Full TAS pipeline (cache activations → locate →
+
+steer → train detector → end-to-end TAS at three τ values) takes approximately 90 –120 minutes per model. The four-model ITI baseline sweep (Section 6.6) runs in 4–15 minutes per model on a single TITAN RTX, dominated by the 1000 forward passes ( 500 prefers-old, 500 prefers-new) used to construct 
+
+∆ITI plus the α-sweep over the 200 -instance control set. 
+
+Default knobs. The released pipeline ships with the following defaults, which were used unchanged for every reported number: α grid {0.5, 1, 2, 3, 4, 6, 8}; detector thresholds τ ∈ { 0.15 , 0.20 , 0.30 }; λ = 1 .0
+
+in the J objective; 200 -instance non-conflict control set (seed 0); 500 -instance caps for the per-model prefers-new and prefers-old ITI samples (seed 0); τrec = −3 for the knowledge-recovery filter; bfloat16 weights for Mistral-7B-v0.3 and Llama-3.1-8B, fp16 for the two Qwens. Pre-trained model checkpoints are loaded from the Hugging Face Hub through the registry in configs/models.yaml .
+
+Steering vector storage. Per-model steering vectors are ≤ 150 KB. Detector activations are ∼ 8 MB per model. Full per-layer activation caches for the locator are ∼ 30 MB per model. 
+
+Code and data release. All scripts, the model registry, and the benchmark loader are available at 
+
+https://github.com/eliashossain001/temporal-attractor-steering ; the released PTC dataset is hosted at https://huggingface.co/datasets/EliasHossain/ptc-benchmark . Hyperparameters, model checkpoints, and the per-model (ℓ∗, α ∗, τ ∗) values are deterministic and reported throughout. The five appendix figures (Figs. 6 to 10) are each produced by a single script under figures/scripts/ that reads the released per-model JSON files and emits the corresponding PDF; rerunning a script with no arguments regenerates the figure with bit-identical values to those cited in the table captions. 
+
+License and usage terms. The source code will be released under a permissive open-source license, and the PTC benchmark under a research-use license, both intended strictly for research on parametric-knowledge analysis and inference-time intervention. Precise terms, sourcing notes, and known-coverage limitations will be documented on the release artefacts themselves, which will be authoritative where they disagree with this paper. Underlying language-model checkpoints (Qwen-2.5, Mistral-7B-v0.3, Llama-3.1-8B) remain subject to their respective publisher licenses and are not redistributed. Wikidata-sourced facts retain the public-domain dedication (CC0 1.0) of their original statements; only the PTC record schema and the verified filtering decisions on top of those facts are the new contribution. Identifying release endpoints (hosting platform, repository URL, license file) will be substituted at camera-ready. 
+
+Known engineering items. The largest remaining engineering item is detector calibration. The isotonic calibrator trained on a small held-out fold of the per-model detector training set generalizes imperfectly to the long tail of the full 8,746 -record benchmark, leading to high false-alarm rates at aggressive thresholds for the larger models. A proper held-out calibration set of ∼1,000 records is expected to substantially sharpen the operating-point selection. L AI Usage Statement 
+
+Use of AI Assistance. AI-based tools such as ChatGPT and Claude were used only to refine the manuscript, including grammar checking, clarity improvement, and language polishing. These tools were also used to support limited code refactoring and formatting improvements. All scientific findings, experimental results, analyses, interpretations, and conclusions presented in this work were developed and verified exclusively by the authors and were not generated by AI systems. 
+
+Benchmark. The 8,746 -record benchmark was constructed from public Wikidata statements following the deterministic protocol in Appendix E. No AI system was used to generate, label, verify, or filter benchmark records; LLM-judge cross-verification is noted as a planned extension in Section 8.
