@@ -1,0 +1,1563 @@
+Title: Stealthy World Model Manipulation via Data Poisoning
+
+URL Source: https://arxiv.org/pdf/2606.18697v1
+
+Published Time: Thu, 18 Jun 2026 00:32:54 GMT
+
+Number of Pages: 41
+
+Markdown Content:
+# Stealthy World Model Manipulation via Data Poisoning 
+
+Yibin Hu 
+
+Department of Computer Science Tulane University 
+
+Xiaolin Sun 
+
+Department of Computer Science Tulane University 
+
+Zizhan Zheng 
+
+Department of Computer Science Tulane University New Orleans, LA, USA 
+
+zzheng3@tulane.edu 
+
+## Abstract 
+
+Model-based learning agents use learned world models to predict future states, plan actions, and adapt to new environments. However, the process of updating world models from collected experience creates a training-time attack surface: ad-versarially poisoned fine-tuning trajectories can manipulate the learned dynamics and thereby corrupt downstream planning. In this paper, we propose SWAAP, the first two-stage data poisoning framework for learned world models. In the first stage, SWAAP identifies a harmful target world model that induces low-return behavior under planning while remaining close to clean dynamics, using first-order bilevel optimization enabled by a transition-gradient theorem. In the second stage, SWAAP realizes this target through stealth-constrained gradient matching, modi-fying only a limited fraction of fine-tuning transition targets so that the induced training gradients steer the victim model toward the adversarial target, while a prediction-error regularizer encourages the poisoned targets to remain close to the world model’s natural approximation error. To assess attack stealthiness, we evaluate defenses and detectability across three stages of the poisoning pipeline: pre-training detection of poisoned transitions, robust training during fine-tuning, and test-time monitoring of the resulting world model. Across diverse continuous-control tasks, SWAAP causes substantial performance degradation while keeping poisoned transitions close to clean data and evading the evaluated non-adaptive residual/CUSUM/TRIM-style defenses. These results reveal a practical vulnera-bility in world-model adaptation pipelines and highlight the need for robustness methods that protect both world-model training data and learned dynamics. 
+
+## 1 Introduction 
+
+While artificial intelligence (AI) has achieved remarkable success across various domains, building general-purpose agents that can quickly adapt to new tasks remains a major challenge, particularly for sequential decision-making tasks in open-ended environments that require substantial planning and adaptation. A promising direction is the development of world models [Ha and Schmidhuber, 2018] that accurately capture environmental structure and dynamics to support a wide range of downstream tasks. In this context, predictive world models, which allow agents to “imagine” future scenarios for safer, more efficient decisions, are proliferating [Hafner et al., 2024, Hansen et al., 2024, Zhou et al., 2025]. Further, with recent advances in diffusion and transformer architectures, foundation world models [OpenAI, 2025, Bruce et al., 2024, Nvidia, 2025a] capable of simulating interactive environments from multi-modal input are emerging and are increasingly being applied in complex 
+
+> Preprint.
+> arXiv:2606.18697v1 [cs.LG] 17 Jun 2026
+
+domains such as autonomous vehicles and robotics [Nvidia, 2025b], making them valuable targets for malicious attacks. To support effective decision-making across diverse domains, world models must encode broad knowledge, process high-dimensional inputs (e.g., images, videos, and text), and make long-horizon predictions, introducing new vulnerabilities not present in traditional supervised learning or model-free reinforcement learning (RL) systems. Despite extensive research in AI security and adversarial machine learning over the past decade, ensuring the robustness of world models against adversarial manipulation remains largely unexplored, limiting their deployment in high-stakes domains. In this work, we take an early step toward adversarially robust world modeling by introducing poisoning attacks tailored to world models. Our method strategically alters trajectory data used for training or fine-tuning, with the objective of manipulating model-based decision-making while maintaining outputs close to those of a clean model to evade detection. We believe this line of work is both practical and influential, as it highlights a fundamental vulnerability in world models that underpins their reliability in downstream applications. Traditional data poisoning methods from supervised learning [Biggio et al., 2012, Muñoz-González et al., 2017, Geiping et al., 2021] cannot be directly applied to our setting. These approaches typically assume fully differentiable training pipelines and discrete labels (e.g., flipping a cat to a dog ), allowing the adversary to optimize per-example perturbations via gradient-based techniques. In contrast, poisoning a world model requires identifying perturbations to the predicted next-state outcomes, which are structured, high-dimensional, and may be deterministic or stochastic. Such perturbations influence not only one-step predictions but also compound over long-horizon rollouts. Moreover, differentiating through the training process of the world model is computationally expensive and generally intractable, making standard supervised learning attacks unsuitable for this problem. Existing data-poisoning attacks in reinforcement learning [Rakhsha et al., 2020, Zhang et al., 2020] primarily manipulate rewards or transitions observed during training to steer the learned policy toward an adversary-specified target policy or behavior. Although performance degradation can in principle be achieved by enforcing a low-return target policy, this perspective does not directly apply to world-model poisoning, where the adversary cannot directly enforce the deployed policy. Instead, a world-model poisoning must act indirectly: it changes fine-tuning transitions so that the learned dynamics induce harmful planning or model-based policy improvement. SWAAP operationalizes this indirect attack by identifying a poisoned world model under which harmful behavior becomes favorable for the victim’s planner, and then realizing this model by poisoning only a bounded fraction of fine-tuning transitions. This creates a coupled inverse-planning and data-realization problem: even if a low-return target policy is known, there may be no nearby world model that induces it while remaining sufficiently close to clean dynamics to evade detection. Moreover, existing RL poisoning formulations are designed for simpler tabular or low-dimensional settings and do not directly scale to deep world models with high-dimensional continuous latent states, continuous actions, and long-horizon compounding prediction errors, as in TD-MPC2 [Hansen et al., 2024], DINO-WM [Zhou et al., 2025], and DreamerV3 [Hafner et al., 2024]. These differences motivate a scalable poisoning framework tailored to learned world models. In this work, we propose SWAAP (Stealthy World Model M Anipulation via D Ata Poisoning), a two-stage data poisoning framework to manipulate learned world models in model-based RL. Our framework is applicable to both stochastic and deterministic transition dynamics. SWAAP first identifies a stealthy target world model that induces low-return behavior while staying close to the intact world model, via bilevel optimization. It then achieves this target through a realistic data-poisoning procedure that alters only a small fraction of the fine-tuning transition-dynamics data. Our contributions can be summarized as follows. • We propose, to our knowledge, the first data poisoning attack that explicitly targets learned world-model dynamics in deep model-based RL, which effectively degrades downstream planning performance while keeping the poisoned dynamics close to the true environment, making the attack difficult to detect. • Two-stage decomposition . Direct bilevel optimization through fine-tuning is intractable; we decouple it into (i) finding a stealthy adversarial target world model enabled by a transition gradient, and (ii) realizing it via gradient-matched data poisoning applied to trajectory data. We also show empirically that both stages are necessary. 2• Stealth-constrained data realization. We adapt gradient matching to world-model fine-tuning by constructing poisoned transition targets whose gradients steer the victim toward the Stage 1 target while a prediction-error regularizer keeps perturbations close to the clean model’s natural deviation scale. We also introduce a trajectory-consistent variant for sequential fine-tuning data, where a poisoned intermediate state is used consistently as both the next-state target at time t and the current state at time t + 1 .• Empirical evaluation. Evaluations using TD-MPC2 and DINO-WM show that poisoning a small fraction of fine-tuning data can cause large performance drops across diverse continuous-control benchmarks, including DMControl [Tassa et al., 2018], MyoSuite [Caggiano et al., 2022], and MetaWorld [Yu et al., 2020]. We evaluate three complementary notions of stealthiness: data-level stealth before fine-tuning ( δd, deviation-based filtering, and CUSUM-style screening of data trajectories), robustness during fine-tuning (TRIM), and model-level deviation after deployment (δm). Across these evaluations, SWAAP maintains low data-level deviation and remains effective under the evaluated defenses and detectors, highlighting the need for robustness methods that protect both world-model training data and learned dynamics. 
+
+## 2 System and Threat Models 
+
+In this section, we present the system and threat models, covering both world models and our proposed data-poisoning attacks framework. A detailed summary of related work on world models, model-based RL, model poisoning, data poisoning, and defenses is provided in Appendix C. 
+
+2.1 World Models 
+
+We study an agent interacting with an environment formalized as a Markov decision process (MDP) 
+
+(S, A, P, R, γ, μ ), where μ is the initial state distribution, S is the state space, A is the action space, 
+
+P : S ×A → ∆( S) is the transition kernel, R : S ×A×S → R is the reward function, and γ ∈ (0 , 1) 
+
+is the discount factor. The agent learns a world model Pψ (parameterized by ψ) that approximates the environment dynamics P (s′ | s, a ) from transition data D = {(si, a i, s ′
+
+> i
+
+)}|D|
+
+> i=1
+
+. To simplify notation and keep the discussion general, we assume a deterministic transition function in the main text and write the next state as s′ = Pψ (s, a ). With this slight abuse of notation, Pψ is trained by minimizing the squared prediction error 
+
+L(ψ; D) = X
+
+> (s,a,s ′)∈D
+
+∥s′ − Pψ (s, a )∥22.
+
+Extensions to the stochastic transition functions are in Appendix D.3, where the squared-error objective is replaced by a likelihood-based formulation. In modern model-based agents, prediction and planning are usually performed in a learned latent space z = enc( s). To simplify notation, we write transitions in state space, but in our implementation s denotes the encoded latent z unless otherwise stated; transition predictions, poisoned targets, and stealth metrics are therefore computed in latent space. If fine-tuning data are stored as raw observations, the same objective can in principle be optimized through the encoder by replacing a raw next observation ˜o′ whose encoding realizes the desired latent target. Appendix H.3 gives initial raw-space transfer evidence across different encoders. We adopt TD-MPC2 [Hansen et al., 2024], a representative world modeling framework, to explain our approach. TD-MPC2 jointly trains a latent dynamics model, value functions, and a policy, and uses the policy to initialize model predictive control (MPC). In general, a learned world model induces a downstream policy or planner πθ⋆(ψ) by optimizing expected return under Pψ :
+
+θ⋆(ψ) ∈ arg max 
+
+> θ
+
+J(Pψ , θ ), J(Pψ , θ ) = E(st,a t,s t+1 )∼Pψ ,π θ
+
+" TX
+
+> t=0
+
+γtR(st, a t, s t+1 )
+
+#
+
+.
+
+For MPC-based agents, at time t the planner evaluates candidate action sequences at:t+H by rolling them out under Pψ from ˆst = st and executes only the first action of the best sequence: 
+
+a⋆t:t+H ∈ arg max 
+
+> at:t+H
+> H
+
+X
+
+> h=0
+
+γhR(ˆ st+h, a t+h, ˆst+1+ h), ˆst+h+1 ∼ Pψ (· | ˆst+h, a t+h), aexec  
+
+> t
+
+= a⋆
+
+> 0
+
+.
+
+A detailed description of the MPC procedure is given in Appendix E.1. 32.2 Threat Model 
+
+We consider a continual fine-tuning pipeline for learned world models: a developer pretrains a world model on a large general-purpose dataset and then periodically adapts it using locally collected trajectories from a deployed robot, edge device, or simulation client. In such pipelines, compromising the local fine-tuning buffer is a more accessible attack surface than compromising the pre-training process or directly overwriting deployed model parameters. We consider a data-poisoning adversary with access to this local fine-tuning stream, such as through a compromised data-logging path, data-aggregation service, or insider write access. The attacker may (i) modify at most rp|D| (rp ∈ (0 , 1] )transitions in the fine-tuning dataset D by replacing the recorded next state s′ 
+
+> i
+
+with an adversarial target 
+
+˜s′
+
+> i
+
+, leaving si, ai, and the reward unchanged; and (ii) interact with a clean copy of the environment to collect reference trajectories for surrogate fitting and stealth regularization. The attack objective is to reduce the long-term return of the agent after the poisoned world model is used for planning or model-based policy improvement. 
+
+Figure 1: Pipeline of SWAAP. 
+
+In our main experiments, we assume white-box access to the victim world-model architecture, pretrained weights ψ0, and fine-tuning loss. We use this as an attack feasibility study and a worst-case robustness evaluation, analogous to white-box adversarial evaluation in supervised learning; it is also relevant to open-weight world models and downstream adaptation settings. The attacker may additionally collect clean reference trajec-tories from the environment for surrogate fitting and stealth regularization. We also evaluate a gray-box variant in Appendix H.3, in which the attacker does not know the exact victim parame-ters or the downstream task. In both white-box and gray-box settings, the attacker only modifies a bounded subset of recorded fine-tuning transitions. The attacker does not directly change the deployed model parameters at test time; the attack must instead act through subsequent world-model adapta-tion. This separates SWAAP from direct model overwrite baselines and from test-time observation perturbations, which intervene at different stages of the pipeline. 
+
+2.3 Bilevel Formulation of Problem 
+
+The adversary can pursue multiple objectives when manipulating the world model update, such as steering the agent toward a specific target policy or degrading its performance. In this work, we focus on the objective of reducing the agent’s long-term return. We consider a data-poisoning adversary that may perturb a bounded fraction of transitions in the fine-tuning dataset D, replacing (si, a i, s ′
+
+> i
+
+)
+
+with (si, a i, ˜s′
+
+> i
+
+) to form a poisoned dataset ˜D. After the agent trains on ˜D, the resulting world model 
+
+Pψ deviates from the true dynamics P and induces suboptimal behavior. This interaction can be formalized as the following bilevel optimization problem: 
+
+min 
+
+> ˜D
+
+J P, θ ∗(ψ) + λL (Pψ , P )
+
+s.t. Pψ = F (Pψ0 , ˜D), θ ∗(ψ) = arg max 
+
+> θ
+
+J(Pψ , θ ),
+
+> |D|
+
+X
+
+> i=1
+
+1[˜ s′
+
+> i
+
+̸ = s′
+
+> i
+
+] ≤ rp |D|.
+
+(1) where J P, θ ∗(ψ) is the return of the surrogate policy in the true environment, F (Pψ0 , ˜D) denotes fine-tuning the initial world model Pψ0 on the poisoned dataset ˜D, and L(Pψ , P ) penalizes deviation between the poisoned world model and the true dynamics. In the general stochastic setting, this deviation can be measured by an expected divergence between transition kernels, such as DKL (P (· | 
+
+s, a ) ∥ Pψ (· | s, a )) . Our experiments use deterministic latent world models, where the transition model outputs a point prediction and the KL divergence is degenerate; we therefore instantiate 
+
+L(Pψ , P ) with the squared latent prediction-error surrogate: 
+
+L(Pψ , P ) = E(s,a,s ′)∼P,π θ∗(ψ)
+
+∥Pψ (s, a ) − s′∥22
+
+ . (2) 4Thus, we instantiate a deterministic formulation here; Appendix D.3 gives the stochastic formula-tion. In summary, the outer minimization reduces real-environment performance, while the inner maximization captures the agent’s policy optimization under the poisoned world model. 
+
+## 3 Stealthy World Model Manipulation via Data Poisoning 
+
+Directly solving Eq. 1 is intractable because it requires optimizing which transition targets to perturb, how to perturb them, and how the victim world model changes after fine-tuning. SWAAP therefore decomposes the attack into two stages, shown in Figure 1. Stage 1 identifies a harmful but low-deviation target world model ˆψ by solving a model-space bilevel problem. Stage 2 realizes this target through gradient-matched data poisoning, constructing ˜D so that fine-tuning gradients steer the victim model toward ˆψ. Stealthiness is enforced at both levels: Stage 1 regularizes model-level deviation, while Stage 2 regularizes data-level deviations so poisoned targets remain close to the clean model’s natural prediction error. 
+
+3.1 Stage 1: Identification of Perturbed Models 
+
+In the first stage, the attacker searches for a target world model ˆψ that induces low return when used for planning, while remaining close to the true dynamics. Let J(ψ, θ ) := J(Pψ , θ ) denote the expected return of policy πθ in the imagined environment Pψ , and let J(P, θ ) denote its return in the true environment. The attacker then solves the model-space bilevel problem 
+
+ˆψ ∈ arg min 
+
+> ψ
+
+J(P, θ ⋆(ψ)) + λL (Pψ , P ) s.t. θ⋆(ψ) ∈ arg max 
+
+> θ
+
+J(ψ, θ ), (3) where L(Pψ , P ) penalizes deviation from true dynamics and controls the attack–stealth trade-off. Directly solving Equation 3 is difficult because changing ψ affects the agent only indirectly through long-horizon model-based planning or policy improvement. The outer objective is a trajectory-level return evaluated in the true environment, while the inner problem is a nonconvex RL/planning problem over high-dimensional policies and learned dynamics. Thus, applying a generic bilevel optimizer would require differentiating through the implicit response θ⋆(ψ), which is computationally prohibitive in modern world-model agents. We therefore use a first-order dynamic-barrier bilevel method in the spirit of BOME [Liu et al., 2022], which replaces the implicit optimality condition with a value-function constraint; details are given in Appendix D.2. However, directly instantiating this update in model-based RL still requires the transition-model gradient ∇ψ J(ψ, θ ), which is not provided by the standard policy-gradient theorem. We thus derive a general transition-gradient estimator for stochastic transition kernels Pψ (· | s, a ).
+
+Theorem 3.1 (Transition Gradient) For a finite-horizon MDP with stochastic tran-sition kernel Pψ (·| s, a ), policy πθ , and time-indexed value function Vt(s) := 
+
+E(st,a t,s t+1 )∼Pψ ,π θ
+
+hPT −ti=0 γiR(st+i, a t+i, s t+i+1 ) st = s
+
+i
+
+. Assuming Pψ (s′|s, a ) is differ-entiable in ψ, the gradient of the return with respect to the transition parameters is 
+
+∇ψ J(ψ, θ ) = E(st,a t,s t+1 )∼Pψ ,π θ
+
+h T −1X
+
+> t=0
+
+γt R(st, a t, s t+1 )+ γV t+1 (st+1 )∇ψ log Pψ (st+1 | st, a t)
+
+i
+
+Using Theorem 3.1, Stage 1 alternates between approximating the agent’s response under the current world model and updating (ψ, θ ) with the dynamic-barrier direction. At iteration k, we first run W
+
+policy-gradient steps to obtain an approximate best response θWk under Pψk . We then estimate the outer and constraint gradients using rollouts from the true environment and the current/perturbed world models, and update (ψk, θ k) by the first-order dynamic-barrier step. Algorithm 1 summarizes the procedure (see Appendix E.3 for the algorithm details); Appendix D.2 provides the full BOME derivation and Appendix D.1 proves Theorem 3.1, including the discounted infinite-horizon stochastic form and the deterministic finite-horizon specialization used by deterministic latent predictors. 
+
+3.2 Stage 2: Poisoning Data to Manipulate Model 
+
+Stage 1 identifies a harmful target world model P ˆψ , but directly replacing the victim model would require model overwrite. Stage 2 instead realizes this target through bounded data poisoning. Let 5F (Pψ0 , ˜D) denote fine-tuning the initial world model on poisoned data ˜D. The attack objective is 
+
+min 
+
+> ˜D
+
+L P ˆψ , F (Pψ0 , ˜D) s.t. 
+
+> |D|
+
+X
+
+> i=1
+
+1[˜ s′
+
+> i
+
+̸ = s′
+
+> i
+
+] ≤ rp |D|, (4) where the attacker modify at most an rp fraction of next-state targets while keeping (s, a, r ) un-changed. Directly solving this problem requires both discrete subset selection and continuous target optimization while repeatedly fine-tuning the victim model, so we use a two-step approximation. First, we select the top-rp fraction of transitions with largest residual eψ (s, a, s ′) = ∥s′ − Pψ (s, a )∥2
+
+under the Stage 1 target model. These transitions are most inconsistent with the target dynamics and therefore provide strong local signal for steering fine-tuning toward P ˆψ . Let Dp be this selected subset and Dc = D \ Dp. The poisoned dataset is ˜D = Dc ∪ ˜Dp, where ˜Dp replaces s′ by ˜s′ only for transitions in Dp. As throughout the paper, these deviations are computed in latent space. Second, we optimize the poisoned targets by gradient matching. Let 
+
+Greal = E(s,a, ˜s′)∼ ˜D
+
+∇ψ0 ∥˜s′ − Pψ0 (s, a )∥22
+
+ , Gtarget = E(s,a )∼Dall 
+
+h
+
+∇ψ0 ∥P ˆψ (s, a ) − Pψ0 (s, a )∥22
+
+i
+
+.
+
+where Dall is a large clean reference dataset collected by the attacker. Greal is the gradient induced by training on the poisoned data, while Gtarget is the update direction that would move the clean model toward the Stage 1 target. Thus, aligning these gradients makes ordinary fine-tuning move the victim world model toward P ˆψ .To achieve the objective, we follow gradient-matching [Geiping et al., 2021] and optimize gradient direction using cosine alignment. The key requirement is that the victim’s training update is a descent direction for the adversarial target objective; matching direction is thus more important than matching gradient magnitude, which can vary with batch size, model scale, and loss normalization. We optimize                  
+
+> LP= (1 −α) 1−cos( Greal , G target )+αX
+> (si,a i,s ′
+> i)∈˜Dp
+>  ∥˜s′
+> i−s′
+> i∥2− ∥ Pψ0(si, a i)−s′
+> i∥2
+> 2.(5)
+
+The cosine term aligns the poisoned-data gradient with the Stage 1 target gradient. The second term regularizes perturbation size to match the clean model’s natural one-step prediction error, making poisoned targets less conspicuous under reference-model residual screening. The coefficient α
+
+controls the trade-off between target realization and data-level stealth. 
+
+Trajectory-consistent poisoning. The formulation above treats fine-tuning data as a set of transition tuples, a common practice in reality. When the fine-tuning data are stored as sequential trajectories, however, the same intermediate state appears twice: as the next-state target of transition t and as the current-state input of transition t + 1 . In this case, perturbing only s′ 
+
+> t
+
+would create an inconsistent trajectory, which can be detected by the victim agent with access to trajectory data. To further improve attack stealthiness, we therefore extend the above formulation by considering a trajectory-consistent variant (Appendix G.6): if transition t is selected for poisoning, we replace both occurrences of the intermediate latent state, excluding terminal transitions where t + 1 starts a new trajectory. The original matching gradient is augmented with a one-step consistency term to become 
+
+Greal = E(st,a t,s ′ 
+
+> t,a t+1 ,s ′
+> t+1 )∼˜D
+
+h
+
+∇ψ0
+
+
+
+∥˜s′ 
+
+> t
+
+−Pψ0 (st, a t)∥22 +∥s′ 
+
+> t+1
+
+−Pψ0 (stopgrad(˜ s′
+
+> t
+
+), a t+1 )∥22
+
+i 
+
+,
+
+so that the poisoned intermediate state remains predictive of the observed successor under the next action. This variant preserves the same poisoning-budget interpretation, but each selected poisoned state is applied consistently across adjacent trajectory tuples. 
+
+3.3 Defenses Against Data Poisoning 
+
+We evaluate stealthiness against three stages of defense: pre-training detection before poisoned transitions are used for fine-tuning, robust training during fine-tuning, and test-time monitoring. 
+
+Pre-training detection. Pre-training detection-based defenses aim to identify poisoned transitions before they are used for model updates. We consider a deviation-based detector that compares each candidate transition against a reference world model and flags transitions whose residual 6eψref (s, a, s ′) exceeds a threshold [Chen et al., 2021]. Specifically, we consider a defender with access to a reasonably accurate reference world model Pψref for which we choose to use Pψ0 , and it computes data-level deviation δd = 1 
+
+> |˜D|
+
+P    
+
+> (si,a i,˜s′
+> i)∈˜D
+> ∥Pψ0(si,a i)−˜s′
+> i∥2
+> ∥Pψ0(si,a i)∥2
+
+, which measures the deviation of crafted poisoned transitions from clean predictions of the reference model and is compared with clean data δd,ref = 1
+
+> |D|
+
+P   
+
+> (si,a i,s ′
+> i)∈D
+> ∥Pψ0(si,a i)−s′
+> i∥2
+> ∥Pψ0(si,a i)∥2
+
+. We also evaluate a CUSUM-style sequential detector calibrated on held-out clean trajectories. The detector accumulates a scalar latent anomaly signal along candidate fine-tuning trajectories; details are in Appendix F.3.1. Because SWAAP operates on latent transitions, we further include a latent-space PCA sanity check on ˜D: poisoned next-state targets largely overlap with true next states and do not form obvious latent outliers. 
+
+Training-time defenses aim to reduce the impact of poisoned samples without explicitly identifying them. One representative approach is the TRIM strategy [Biggio et al., 2012], which iteratively filters transitions based on their deviation. At each iteration, the transitions are ranked by eψref (s, a, s ′),and only the lowest (1 − β)n deviation transitions are retained, where n is the number of transitions considered and β ∈ (0 , 1) controls the fraction of discarded data. The fine-tuning update is then computed using this subset. By discarding high-deviation transitions, the TRIM strategy limits the influence of adversarially perturbed transitions while preserving the underlying clean dynamics. 
+
+Test-time monitoring . At test time, the defender may monitor whether the learned world model remains consistent with observed environment transitions. For deterministic world models (stochastic case in Appendix D.3), we report the model-level deviation δm = 1
+
+> T
+
+PTi=1   
+
+> ∥s′
+> i−Pψ(si,a i)∥2
+> ∥s′
+> i∥2
+
+, computed over rollout transitions {(st, a t, s ′
+
+> t
+
+)}Tt=0 . This measures how far the poisoned model deviates from true dynamics observed during execution, and clean model deviation δm,ref = 1
+
+> T
+
+PTi=1   
+
+> ∥s′
+> i−Pψ0(si,a i)∥2
+> ∥s′
+> i∥2
+
+.However, in our data-poisoning threat model, test-time monitoring is a late-stage defense: if poisoned data have already evaded pre-training screening and been used for fine-tuning, harmful behavior may occur before the learned model is diagnosed. Therefore, the pre-training data-level deviation δd is the more direct stealth metric for this attack surface, while δm measures whether the resulting model remains plausibly close to clean dynamics after deployment. 
+
+## 4 Experiments 
+
+We evaluate SWAAP’s effectiveness and stealthiness under the criteria in Section 3.3. After describing setup and metrics, we present main results on return degradation, δd, δm, and evaluated defenses, then summarize ablations and broader settings including larger buffers, trajectory-consistent poison-ing, DINO-WM, and gray-box transfer. Additional implementation details, system configurations, hyperparameters, and extended results are deferred to Appendices E–H. 
+
+4.1 Experimental Setup and Metrics 
+
+We use TD-MPC2 [Hansen et al., 2024] as the main victim agent. Unless otherwise stated, the victim starts from a world model ψ0 pretrained on 10 6 clean transitions and is fine-tuned on 5,000 
+
+transitions, of which the attacker may modify at most an rp fraction. We use rp = 0 .1 in the main experiments. TD-MPC2 uses 512 candidate rollouts with planning horizon 3. All deviations are computed in the learned latent space z = enc( s). We evaluate on DMControl [Tassa et al., 2018], MyoSuite [Caggiano et al., 2022], MetaWorld [Yu et al., 2020], and ManiSkill2 [Gu et al., 2023]. We compare Clean , SWAAP (Random) , Direct Model Poisoning , and SWAAP . Direct Model Poisoning directly deploys the Stage 1 target model and is used to serve as a reference point under a stronger threat model of model overwriting. Unless otherwise stated, each Table 1 entry reports mean 
+
+± std over 10 independent seeds. Each seed-level value is itself averaged over approximately 5,000 rollout transitions, using 10 episodes for 500-step DMControl tasks and 50 episodes for 100-step tasks. Figure 2 and Appendix Figure 4 also use 10 independent seeds; their error bars report variation across seed-level averages. Other diagnostic ablations report variation across independent evaluation episodes rather than independent runs that aggregate multiple episodes. 
+
+4.2 Effective and Stealthy Poisoning Main attack results. Table 1 reports return, model-level deviation δm, and data-level deviation 
+
+δd. The clean column gives the reference model’s natural rollout deviation δm, ref . For fine-tuning 7Table 1: Main attack results. Clean reports return and reference model-level deviation δm, ref on rollout transitions. Attack columns report return and δm; SWAAP also reports δd, ref and δd on the fine-tuning buffer. Table 1 reports a stealth-prioritized operating point rather than an exhaustive search over Stage 1 checkpoints and Stage 2 stealth weights. Unless otherwise stated, SWAAP (Random) and SWAAP use rp = 0 .1 and α = 0 .9;humanoid-walk and lift-cube use α = 0 .99 to bias the operating point toward lower model-level deviation. Stronger attack–deviation trade-offs are shown in Figure 2 and Appendix F.1.                                                                                                                                                                                                                                                                                                                                                                                                                         
+
+> Clean SWAAP (Random) Direct Model Poisoning SWAAP Env. Return δm,ref Return δdδmReturn δmReturn δd,ref δdδm
+> humanoid-walk 868 ±15 .092 ±.003 826 ±26 .090 ±.005 .103 ±.004 307 ±87 .174 ±.009 775 ±50 .090 ±.005 .090 ±.005 .110 ±.007
+> DMControl humanoid-run 584 ±13 .049 ±.002 567 ±13 .052 ±.008 .053 ±.002 189 ±09 .104 ±.001 515 ±14 .051 ±.008 .053 ±.008 .063 ±.002
+> dog-walk 798 ±8.056 ±.001 794 ±10 .059 ±.002 .055 ±.001 523 ±18 .086 ±.001 748 ±13 .059 ±.002 .060 ±.002 .061 ±.002
+> dog-run 637 ±09 .052 ±.001 607 ±22 .051 ±.004 .054 ±.001 270 ±28 .081 ±.001 478 ±26 .051 ±.004 .052 ±.004 .064 ±.001
+> cheetah-run 838 ±11 .026 ±.001 830 ±23 .032 ±.006 .025 ±.004 389 ±39 .104 ±.011 806 ±6.028 ±.002 .034 ±.006 .036 ±.001
+> pen-twirl-hard 3574 ±640 .057 ±.003 3024 ±646 .056 ±.008 .079 ±.007 2743 ±497 .073 ±.006 2771 ±801 .056 ±.008 .056 ±.008 .101 ±.013
+> MyoSuite reach-hard 743 ±22 .042 ±.010 664 ±36 .035 ±.011 .065 ±.006 410 ±344 .085 ±.007 606 ±198 .035 ±.011 .035 ±.011 .089 ±.030
+> push 1784 ±13 .080 ±.002 1476 ±142 .080 ±.005 .176 ±.018 1464 ±154 .150 ±.022 1641 ±80 .080 ±.005 .081 ±.005 .171 ±.011
+> Meta-World soccer 1724 ±9.033 ±.002 1711 ±26 .050 ±.009 .034 ±.004 1555 ±102 .083 ±.018 1479 ±96 .046 ±.007 .051 ±.010 .064 ±.008
+> lift-cube 193 ±04 .019 ±.006 178 ±15 .031 ±.027 .071 ±.027 136 ±22 .210 ±.047 175 ±20 .031 ±.027 .032 ±.027 .068 ±.034
+> ManiSkill2 pick-cube 161 ±07 .028 ±.007 158 ±10 .026 ±.003 .029 ±.012 117 ±11 .198 ±.022 147 ±14 .025 ±.003 .027 ±.003 .069 ±.028
+> stack-cube 170 ±16 .044 ±.010 137 ±13 .042 ±.011 .088 ±.011 106 ±23 .116 ±.007 141 ±18 .041 ±.011 .042 ±.011 .077 ±.016
+
+data, δd = ∥Pψref (s, a ) − s′
+
+> data
+
+∥2/∥Pψref (s, a )∥2, where s′ 
+
+> data
+
+is either s′ or ˜s′; this is the signal available to a defender who observes only the incoming fine-tuning stream and a reference model. SWAAP consistently lowers return while modifying only a bounded fraction of transition targets and keeping δd close to δd, ref in most tasks. The resulting δm varies across environments, so we do not claim model-level indistinguishability; rather, SWAAP demonstrates an effectiveness–stealth trade-off under bounded data-level perturbation. Direct Model Poisoning is stronger in some tasks but assumes direct model overwrite and serves only as a reference point under a stronger threat model. Appendix F.3 shows that lower α can increase degradation with little change in δd.
+
+Pre-training and training-time defenses. We evaluate a residual-based CUSUM detector using 
+
+xt = ∥zt+1 − Pψref (zt, a t)∥2 and report ROC-AUC and TPR at a clean-calibrated threshold (Ap-pendix F.3.1). On MW-Push, it detects aggressive low-stealth poisoning ( α = 0 .1: AUC 0.864 , TPR 
+
+0.40 at FPR 0.06 ), but loses power at the main stealth setting ( α = 0 .9: AUC 0.509 , TPR 0.08 ). Humanoid-Walk at α = 0 .9 similarly gives AUC 0.520 and TPR 0.10 at FPR 0.10 . PCA visualiza-tions in Appendix F.3.2 show that poisoned next-state targets do not form obvious outliers. During fine-tuning, Figure 3c shows that SWAAP preserves its effectiveness under TRIM and produces even stronger degradation. We conjecture this occurs because the poisoned transitions are crafted to mislead TRIM into removing clean transitions, thereby amplifying the attack’s effect after training. 
+
+Stage-wise realization and attack-stealth trade-off. Figure 2 examines the Stage 2 poisoning realization step across stealth weights α and shows that at relaxed stealth, SWAAP’s return drop substantially exceeds that of SWAAP (Random), whose effect saturates, indicating that the Stage 1 target provides more useful poisoning directions than random perturbations. Additional α and rp
+
+ablations across all environments are in Appendix F.1. Figure 3 visualizes the attack-stealth frontier induced by different Stage 1 checkpoints and Stage 2 poisoning settings. In Stage 1, optimization produces saved target-model checkpoints with different return-δm trade-offs; Direct Model Poisoning evaluates these checkpoints directly, while SWAAP attempts to realize selected targets through constrained data poisoning. The comparison exposes the main realization bottleneck. In Humanoid-Walk, SWAAP points closely track the Direct Model Poisoning frontier, showing that Stage 2 can recover much of the target model’s effect. In Myo-Pen-Twirl-Hard, however, SWAAP remains separated from the Direct Model Poisoning frontier, showing that harmful targets are not always equally realizable through gradient-matched data poisoning. This target-selection procedure reflects a limitation of the current two-stage design that is not jointly optimized: Stage 1 optimizes for harmful and low-δm target dynamics, but not for how easily those targets can later be realized by Stage 2. 
+
+4.3 Ablations and Generalization 
+
+We provide additional ablations and generalization tests in Appendices F.4, G, H. First, Appendix F.4 studies the relation between Stage 1 target identification and Stage 2 data realization. Direct Model Poisoning in Table 1 evaluates saved Stage 1 target models under an unrealistic model-overwrite threat model, while SWAAP realizes selected targets through bounded data poisoning. The gap between the two reflects the practical cost of realizing a target model only through fine-tuning data, rather than a failure of the two-stage decomposition. We also compare against DMP-data, which directly inserts Stage 1 target predictions without gradient matching; SWAAP is more effective, especially under TRIM, indicating that the gradient-matching realization step is useful. 8Figure 2: SWAAP versus SWAAP (Random) across stealth weights α with rp = 0 .1. SWAAP generally causes larger return drops under smaller stealth weights. 0.1 0.2 0.3 0.4 0.5  
+
+> m
+> 0
+> 200
+> 400
+> 600
+> 800
+> 1000
+> Return
+> Humanoid-Walk
+> SWAAP
+> Direct Model Poisoning
+> SWAAP (Random)
+> Clean Return
+> Clean m, ref
+
+(a) Humanoid-Walk frontier 0.0 0.1 0.2 0.3 0.4 0.5   
+
+> m
+> 0
+> 1000
+> 2000
+> 3000
+> 4000
+> 5000
+> Return
+> Myo-Pen-Twirl-Hard
+> SWAAP
+> Direct Model Poisoning
+> SWAAP (Random)
+> Clean Return
+> Clean m, ref
+
+(b) Myo-Pen-Twirl-Hard frontier Clean (No Trim)    
+
+> Clean (Trim)
+> SWAAP (No Trim)
+> SWAAP (Trim)
+> 0
+> 200
+> 400
+> 600
+> 800
+> 1000
+> Return
+> Humanoid Walk ( =0.9)
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> m
+> Return m
+
+(c) TRIM defense 
+
+Figure 3: (a) and (b) Attack-stealth frontier: DMP evaluates saved Stage 1 target models directly, while SWAAP applies Stage 2 data poisoning toward selected targets. (c) Robust-training defense: on Humanoid-Walk, SWAAP ( rp, α = 0 .1, 0.9) remains effective under TRIM robust training ( β = 0 .2). 
+
+Second, Appendices G.1 and G.2 test Stage 2 design choices and alternative baselines, respectively. Replacing the top-rp transition-selection heuristic with random selection weakens the attack on Humanoid-Walk, supporting the choice of poisoning transitions most inconsistent with the Stage 1 target. On MW-Push, a PGD transition-poisoning baseline is weaker than SWAAP and produces larger data-level deviation, suggesting that local value-reducing perturbations are less effective and less stealthy than target-model gradient matching in this setting. Finally, Appendices G.6–H.3 evaluate broader settings. With a fixed number of poisoned samples, increasing the fine-tuning buffer weakens but does not eliminate the attack. We also evaluate a trajectory-consistent variant in which a poisoned intermediate latent state is written consistently as both s′ 
+
+> t
+
+and st+1 in sequential fine-tuning data. On Humanoid-Walk, this variant achieves 
+
+R = 784 ± 19 and δm = 0 .111 ± 0.003 with rp = 0 .05 , while maintaining data-level reference deviation δd = .102 ± .007 . This suggests that SWAAP is not limited to unordered transition buffers, although the attack is weaker under the stricter sequential-consistency constraint. On DINO-WM Push-T, SWAAP reduces the success rate after Stage 2 poisoning, providing initial evidence across world-model backbones. In a preliminary gray-box transfer setting, poisoned data are constructed in raw observation space using a single-task surrogate and then applied to a multi-task TD-MPC2 victim with a different latent encoder. This does not replace the white-box setting as a worst-case robustness baseline, but suggests a path toward relaxing exact-parameter and shared-encoder assumptions. 
+
+## 5 Conclusion and Limitations 
+
+We introduced SWAAP, a two-stage data poisoning framework that realizes harmful target dynamics through stealth-constrained fine-tuning data. Across continuous-control tasks and a range of evaluated defenses, SWAAP exposes a practical vulnerability in world-model adaptation pipelines and motivates stronger protection for world-model training data and learned dynamics. As an initial study of world model poisoning, this work has limitations. First, our experiments primarily use TD-MPC2 as the victim model, with DINO-WM as an additional backbone; scaling to larger foundation models is left for future work. Second, SWAAP uses a two-stage approximation: 9Stage 1 identifies harmful, low-deviation target dynamics, and Stage 2 realizes them via gradient-matched data poisoning. Since some targets are easier to realize than others, jointly optimizing target selection and data realization is an important next step. Third, we focus on untargeted performance degradation rather than targeted behavior manipulation. Finally, while our stealth evaluation covers representative detection and defense techniques, it does not rule out stronger detectors, deployment-specific defenses, or more stringent constrained-poisoning settings. 10 References 
+
+Jonathan F Bard. Practical bilevel optimization: algorithms and applications , volume 30. Springer Science & Business Media, 2013. Battista Biggio, Blaine Nelson, and Pavel Laskov. Poisoning attacks against support vector machines. In International Conference on Machine Learning (ICML) , 2012. Jake Bruce, Michael Dennis, Ashley Edwards, Jack Parker-Holder, Yuge Shi, Edward Hughes, Matthew Lai, Aditi Mavalankar, Richie Steigerwald, Chris Apps, Yusuf Aytar, Sarah Bechtle, Feryal Behbahani, Stephanie Chan, Nicolas Heess, Lucy Gonzalez, Simon Osindero, Sherjil Ozair, Scott Reed, Jingwei Zhang, Konrad Zolna, Jeff Clune, Nando de Freitas, Satinder Singh, and Tim Rocktäschel. Genie: Generative interactive environments, 2024. URL https://arxiv.org/ abs/2402.15391 .Vittorio Caggiano, Huawei Wang, Guillaume Durandau, Massimo Sartori, and Vikash Kumar. MyoSuite: A contact-rich simulation suite for musculoskeletal motor control. In Annual Learning for Dynamics and Control Conference , 2022. Eduardo F Camacho and Carlos Bordons. Model predictive control . Springer, 2013. Jian Chen, Xuxin Zhang, Rui Zhang, Chen Wang, and Ling Liu. De-pois: An attack-agnostic defense against data poisoning attacks. IEEE Transactions on Information Forensics and Security , 16: 3412–3425, 2021. Kurtland Chua, Roberto Calandra, Rowan McAllister, and Sergey Levine. Deep reinforcement learning in a handful of trials using probabilistic dynamics models. In Advances in Neural Information Processing Systems (NeurIPS) , 2018. Marc Peter Deisenroth and Carl Edward Rasmussen. Pilco: A model-based and data-efficient approach to policy search. In International Conference on Machine Learning (ICML) , 2011. Minghong Fang, Xiaoyu Cao, Jinyuan Jia, and Neil Zhenqiang Gong. Local model poisoning attacks to byzantine-robust federated learning. In USENIX Security Symposium , 2020. Jonas Geiping, Liam Fowl, W. Ronny Huang, Wojciech Czaja, Gavin Taylor, Michael Moeller, and Tom Goldstein. Witches’ brew: Industrial scale data poisoning via gradient matching, 2021. URL 
+
+https://arxiv.org/abs/2009.02276 .Saeed Ghadimi and Mengdi Wang. Approximation methods for bilevel programming. arXiv preprint arXiv:1802.02246 , 2018. Jiayuan Gu, Fanbo Xiang, Xuanlin Li, Zhan Ling, Xiqiang Liu, Tongzhou Mu, Yihe Tang, Stone Tao, Xinyue Wei, Yunchao Yao, Xiaodi Yuan, Pengwei Xie, Zhiao Huang, Rui Chen, and Hao Su. ManiSkill2: A unified benchmark for generalizable manipulation skills, 2023. URL https: //arxiv.org/abs/2302.04659 .David Ha and Jürgen Schmidhuber. World models. arXiv preprint arXiv:1803.10122 , 2018. Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. Soft actor-critic: Off-policy maximum entropy deep reinforcement learning with a stochastic actor. In International Conference on Machine Learning (ICML) , 2018. Danijar Hafner, Timothy Lillicrap, Ian Fischer, Ruben Villegas, David Ha, Honglak Lee, and James Davidson. Learning latent dynamics for planning from pixels. International Conference on Machine Learning (ICML) , 2019. Danijar Hafner, Jurgis Pasukonis, Jimmy Ba, and Timothy Lillicrap. Mastering diverse domains through world models, 2024. URL https://arxiv.org/abs/2301.04104 .Nicklas Hansen, Hao Su, and Xiaolong Wang. TD-MPC2: Scalable, robust world models for continuous control. In International Conference on Learning Representations (ICLR) , 2024. Michael Janner, Justin Fu, Marvin Zhang, and Sergey Levine. When to trust your model: Model-based policy optimization. In Advances in Neural Information Processing Systems (NeurIPS) , 2019. 11 Michael Janner, Yilun Du, Joshua B Tenenbaum, and Sergey Levine. Planning with diffusion for flexible behavior synthesis. In International Conference on Machine Learning (ICML) , 2022. Lukasz Kaiser, Mohammad Babaeizadeh, Piotr Milos, Blazej Osinski, Roy Campbell, Konrad Czechowski, Dumitru Erhan, Chelsea Finn, Piotr Kozakowski, Sergey Levine, Afroz Mohiuddin, Ryan Sepassi, George Tucker, and Henryk Michalewski. Model-based reinforcement learning for atari. In International Conference on Learning Representations (ICLR) , 2020. Yongyuan Liang, Yanchao Sun, Ruijie Zheng, and Furong Huang. Efficient adversarial training without attacking: Worst-case-aware robust reinforcement learning. In Advances in Neural Information Processing Systems (NeurIPS) , 2022. Timothy P Lillicrap, Jonathan J Hunt, Alexander Pritzel, Nicolas Heess, Tom Erez, Yuval Tassa, David Silver, and Daan Wierstra. Continuous control with deep reinforcement learning. In 
+
+International Conference on Learning Representations (ICLR) , 2016. Bo Liu, Mao Ye, Stephen Wright, Peter Stone, and Qiang Liu. BOME! bilevel optimization made easy: A simple first-order approach. In Advances in neural information processing systems (NeurIPS) , 2022. Risheng Liu, Jiaxin Gao, Jin Zhang, Deyu Meng, and Zhouchen Lin. Investigating bi-level optimiza-tion for learning and vision from a unified perspective: A survey and beyond. IEEE Transactions on Pattern Analysis and Machine Intelligence , 44(12):10045–10067, 2021. Matthew MacKay, Paul Vicol, Jon Lorraine, David Duvenaud, and Roger Grosse. Self-tuning networks: Bilevel optimization of hyperparameters using structured best-response functions. arXiv preprint arXiv:1903.03088 , 2019. Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg Ostrovski, Stig Petersen, Charles Beattie, Amir Sadik, Ioannis Antonoglou, Helen King, Dharshan Kumaran, Daan Wierstra, Shane Legg, and Demis Hassabis. Human-level control through deep reinforcement learning. Nature ,2015. Luis Muñoz-González, Battista Biggio, Ambra Demontis, Andrea Paudice, Vasin Wongrassamee, Emil C. Lupu, and Fabio Roli. Towards poisoning of deep learning algorithms with back-gradient optimization. In 10th ACM Workshop on Artificial Intelligence and Security (AISec) , 2017. Nvidia. Cosmos world foundation model platform for Physical AI. https://arxiv.org/abs/ 2501.03575 , 2025a. Nvidia. World foundation models. https://www.nvidia.com/en-us/glossary/ world-models/ , 2025b. OpenAI. Creating video from text. https://openai.com/index/sora/ , 2025. Tim Pearce, Tabish Rashid, Anssi Kanervisto, Dave Bignell, Mingfei Sun, Raluca Georgescu, Sergio Valcarcel Macua, Shan Zheng Tan, Ida Momennejad, Katja Hofmann, and Sam Devlin. Imitating human behaviour with diffusion models. In International Conference on Learning Representations (ICLR) , 2023. Fabian Pedregosa. Hyperparameter optimization with approximate gradient. In International Conference on Machine Learning (ICML) , 2016. Amin Rakhsha, Goran Radanovic, Rati Devidze, Xiaojin Zhu, and Adish Singla. Policy teaching via environment poisoning: Training-time adversarial attacks against reinforcement learning. In 
+
+International Conference on Machine Learning (ICML) , 2020. Yuval Tassa, Tom Erez, and Emanuel Todorov. Synthesis and stabilization of complex behaviors through online trajectory optimization. In IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS) , 2012. Yuval Tassa, Yotam Doron, Alistair Muldal, Tom Erez, Yazhe Li, Diego de Las Casas, David Budden, Abbas Abdolmaleki, Josh Merel, Andrew Lefrancq, et al. Deepmind control suite. arXiv preprint arXiv:1801.00690 , 2018. 12 Tianhe Yu, Deirdre Quillen, Zhanpeng He, Ryan Julian, Karol Hausman, Chelsea Finn, and Sergey Levine. Meta-world: A benchmark and evaluation for multi-task and meta reinforcement learning. In Conference on Robot Learning (CoRL) , 2020. Xuezhou Zhang, Yuzhe Ma, Adish Singla, and Xiaojin Zhu. Adaptive reward-poisoning attacks against reinforcement learning. In International Conference on Machine Learning (ICML) , 2020. Gaoyue Zhou, Hengkai Pan, Yann LeCun, and Lerrel Pinto. DINO-WM: World models on pre-trained visual features enable zero-shot planning, 2025. URL https://arxiv.org/abs/2411.04983 .13 Appendix Table of Contents 
+
+A Use of LLMs 16 B Broader Impact 16 C Related Works 16 
+
+C.1 World Models . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 C.2 Model-Based Reinforcement Learning . . . . . . . . . . . . . . . . . . . . . . . . 17 C.3 Model Poisoning Attack . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 17 C.4 Data Poisoning Attacks and Defenses . . . . . . . . . . . . . . . . . . . . . . . . 17 
+
+D Theory and Derivations 18 
+
+D.1 Derivation of Transition Gradient . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 D.2 BOME Details for Stage 1 Model Poisoning . . . . . . . . . . . . . . . . . . . . . 19 D.3 Stochastic Transition Functions Case . . . . . . . . . . . . . . . . . . . . . . . . . 21 
+
+E Implementation Details 21 
+
+E.1 Model Predictive Control . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 E.2 Hyperparameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22 E.3 Stage 1: Target Model Identification . . . . . . . . . . . . . . . . . . . . . . . . . 23 E.4 Stage 2: Data Poisoning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 E.5 Hardware Specification and Computational Cost . . . . . . . . . . . . . . . . . . . 24 
+
+F Main Extended Results 24 
+
+F.1 SWAAP and SWAAP (Random) . . . . . . . . . . . . . . . . . . . . . . . . . . . 24 F.2 Model Poisoning Training Curve . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 F.3 Pre-Training Detection . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 F.3.1 Residual-Based CUSUM Pre-Training Detector . . . . . . . . . . . . . . . 26 F.3.2 Latent-Space PCA Visualization . . . . . . . . . . . . . . . . . . . . . . . 27 F.4 Stage 1–Stage 2 Realization Bottleneck . . . . . . . . . . . . . . . . . . . . . . . 28 
+
+G Ablations and Baselines 29 
+
+G.1 Iterative FGSM/PGD Transition-Perturbation Baselines . . . . . . . . . . . . . . . 29 G.2 Top-rp Transition Selection vs. Random Selection . . . . . . . . . . . . . . . . . . 30 G.3 MPC Hyperparameter Ablation . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 G.4 Stage 1 Masked Perturbation Fraction . . . . . . . . . . . . . . . . . . . . . . . . 30 G.5 Stage 2 Poisoning Ratio rp . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 G.6 Trajectory-Consistent Data Poisoning . . . . . . . . . . . . . . . . . . . . . . . . 31 G.7 Larger Fine-Tuning Buffers . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 
+
+H Generalization Experiments 32 
+
+H.1 Additional MyoSuite and MetaWorld Environments . . . . . . . . . . . . . . . . . 32 14 H.2 DINO-WM Push-T Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 H.3 Gray-Box Attack on TD-MPC2 Multi-Task World Model . . . . . . . . . . . . . . 32 15 Appendix A Use of LLMs 
+
+The authors used LLM-based assistants for manuscript preparation and presentation of supple-mentary materials, including grammar correction, wording suggestions, condensation of prose, LaTeX/formatting assistance, and improving the organization/readability of author-written code artifacts. LLMs were not used as part of the proposed method, theorem derivation, experiment design, result generation, or statistical analysis. All algorithms, experiments, figures, tables, citations, and technical claims were produced, checked, and approved by the authors. No confidential reviewer information, proprietary data, or sensitive personal data were used as LLM inputs. 
+
+## B Broader Impact 
+
+This paper studies a new training-time attack surface for learned world models. The primary intended benefit is defensive: by showing that fine-tuning trajectories can manipulate learned dynamics and downstream planning, the work motivates stronger data validation, robust fine-tuning, and monitoring methods for world-model adaptation pipelines. These issues are especially important for embodied agents, robotics, autonomous systems, and other settings where world models may be updated from locally collected experience. The same techniques could also inform misuse by suggesting ways to craft poisoned fine-tuning data. We mitigate this risk by studying the attack in controlled simulation benchmarks, limiting the threat model to bounded transition-target poisoning, and evaluating representative detection and robust-training defenses. We do not provide instructions for attacking deployed real-world systems. We believe that disclosure is warranted because the vulnerability arises naturally in continual fine-tuning pipelines, and understanding it is necessary for developing effective defenses. More broadly, this work highlights that the robustness of world-model agents cannot be evaluated only at the final policy or planner level. The training data stream, learned dynamics, and downstream planning procedure are coupled, so future safety evaluations should consider how small changes in adaptation data can propagate into long-horizon behavior. We hope the proposed evaluations encourage further work on secure data collection, provenance tracking, anomaly detection, and robust world-model fine-tuning. 
+
+## C Related Works 
+
+C.1 World Models 
+
+World models aim to learn compact and predictive representations of environment dynamics that can be used for planning and control. Instead of interacting directly with the environment, an agent can rely on its learned model to simulate trajectories, evaluate policies, and anticipate future states. First introduced in [Ha and Schmidhuber, 2018], this work introduced a three-component architecture combining a variational autoencoder (VAE), a recurrent neural network (RNN), and a linear controller, demonstrating that policies trained entirely within a latent model can transfer back to the real environment. This work sparked a line of research exploring increasingly powerful and scalable model-based reinforcement learning frameworks. Dreamer-style agents use latent dynamics models optimized end-to-end with reinforcement learning. DreamerV3 [Hafner et al., 2024] achieves state-of-the-art performance on visual control and robotic tasks. It employs a recurrent state-space model (RSSM) with deterministic state ht and stochastic latent st, performing rollouts entirely in latent space. Three heads are trained on the RSSM: a reward predictor ˆrt, a value function ˆV (·), and an actor π, using imagined rollouts. At decision time, the actor proposes candidate actions, either sampled or taken as the mean. More recent approaches have investigated architectural advances tailored for large-scale and complex environments. DINO-WM [Zhou et al., 2025] leverages self-supervised vision transformers (ViTs) to improve perception quality, enabling stronger generalization in visually rich settings. Similarly, TD-MPC2 [Hansen et al., 2024] proposes a temporally abstracted model predictive control framework 16 that combines world models with trajectory optimization, achieving sample-efficient learning and strong performance in high-dimensional continuous control tasks. Parallel to these developments, diffusion-based world models have emerged as a promising alter-native [Pearce et al., 2023, Janner et al., 2022]. By parameterizing the transition distribution as a denoising diffusion process, these models can capture multi-modal and stochastic dynamics more effectively than conventional Gaussian latent models. Diffusion world models have been shown to improve both planning quality and robustness to uncertainty, making them attractive in settings where dynamics are highly non-deterministic. 
+
+C.2 Model-Based Reinforcement Learning 
+
+Model-based reinforcement learning (MBRL) is a powerful paradigm that improves sample efficiency and enables better generalization compared to purely model-free methods. In MBRL, an agent learns an explicit dynamics model of the environment and leverages this model for planning or policy optimization. We study an agent that leverages a learned world model to interact with an environment formalized as a Markov decision process (MDP) (S, A, P, R, γ, μ ), where μ is the initial state distribution, S is the state space, A is the action space, P : S × A → ∆( S) is the transition kernel, R : S × A × S → R is the reward function, and γ ∈ (0 , 1) is the discount factor. The goal is to find a policy π : S → ∆( A) that maximizes the expected discounted return PTi=0 γiR(st, a t).Unlike model-free approaches that learn value functions or policies directly from experience [Mnih et al., 2015, Lillicrap et al., 2016, Haarnoja et al., 2018], MBRL explicitly learns a parametric approximation ˆPψ of the transition kernel P , often using neural networks [Deisenroth and Rasmussen, 2011, Chua et al., 2018, Janner et al., 2019, Hansen et al., 2024]. This learned dynamics model can then be used for model-predictive control (MPC) [Camacho and Bordons, 2013], trajectory optimization [Tassa et al., 2012], or to generate synthetic rollouts for policy improvement [Kaiser et al., 2020, Hafner et al., 2019]. 
+
+C.3 Model Poisoning Attack 
+
+Model poisoning attacks directly compromise a learned model by altering its parameters. They assume the adversary can craft malicious model updates to steer the learning outcome or directly replace model parameters. For example, carefully crafted local malicious updates can harm the performance of a federated learning system [Fang et al., 2020]. In reinforcement learning, model poisoning is particularly concerning when applied to the agent’s learned dynamics model. Small, adversarial modifications to the transition kernel can propagate over planning horizons, misleading policy improvement, and causing degraded performance. This makes model poisoning a uniquely severe threat in model-based RL, as even subtle deviations from the true dynamics can cascade into large errors in long-term decision making. 
+
+C.4 Data Poisoning Attacks and Defenses 
+
+Data poisoning attacks compromise learning systems by corrupting the training dataset to bias the learned model toward an adversarial objective. Unlike model poisoning, which manipulates parameters directly, data poisoning assumes the attacker can only influence the data stream but not the learning algorithm itself, which is a more realistic attack scenario. Data poisoning attacks have been shown to significantly degrade the model performance even with small amounts of poisoned data [Biggio et al., 2012]. A recent and effective data poisoning technique leverages gradient matching, which optimizes poisoned samples such that their gradients closely align with those of a target adversarial objective [Geiping et al., 2021]. By ensuring that poisoned data induces updates similar to those of the adversary’s intended solution, gradient matching enables stealthy and highly effective poisoning even under limited attacker control. We also adopt gradient matching in the second stage of our attack methods, where we inject carefully crafted poisoned transitions into the newly collected fine-tuning dataset. In reinforcement learning, data poisoning is particularly dangerous since training relies on sequential interactions with the environment. By injecting corrupted transitions into the replay buffer or modifying observed trajectories, an adversary can degrade the long-term performance of the agent, or even embed targeted failures [Rakhsha et al., 2020, Zhang et al., 2020]. 17 Effective defenses against data poisoning attacks involve detection and training-time strategies. We consider two widely used data poisoning defenses in our work. Chen et al. [2021] propose De-Pois, an attack-agnostic detection method that identifies poisoned data points with the help of a mimic model trained from clean data samples. By measuring the difference between the samples on the mimic model’s outputs, De-Pois can flag and remove suspicious points, improving robustness without assuming knowledge of the attack type. Complementing detection, training-time defenses aim to mitigate the effect of poisoned samples during learning. For example, Biggio et al. [2012] introduce the TRIM method and its iterative variant, which estimates and removes a fraction of potentially poisoned points based on deviation and the statistical properties of the data. 
+
+## D Theory and Derivations 
+
+D.1 Derivation of Transition Gradient Theorem 3.1 The transition gradient of expected return in an MDP with transition dynamics Pψ and policy πθ can be expressed by 
+
+∇ψ J(Pψ , θ ) = E(s,a,s ′)∼Pψ ,π θ
+
+h
+
+(R(s, a, s ′) + γV (s′)) ∇ψ log Pψ (s′|s, a )
+
+i
+
+.
+
+Proof: We start from the derivative of the state-value function of an arbitrary initial state s0 and extend the state into the future time indefinitely, and expand it to write it as a recursive form in terms of M function defined below, from which it unrolls to become an infinite series of the sum of M (sk)
+
+weighted by the probability of reaching sk from s0 in k steps. 
+
+∇ψ V (s0) = ∇ψ
+
+X
+
+> a0
+
+π(a0|s0)Q(s0, a 0)= ∇ψ
+
+X
+
+> a0
+
+π(a0|s0) X
+
+> s1
+
+Pψ (s1|s0, a 0)[ R(s0, a 0, s 1) + γV (s1)] = X
+
+> a0
+
+π(a0|s0) X
+
+> s1
+
+∇ψ Pψ (s1|s0, a 0)[ R(s0, a 0, s 1) + γV (s1)] + γ X
+
+> a0
+
+π(a0|s0) X
+
+> s1
+
+Pψ (s1|s0, a 0)∇ψ V (s1)= M (s0) + γ X
+
+> s1
+
+ρπ (s0 → s1, k = 1) ∇ψ V (s1) a recursive relation about ∇ψ V (si)
+
+= M (s0) + γ X
+
+> s1
+
+ρπ (s0 → s1, 1) 
+
+h
+
+M (s1) + γX
+
+> s2
+
+ρπ (s1 → s2, 1) ∇ψ V (s2)
+
+i
+
+= M (s0) + X
+
+> s1
+
+γρ π (s0 → s1, 1) M (s1) + X
+
+> s2
+
+γ2ρπ (s0 → s2, 2) M (s2) + · · · unrolling into future steps indefinitely 
+
+= X
+
+> x
+> ∞
+
+X
+
+> k=0
+
+γkρπ (s0 → x, k )M (x) swap order of the summation and re-indexing 
+
+= X
+
+> s
+
+η(s)M (s) let η(s) =     
+
+> ∞X
+> k=0
+> γkρπ(s0→s, k )
+
+∝ X
+
+> s
+
+η(s)
+
+P 
+
+> s
+
+η(s) M (s) η(s)   
+
+> P
+> sη(s)is the stationary distribution of s
+
+= X
+
+> s
+
+dπ (s) X
+
+> a
+
+π(a|s) X
+
+> s′
+
+∇ψ Pψ (s′|s, a )( R(s, a, s ′) + γV (s′)) .
+
+where M (s0) := P 
+
+> a0
+
+π(a0|s0) P 
+
+> s1
+
+∇ψ Pψ (s1|s0, a 0)[ R(s0, a 0, s 1) + γV (s1)] , and the scaling from dividing the normalization constant P 
+
+> s
+
+η(s) can be absorbed into the learning rate, and 
+
+ρπ (s → x, k = 1) := P 
+
+> a
+
+π(a|s)P (x|s, a ) is the transition probability of reaching x from s at step 18 k = 1 , and the relation ρπ (s → x, k + 1) = P 
+
+> s′
+
+ρπ (s → s′, k )ρπ (s′ → x, 1) is used to write the transition gradient into recursive form. Therefore, 
+
+∇ψ J(Pψ , π ) = X
+
+> s
+
+dπ (s) X
+
+> a
+
+π(a|s) X
+
+> s′
+
+∇ψ Pψ (s′|s, a )( R(s, a, s ′) + γV (s′)) = E(s,a,r,s ′)∼Pψ ,π [( R(s, a, s ′) + γV (s′)) ∇ψ log Pψ (s′|s, a )] .
+
+For planning with a finite horizon T , given a time-indexed value function Vt(st) with terminal value 
+
+VT (sT ) = 0 , the unrolling stops at finite steps. We begin a recursive form of ∇ψ Vt(s0) that is similar to the infinite horizon one derived above 
+
+∇ψ Vt(s0) = Mt(s0) + γ X
+
+> a0
+
+π(a0|s0) X
+
+> s1
+
+Pψ (s1|s0, a 0)∇ψ Vt+1 (s1)= Mt(s0) + γ X
+
+> s1
+
+ρπ (s0 → s1, k = 1) ∇ψ Vt+1 (s1)= Mt(s0) + γ X
+
+> s1
+
+ρπ (s0 → s1, k = 1) 
+
+h
+
+Mt+1 (s1) + γ X
+
+> s2
+
+ρπ (s0 → s2, k = 2) Vt+2 (s2)
+
+i
+
+= Mt(s0) + γ X
+
+> s1
+
+ρπ (s0 → s1, k = 1) Mt+1 (s1) + ... + γk′ X
+
+> sk
+
+ρπ (s0 → sk′ , k = k′)∇ψ Vt+k′ (sk′ )=
+
+> k′−1
+
+X
+
+> i=0
+
+γiρπ (s0 → si, i )Mt+i(si) + γk′ X
+
+> sk
+
+ρπ (s0 → sk′ , k = k′)∇ψ Vt+k′ (sk′ )= 
+
+> T−t−1
+
+X
+
+> i=0
+
+γiρπ (s0 → si, i )Mi(si)
+
+where in the last step, setting k′ = T − t and using VT (sT ) = 0 drops the last term, and therefore the finite horizon transition gradient is 
+
+∇ψ JT (Pψ , π ) = ∇ψ V0(s0) = E(st,a t,r t,s t+1 )∼Pψ ,π 
+
+ T −1X
+
+> t=0
+
+γt R(st, a t, s t+1 )+ γV t+1 (st+1 )∇ψ log Pψ (st+1 |st, a t)
+
+For the deterministic transition st+1 = fψ (st, a t) in finite horizon 
+
+∇ψ Vt(s0) = ∇ψ Ea∼π(·| s)
+
+R(s0, a 0, s 1) + γV t+1 (s1)
+
+= Ea∼π(·| s)
+
+∇s1 (R(s0, a 0, s 1) + γV t+1 (s1)) |s1=fψ (s0,a 0)∇ψ fψ (s0, a 0, s 1) + γ∇ψ Vt+1 (s1)
+
+= Ea∼π(·| s)
+
+ T −t−1X
+
+> i=0
+
+γt∇s′ (R(si, a i) + γV t+i+1 (si+1 )) |si+1 =fψ (si,a i)∇ψ fψ (si, a i, s i+1 )
+
+D.2 BOME Details for Stage 1 Model Poisoning 
+
+The adversary minimizes the return of the surrogate policy that learns from perturbed transitions by solving the following bilevel optimization problem: 
+
+min ψ J(P, θ (ψ)) + λL (Pψ , P )
+
+s.t. θ(ψ) ∈ arg max θ′ J(Pψ , θ ′). (6) The goal is to minimize the constraint-regularized expected return with respect to the optimal policy derived from the poisoned environment. This bilevel optimization problem remains challenging due to its nested structure. The pri-mary difficulty lies in computing the derivative ∇ψ θ(ψ). If one directly treats θ(ψ) as a func-tion of ψ, gradient-based methods such as hypergradient descent [Bard, 2013] update ψ using 
+
+∇ψ J(P, θ ) = ∇ψ θ(ψ)∇θ J(P, θ ), but evaluating ∇ψ θ(ψ) = ∇ψ arg max πθ′ J(Pψ , θ ′) requires solving linear systems and computing costly second-order Hessians. Prior work has attempted 19 Algorithm 1 Algorithm for Perturbed Model Identification  
+
+> 1:
+
+Input: env. dynamics P , dynamics model ψ0, policy θ0, reward model R, value net Vϕ 
+
+> 2:
+
+Output: perturbed model ˆψ 
+
+> 3:
+
+while (ψk , θ k ) not converged do  
+
+> 4:
+
+Collect rollouts from (ψk , θ k ); use R to form TD targets; update Vϕ 
+
+> 5:
+
+θ0 
+
+> k
+
+← θk 
+
+> 6:
+
+for i ← 1 to W do  
+
+> 7:
+
+θi+1  
+
+> k
+
+← θik + ∇θ J(ψk , θ ik ) 
+
+> 8:
+
+Collect rollouts to form replay buffers BkW , Bpk , Bkk from (ψk , θ Wk ), (P, θ k ), (ψk , θ k ), respectively  
+
+> 9:
+
+Ω ← [ ]  
+
+> 10:
+
+for i ← 1 to N do  
+
+> 11:
+
+Sample BkW to compute ∇ψ J(ψk , θ Wk ) 
+
+> 12:
+
+Sample Bpk to compute ∇θ J(P, θ k ), ∇θ L(Pψk , P ) and ∇ψ L(Pψk , P ) 
+
+> 13:
+
+Sample Bkk to compute ∇ψ J(ψk , θ k ) and ∇θ J(ψk , θ k ) 
+
+> 14:
+
+Compose ∇f (ψk , θ k ) and ∇q(ψk , θ k ) from Eqs.11 and 12, and λk 
+
+> 15:
+
+Append ∇f (ψk , θ k ) + λk ∇q(ψk , θ k ) to Ω 
+
+> 16:
+
+ωk ← 1
+
+> N
+
+P 
+
+> ω∈Ω
+
+ω 
+
+> 17:
+
+(ψk+1 , θ k+1 ) ← (ψk , θ k ) − ξ · ωk 
+
+> 18:
+
+return ˆψ ← ψk
+
+to bypass this difficulty either through surrogate approximations or heuristics that are difficult to control [Pedregosa, 2016, Ghadimi and Wang, 2018, MacKay et al., 2019]. Moreover, reinforcement learning objectives are highly non-convex, involve high-dimensional state–action spaces, and present a complex optimization landscape. As a result, naive bilevel optimization methods often fail to converge reliably, making them unsuitable for Problem 6 [Liu et al., 2021]. To obtain a more scalable solution, we adopt the first-order dynamic barrier gradient descent method (BOME) in [Liu et al., 2022], which reformulates the problem by replacing the implicit argmin operator with a value-function constraint. This allows the outer objective and inner objective to be solved without explicitly computing the derivative ∇ψ θ(ψ). Formally, let f (ψ, θ ) := J(P, θ ) + L(Pψ , P ) denote the outer objective, and 
+
+q(ψ, θ ) := max πθ′ J(Pψ , θ ′) − J(Pψ , θ ), which measures the suboptimality of πθ relative to the optimal policy under Pψ . Under the value-function approach, the bilevel problem becomes the following constrained optimization: 
+
+min  
+
+> ψ,θ
+
+f (ψ, θ ) s.t. q(ψ, θ ) ≤ 0.
+
+This transformed problem is solvable by iteratively updating (ψ, θ ) to decrease f while at the same time keeping the constraint q ≤ 0 satisfied by decreasing q whenever q > 0 in each step: 
+
+(ψk+1 , θ k+1 ) ← (ψk, θ k) − ξω k (7) where ωk = arg min  
+
+> ω
+
+||∇ f (ψk, θ k) − ω|| 2 (8) s.t. ⟨∇ q(ψk, θ k), ω ⟩ ≥ ϕk (9) this could be solved in closed form, which gives ωk = ∇f (ψk, θ k) + λk∇q(ψk, θ k), with λk =max 
+
+ ϕk −⟨∇ f (ψk ,θ k ),∇q(ψk ,θ k )⟩∥∇ q(ψk ,θ k )∥2 , 0
+
+
+
+and ϕk is chosen to be ηq (ψ, θ ) or η ∥∇ q(ψ, θ )∥2 (we used 
+
+η ∥∇ q(ψ, θ )∥2 in experiment and take η = 0 .5). Therefore, the procedure to optimize f by jointly updating (ψ, θ ) is: 
+
+(ψk+1 , θ k+1 ) ← (ψk, θ k) − ξ[∇f (ψk, θ k) + λk∇q(ψk, θ k)] (10) where ∇f (ψk, θ k) = ∇(ψk ,θ k )f (ψk, θ k) is the gradient update of outer problem and ∇q(ψ, θ ) = 
+
+∇(ψ,θ )q(ψ, θ ) imposes the constraint. Expressed explicitly, the gradient of f and q are: 
+
+∇(ψ,θ )f (ψk, θ k) = ( λ∇ψ L(Pψk , P ), ∇θ J(P, θ k) + λ∇θ L(Pψk , P )) , (11) 
+
+∇(ψ,θ )q(ψk, θ k) ≈
+
+∇ψ J(ψk, θ Wk ) − ∇ ψ J(ψk, θ k),
+
+− ∇ θ J(ψk, θ k)
+
+
+
+. (12) where we use the shorthand J(ψk, θ k) := J(Pψk , θ k), and θWk is the W -step approximation of the optimal policy θ∗ ∈ arg max θ′ J(Pψ , θ ′).20 D.3 Stochastic Transition Functions Case 
+
+The stochastic world model minimizes the negative log likelihood to fine-tune on data D
+
+L(ψ; D) = − X
+
+> (s,a,s ′)∈D
+
+log Pψ (s′ | s, a ). (13) where s′ ∼ P (·| s, a ), and P is the true environment transition, the loss function used in the bilevel optimization is defined as 
+
+L(Pψ , P ) = E(s,a )∼P,π θ(ψ)
+
+DKL (P (·| s, a )∥Pψ (·| s, a ))  (14) For stochastic transitions, we define the residual as the KL divergence between the empirical next-state distribution induced by samples (s, a, s ′) ∈ D and the model distribution: 
+
+eψ (s, a ) = DKL (P (· | s, a )∥Pψ (· | s, a ) ) , (15) For stochastic transition models, the gradients we defined in stage 2 are shown below 
+
+Greal = E(s,a )∼ ˜D
+
+h
+
+∇ψ0 DKL 
+
+
+
+Pψ0 (· | s, a ) ˆP ˜D (· | s, a )
+
+ i 
+
+,Gtarget = E(s,a )∼Dall 
+
+h
+
+∇ψ0 DKL 
+
+
+
+Pψ0 (· | s, a ) P ˆψ (· | s, a )
+
+ i 
+
+.
+
+(16) where we use ˆPD (· | s, a ) denotes the empirical distribution of next states associated with (s, a )
+
+in the dataset D, in which given a (s, a ) pair an agent can sample multiple s′ using environment dynamics or its transition models, establishing a distribution. The loss function of Stage 2 is defined as below. 
+
+Lsto  
+
+> P
+
+= (1 − α) 1 − cos( Greal , G target ) + α X
+
+> (si,a i)∈Dp
+
+DKL 
+
+ P (· | si, a i) ∥ ˆPDp (· | si, a i) − DKL 
+
+ P (· | si, a i) ∥ P ˆψ (· | si, a i) .
+
+(17) 
+
+For stochastic world models, we define fine-tune data-level deviation δd = 
+
+> 1
+> |˜D|
+
+P  
+
+> (si,a i)∈˜D
+
+DKL 
+
+ P (·| si, a i) ∥ ˆP ˜D (·| si, a i) and test-time model-level deviation δm =
+
+> 1
+> T
+
+PTi=0 DKL 
+
+ P (·| si, a i) ∥ ˆPψ (·| si, a i) where T is the number of observed transitions. 
+
+## E Implementation Details 
+
+We instantiate the experiment based on the TD-MPC2 framework. Thus all neural networks including policy, dynamics model, encoder and value function have MLP architecture with several layers, for detailed information about architecture, please refer to [Hansen et al., 2024]. 21 E.1 Model Predictive Control Algorithm 2 General Model Predictive Control (MPC)  
+
+> 1:
+
+Input: World model ψ, current state st, goal og (optional) horizon H, number of rollouts 
+
+num_samples  
+
+> 2:
+
+Encode: zt = enc (st), zg = enc (og ) if goal is given  
+
+> 3:
+
+for each MPC step do  
+
+> 4:
+
+Sample num_samples candidate action sequences {ai
+
+> 0: H−1
+
+}num_samples  
+
+> i=1
+
+(from a policy prior, an action sampler, or learned actor)  
+
+> 5:
+
+for each sequence i do  
+
+> 6:
+
+Roll out latent trajectory ˆzi 
+
+> 1: H
+
+= Pψ (ˆ zt, a i
+
+> 0: H−1
+
+) 
+
+> 7:
+
+Evaluate cost or return: 
+
+Ji =
+
+PH−1 
+
+> h=0
+
+γhr(ˆ zih, a ih) + γH Q(ˆ ziH ) (value/bootstrap) 
+
+∥ˆziH − zg ∥2 (goal-closeness) other task-specific objective  
+
+> 8:
+
+Select best sequence(s) according to Ji 
+
+> 9:
+
+Refit a sampling distribution to top-K sequences  
+
+> 10:
+
+return first action or first k actions from selected sequence or sampler We provide a general formulation of Model Predictive Control (MPC), which abstracts across variants such as TD-MPC2 [Hansen et al., 2024], DINO-WM [Zhou et al., 2025]. In this section, we occasionally use ˆz to denote an imagined latent, compared to the real latent z encoded from the real state s from the environment. To model the dynamics, TD-MPC2 [Hansen et al., 2024] learns the world model Pψ (z′|z, a ) that predicts next latent state given current latent state and action, where z = enc (s) is the latent state from a learned encoder, and its agent plans by using the learned world model Pψ together with a learned prior policy πprior . At each planning step, the planner first obtains num_pi_trajs 
+
+candidate trajectories by rolling out πprior under transition Pψ ; these yield the policy-guided action sequences. The planner then samples an additional num_samples − num_pi_trajs random action sequences from a stochastic proposal (e.g., i.i.d. or Gaussian-perturbed sequences). During the inner improvement/refit loop, the action components coming from the prior policy are treated as guidance and are typically held fixed, while only the remaining (random) action sequences are optimized. This hybrid design reduces search dimensionality and biases search toward plausible behavior while still allowing exploratory refinement. DINO-WM [Zhou et al., 2025] does not use a learned prior. Instead, it draws many random action sequences, rolls each sequence forward in the world model Pψ for horizon H, and scores each rollout by a final-state objective (the distance to a goal latent zg , e.g., J = ∥ˆzH − zg ∥2). The top-performing sequences are retained as elites and the sampling distribution is refit to those elites (CEM-style); this process repeats until the sampling distribution concentrates on sequences that reach the goal. The above MPC algorithm highlights the shared structure: rolling out candidate action sequences over a planning horizon H using a learned world model Pψ , evaluating them under a task-specific objective (e.g., bootstrapped return, goal closeness, or other criteria), and executing the first action of the best sequence. The number of sampled rollouts num_samples and the planning horizon H are hyperparameters that directly affect the quality of planning and computation cost. The general MPC procedure is summarized in Algorithm 2. 
+
+E.2 Hyperparameters 
+
+We report our SWAAP key hyperparameters in Table 2. Other parameters are the same as stated in TD-MPC2 [Hansen et al., 2024]. 22 Table 2: Key hyperparameters used in experiments; other parameters are the same as in TD-MPC2 
+
+Hyperparameter Typical value(s) Description Model Poisoning Hyperparameters 
+
+obs_dim 17-223 The range of observation dimensions for tasks action_dim 6-39 The range of action dimensions for tasks latent_dim 512 The latent state dimension to encode observation state H 3 Planning horizon length, which is the number of rollout steps into the future when planning num_samples 512 Total number of trajectories for planning, including policy trajectories and random trajectories policy_samples 24 number of trajectories for planning that are from policy prior iterations 6 number of iterations done to optimize the actions in planning 
+
+λ {0, 1, 10 , 100 } Consistency coefficient applied to the L(P, P ψ ) term during model poisoning in Equation 6 
+
+W {30 } The number of update steps used to approximate θ∗
+
+> k
+
+N {16 } The size of Ω, the number of small updates aggregated to compute gradients of fk , q k and λk
+
+sample_batch_size {256 } Number of transitions used to calculate each sample in 
+
+Ω
+
+num_step {100 , 500 } The imagined rollout length, 500 for DMControl tasks and 100 for others. buffer_size {500 } Buffer size for every buffer used in Algorithm 1. 
+
+Data Poisoning Hyperparameters 
+
+rp {0.1, 0.2, 0.3} Fraction of the dataset (or proportion of trajecto-ries/transitions) modified by adversary. 
+
+α {0.1, 0.5, 0.9, 0.95 , 0.99 } Data poisoning regularization coefficient in Equation 5 poison_steps {5000 } The number of gradient matching update steps. step_size {10 } Step size to update the poisoned samples in gradient matching. noise_scale {0.1, 0.3, 0.5} The random perturbation scale of SWAAP (Random) train_epochs {100 , 500 } The number of training epochs for fine-tuning, 100 for DMControl tasks and 500 for others. learning_rate {0.01 , 0.0001 } Learning rate of fine-tuning, 0.01 for MyoSuite and 0.0001 for others. 
+
+|D| {5000 } Size of the fine-tuning dataset. 
+
+|Dall | {50000 } Size of the dataset to approximate Gtarget 
+
+E.3 Stage 1: Target Model Identification 
+
+The model poisoning starts with a trained TD-MPC2 checkpoint (such as humanoid-walk-2.pt from TD-MPC2 model base), from which following components are extracted as input to Algorithm 1, the trained policy network πθ as θ0, the dynamics model Pψ is used as ψ0, the value network (a Q net in TD-MPC2), reward model, and an encoder, where the reward model and encoder will be freezed during model poisoning for there are no more information about the reward and encoding to be gained in our adversarial training. The model-based agent consists of a prior policy θ and transition model 
+
+ψ, and πθ(ψ) stands for the agent’s policy that it takes after conducting MPC planning in imagined trajectories generated from the prior policy θ and transition ψ.During each iteration of update, the trajectory rollouts are collected from (ψk, θ Wk ), (P, θ k), (ψk, θ k)
+
+to form BkW , Bpk , Bkk , which means BkW is formed by trajectories generated by MPC policy 
+
+πθWk (ψk) and transition ψk, Bpk is formed by trajectories generated by MPC policy πθk (ψk) and environment transition P , and Bkk is formed by trajectories generated by MPC policy πθk (ψk) and transition ψk. Using the reward model, the value network is updated on trajectories collected from 
+
+(ψk, θ k) by minimizing the TD error. Given data (s, a, s ′), the policy return gradient ∇θk J(ψ, θ ) is computed using the TD-MPC2 up-date_pi function, which varies the action to maximize the value estimate Q(s, a pred ) and a scaled action entropy at the same time, where apred is sampled from prior policy θk given state s. The 23 transition return gradient ∇ψk J(ψ, θ ) is computed by varying the prediction s′ 
+
+> pred
+
+= Pψ (s, a ) to minimize the value estimate of predicted next state Q(s′
+
+> pred
+
+, a ′
+
+> pred
+
+) where a′ 
+
+> pred
+
+is sampled from prior policy θk given state s′
+
+> pred
+
+.During training of Stage 1, we evaluate J(P, π θ0 (ψk)) , the return of an unmodified policy using the perturbed world model ψk to plan in real environment P , for 10 episodes every 10 iterations, producing figures like Fig. 5, from which we can select the identified perturbed world model based on the testing performance (ideally one with low return while δm is also low), and this identified dynamics model will be used to propose the perturbed next state in Stage 2.
+
+E.4 Stage 2: Data Poisoning 
+
+The first steps in Stage 2 involves collecting two datasets, one large dataset of 50 , 000 transitions (which translates to 100 independent trajectories for DMControl tasks 500 for all other tasks) for estimating the target gradient Gtarget , and one small dataset of 5, 000 transitions for Greal . During data collection, each action has a 3% chance of being replaced by a random uniform action, which is done for data diversity and to cover enough state-action pairs. Given the fine-tune dataset, the deviations eψ (s, a, s ′) of each transition are calculated and ranked, and the top rp transitions are selected to be poisoned, which are considered to be more vulnerable than other transitions. To ensure the perturbation remains stealthy, after each gradient matching step, we project the perturbed state ˜s′ back to the L2 norm ball around the original state s′, but since TD-MPC2 world model constrains the output prediction within a valid range by architectural design, this step is not needed in our main experiments. Once the poisoned data are crafted, we choose the fine-tuning hyperparameters (train_epochs and learning_rate) so that fine-tuning the clean world model on clean data of the same size does not degrade performance. This ensures that the observed degradation is caused by poisoning rather than overfitting during fine-tuning. SWAAP (Random) use the same setting in Stage 2 like SWAAP, and the only difference comes from that the perturbed model P ˆψ is not learned but crafted from applying a random perturbation of scale being noise _scale elementwise to the true transition, which is ˜s′ = s′ J(1 + ϵ) with 
+
+ϵ ∼ [−noise _scale, noise _scale ], we report SWAAP (random) with noise _scale = 0 .3 in Table 1 and in Appendix F.1. 
+
+E.5 Hardware Specification and Computational Cost 
+
+We conduct all experiments on a workstation with an Intel Core Ultra 9 285K CPU, an NVIDIA GeForce RTX 5080 GPU with 16GB VRAM, and 64GB system RAM. Stage 1 takes approximately 1 hour on DMControl and MetaWorld and 2 hours on MyoSuite. Stage 2 takes roughly 10 minutes. Our attack designs intentionally reduce computational overhead: (1) Stage 1 uses a first-order dynamic barrier method, avoiding the expensive Hessian computations typically required in bilevel optimization; (2) Stage 2 employs a modified gradient-matching step that selects the most influential data points for poisoning instead of exhaustively searching over all possible combinations, which significantly reduces computational cost. 
+
+## F Main Extended Results 
+
+F.1 SWAAP and SWAAP (Random) 
+
+We show more results on SWAAP and SWAAP(Random) in Figure 4, comparing the return and δm
+
+of various tasks under SWAAP, SWAAP(Random) with the clean return and clean δm at different poison ratios rp. A higher α constrains model deviation more strictly, reducing attack strength but improving stealth. A lower α relaxes the deviation constraint and increases performance degradation. A higher data poisoning rate rp will also strengthen our attack performance. Empirically, across all tested α and rp, we did not observe gradient explosion or vanishing. Opti-mization remained numerically stable throughout Stage 2. 24 Figure 4: SWAAP and SWAAP (Random) across poisoning ratios rp and stealth weights α. Blue bars show return and red bars show model-level deviation δm. Lowering α often increases SWAAP’s return degradation more than SWAAP (Random), showing that the Stage 1 target provides useful poisoning directions beyond random perturbation. 25 Figure 5: Model poisoning curves (referred to as Direct Model Poisoning in Table 1) of return and 
+
+δm tested across different training iterations under different λ, each testing is the average of 10 test episodes, and thus each data point is a single run with 10 episodes. From these plots, we observe that 
+
+λ is suppressing the deviation of the model, but the varying influence of λ over different environments implies that a different λ is required to constrain the perturbation of the model. 
+
+F.2 Model Poisoning Training Curve 
+
+We show the stage one model training curve in Figure 5, which comes from testing the agent that directly uses the perturbed model for 10 episodes after every few iterations of updates. From these plots, we observe that λ suppresses the model’s deviation, but the varying influence of λ
+
+across different environments implies that different λ values are required to constrain the model’s perturbation. 
+
+F.3 Pre-Training Detection 
+
+Figure 7 presents additional results on pre-training detection, showing the distribution of data-level deviation before and after poisoning under different values of the poisoning regularization coefficient 
+
+α. As α increases, the deviation of the poisoned transitions becomes more similar to those of clean data, making the attack more difficult to detect using deviation-based filtering. 
+
+F.3.1 Residual-Based CUSUM Pre-Training Detector 
+
+We evaluate a CUSUM-style sequential detector to screen candidate fine-tuning trajectories before they are used for model updates. Instead of using the latent-state norm ∥zt+1 ∥2, we use a transition-residual statistic measured against the clean reference world model: 
+
+xt = ∥zt+1 − Pψref (zt, a t)∥2.
+
+This statistic is aligned with pre-training detection because a defender with a reference world model can test whether each observed transition is anomalous relative to the predicted next latent state. Given clean calibration trajectories, we estimate a robust center and scale using the median m and median absolute deviation MAD of the residual signal. For each candidate trajectory, we form centered residuals rt = xt − m and update a one-sided CUSUM statistic 
+
+St = max(0 , S t−1 + rt − κ), κ = cκMAD .
+
+We use the trajectory-level score max t St for detection. The threshold is chosen from held-out clean trajectories to target a false-positive rate of 5% , and we report ROC-AUC, TPR at the clean-calibrated threshold, and the realized empirical FPR. For Humanoid-Walk, we use 100 clean trajectories (50,000 transitions) to estimate the residual median/MAD and 10 separate held-out clean trajectories (5,000 transitions) to estimate empirical FPR; we compare against 10 poisoned trajectories. Because this held-out set contains only 10 clean trajectories, the empirical FPR is quantized in increments of 0.10 . For MW-Push, we use 500 clean trajectories (50,000 transitions) for calibration and 50 held-out clean trajectories (5,000 transitions) for empirical FPR; we compare against 50 poisoned trajectories. 26 Table 3: Residual-based CUSUM pre-training detection. The detector uses xt = ∥zt+1 −
+
+Pψref (zt, a t)∥2 and scores each trajectory by max t St. Thresholds target FPR 5% on held-out clean trajectories; empirical FPR differs slightly because of finite held-out sets. Environment α AUC TPR Emp. FPR Mean residual Humanoid-Walk 0.1 0.665 0.20 0.10 0.4034 Humanoid-Walk 0.5 0.530 0.10 0.10 0.3821 Humanoid-Walk 0.9 0.520 0.10 0.10 0.3745 Humanoid-Walk 0.99 0.520 0.10 0.10 0.3732 MW-Push 0.1 0.864 0.40 0.06 0.3810 MW-Push 0.5 0.550 0.08 0.06 0.3465 MW-Push 0.9 0.509 0.08 0.06 0.3334 0.0 0.2 0.4 0.6 0.8 1.0  
+
+> False Positive Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> True Positive Rate
+> MW-Push Residual-CUSUM ROC ( = 0.1)
+> AUC = 0.864
+> Random
+
+(a) α = 0 .10.0 0.2 0.4 0.6 0.8 1.0   
+
+> False Positive Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> True Positive Rate
+> MW-Push Residual-CUSUM ROC ( = 0.5)
+> AUC = 0.550
+> Random
+
+(b) α = 0 .50.0 0.2 0.4 0.6 0.8 1.0   
+
+> False Positive Rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> True Positive Rate
+> MW-Push Residual-CUSUM ROC ( = 0.9)
+> AUC = 0.509
+> Random
+
+(c) α = 0 .9
+
+Figure 6: Trajectory-level ROC curves for the residual-based CUSUM detector on MW-Push. Each candidate fine-tuning trajectory is assigned the score max t St, and ROC curves are computed by treating clean and poisoned trajectories as negative and positive examples. The aggressive low-stealth setting α = 0 .1 is more detectable, while the stealth-prioritized setting α = 0 .9 lies close to the chance diagonal, consistent with Table 3. Table 3 and Figure 6 show that the detector separates aggressive low-α attacks more clearly, especially on MW-Push: at α = 0 .1, AUC reaches 0.864 and TPR is 0.40 at empirical FPR 0.06 . However, under the stealth-prioritized settings used in the main experiments, the detector has little power: MW-Push at α = 0 .9 gives AUC 0.509 and TPR 0.08 at empirical FPR 0.06 , while Humanoid-Walk at α = 0 .9 gives AUC 0.520 and TPR 0.10 at empirical FPR 0.10 . These results do not prove indistinguishability against all sequential detectors; rather, they show that a natural residual-based CUSUM screen detects aggressive low-stealth poisoning but loses power under SWAAP’s stealth-regularized operating points. 
+
+F.3.2 Latent-Space PCA Visualization 
+
+We additionally visualize data-level stealthiness using PCA in the latent space used by the world model. This visualization is intended as a qualitative sanity check complementary to the scalar deviations in Table 1. For Humanoid-Walk with α = 0 .9, we take the 500 transitions selected for poisoning and compare their clean next-state latents z′, poisoned next-state latents ˜z′, and clean/reference-model predicted next-state latents Pψref (z, a ). The poisoned-target plot illustrates the deviation from true next-states, while the clean-model-prediction plot illustrates the natural reference residual scale corresponding to δm, ref .To make the visualization comparable, PCA is fitted on the pooled latent samples used in each panel and the first two principal components are plotted. Figure 8 shows that poisoned next-state targets largely overlap with their clean next-state counterparts and that their centroid remains close to the clean centroid. The clean/reference-model predictions show a similar overlapping pattern relative to true next states. This supports the interpretation that SWAAP’s poisoned targets are not obvious latent outliers under this two-dimensional projection. Since PCA only captures the leading low-dimensional variation, this result should not be interpreted as proof of indistinguishability; rather, it provides qualitative evidence consistent with the δd and δref measurements. 27 0.1 0.5 0.9             
+
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> Residual
+> Dog Run
+> Clean
+> Poison
+> 0.1 0.5 0.9
+> Residual
+> Humanoid Run
+> 0.1 0.5 0.9
+> Residual
+> Humanoid Walk
+> 0.1 0.5 0.9
+> Residual
+> Mw Push
+> 0.1 0.5 0.9
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> Residual
+> Mw Soccer
+> 0.1 0.5 0.9
+> Residual
+> Myo Pen Twirl Hard
+> 0.1 0.5 0.9
+> Residual
+> Myo Reach Hard
+
+Figure 7: Pre-training data-level deviation across stealth weights α. Blue bars denote the clean reference residual δd,ref and red bars denote poisoned-data deviation δd. Across α, poisoned targets remain close to the clean reference residual scale in most environments, even when lower α increases attack strength. 
+
+(a) Poisoned targets vs. clean next states (b) Reference-model predictions vs. clean next states 
+
+Figure 8: Latent-space PCA visualization on Humanoid-Walk. (a) compares poisoned next-state targets ˜z′ with their clean sources z′, illustrating the data-level perturbation relative true states, note this is different from δd. (b) compares clean/reference-model predictions Pψref (z, a ) with true next states z′, illustrating the natural reference residual scale δref . Poisoned targets largely overlap with clean next states, similar to the clean model’s natural prediction residuals. 
+
+F.4 Stage 1–Stage 2 Realization Bottleneck 
+
+SWAAP separates target identification from target realization. Stage 1 searches for a target world model P ˆψ that induces low return while remaining close to clean dynamics. Direct Model Poisoning evaluates this target model directly and therefore measures the strength of Stage 1 under an unrealistic model-overwrite threat model. Stage 2 then attempts to realize the selected target model using only bounded data poisoning. Since the attacker can modify only an rp fraction of fine-tuning transitions and must keep poisoned targets stealthy, Stage 2 is expected to realize only part of the effect achieved by direct model overwrite. We quantify this realization gap on Humanoid-Walk. With α = 0 .1 and rp = 0 .3, the clean model has deviation δm(P ˆψ , P ψ0 ) = 0 .15 from the Stage 1 target, while the Stage 2 poisoned model reaches 
+
+δm(P ˆψ , P ψ ) = 0 .11 relative to the target model. This shows that Stage 2 recovers a substantial portion of the Stage 1 target, but does not exactly match it. More broadly, Figure 3 shows this bottleneck as a gap between the Direct Model Poisoning frontier and the SWAAP frontier: in Humanoid-Walk, SWAAP closely tracks the Direct Model Poisoning frontier, while in Myo-Pen-Twirl-Hard the gap is larger, indicating that some harmful target models are more difficult to realize through gradient-matched poisoned data. 28 Table 4: Offline iterative-FGSM/ ℓ∞-PGD transition-perturbation baseline on MW-Push. The baseline directly perturbs next-state targets to reduce the value of a clean prior policy, without Stage 1 target-model identification or Stage 2 gradient matching. SWAAP achieves a lower return while keeping δd
+
+comparable or lower. Values are mean ± std. Method Return δm δd
+
+Clean 1784 ± 13 0.080 ± 0.002 0.0799 
+
+PGD ( ϵ = 0 .015 ) 1732 ± 56 0.107 ± 0.012 0.0832 
+
+PGD ( ϵ = 0 .05 ) 1666 ± 76 0.121 ± 0.008 0.0983 
+
+SWAAP 1641 ± 80 0.171 ± 0.011 0.0805 
+
+We further test whether directly using the Stage 1 target predictions as poisoned data is sufficient. We define DMP-data as a variant that replaces the selected top-rp next states with predictions from the Stage 1 target model P ˆψ , without optimizing the Stage 2 gradient-matching objective. DMP-data remains stealthy at the data level, with δd = 0 .0872 ± 0.0425 , comparable to the clean reference residual 0.0897 ± 0.0455 . However, it is less effective than SWAAP, especially under robust training. Without TRIM, DMP-data gives R = 727 ± 205 and δm = 0 .116 ± 0.065 , while SWAAP gives 
+
+R = 521 ± 332 and δm = 0 .145 ± 0.079 . Under TRIM, DMP-data gives R = 599 ± 297 and 
+
+δm = 0 .130 ± 0.071 , while SWAAP gives R = 183 ± 356 and δm = 0 .192 ± 0.075 . Thus, directly copying target-model next states is not enough; the gradient-matching realization step better steers fine-tuning toward the target dynamics. Overall, these results identify target realization under attack–stealth constraints as the main practical bottleneck and an opportunity to improve the current two-stage implementation. Stage 1 can identify harmful low-deviation target models, but Stage 2 must approximate them using a small number of poisoned transitions. This explains why Direct Model Poisoning is often stronger than SWAAP, and also why improving Stage 2 or making Stage 1 aware of Stage 2 realizability is a promising direction for future work. 
+
+## G Ablations and Baselines 
+
+G.1 Iterative FGSM/PGD Transition-Perturbation Baselines 
+
+We compare SWAAP with iterative signed-gradient transition-perturbation baselines adapted from adversarial state-perturbation attacks. These baselines do not identify a target world model or match fine-tuning gradients. Instead, they directly perturb next-state targets to lower the value of a prior policy πθ trained from the clean world model. For a clean transition (s, a, s ′), we initialize ˜s′ 
+
+> 0
+
+= s′ and run K projected signed-gradient steps: 
+
+˜s′ 
+
+> k+1
+
+= Π [s′−ϵ,s ′+ϵ]
+
+
+
+˜s′ 
+
+> k
+
+− η sign 
+
+
+
+∇˜s′ 
+
+> k
+
+Q(˜ s′
+
+> k
+
+, π θ (˜ s′
+
+> k
+
+)) 
+
+ 
+
+, k = 0 , . . . , K − 1,
+
+where η is the step size, ϵ bounds the maximum per-coordinate perturbation, and Π[s′−ϵ,s ′+ϵ] denotes projection to the ℓ∞ box around the original next state. When K = 1 , this reduces to an FGSM-style perturbation; for K > 1, it is an iterative-FGSM / ℓ∞ PGD-style baseline. We evaluate two variants. The offline transition-perturbation baseline applies this replacement to fine-tuning transitions before model update, matching our data-poisoning setting. The online state-perturbation baseline applies an analogous perturbation at test time to the state observed by the victim. The online variant is not the same threat model as SWAAP because it requires test-time intervention, but it provides context against a standard adversarial-state attack. Table 4 shows that the offline signed-gradient transition-perturbation baseline is weaker than SWAAP on MW-Push. Increasing ϵ improves its attack strength but also increases δd, making the poisoned data less stealthy before fine-tuning. In contrast, SWAAP achieves a lower return with δd close to the clean reference scale, because it poisons data to steer the fine-tuning gradient toward a harmful target world model rather than applying only local value-reducing perturbations. For the online state-perturbation comparison, iterative signed-gradient perturbation with ϵ = 0 .01 
+
+gives R = 1785 ± 5 and δm = 0 .106 ± 0.003 , while ϵ = 0 .02 gives R = 1719 ± 48 and 
+
+δm = 0 .159 ± 0.010 . SWAAP gives R = 1641 ± 80 and δm = 0 .171 ± 0.011 . This comparison is 29 Table 5: Effect of MPC hyperparameters ( num_samples , horizon H) on reward under clean and SWAAP settings evaluated in Humanoid-Walk. Values are mean ± std over 10 episodes. Num Samples Return 
+
+h = 3 h = 6 h = 9 
+
+64 Clean 12 ± 21 5 ± 4 9 ± 21 SWAAP 7 ± 7 19 ± 39 14 ± 20 128 Clean 150 ± 95 58 ± 92 2 ± 2SWAAP 101 ± 85 38 ± 51 43 ± 41 256 Clean 788 ± 157 488 ± 279 68 ± 115 SWAAP 347 ± 257 93 ± 93 21 ± 36 512 Clean 855 ± 62 687 ± 112 37 ± 61 SWAAP 594 ± 203 49 ± 61 41 ± 58 1024 Clean 875 ± 63 812 ± 91 385 ± 287 SWAAP 656 ± 192 87 ± 147 75 ± 92 Table 6: Attack performance with different poison fraction in Stage 1 in Humanoid-Walk with α =0.9 Stage 1 poison fraction Return δm
+
+0% (clean) 866 ± 57 0.09 ± 0.05 10% 825 ± 106 0.10 ± 0.06 50% 669 ± 242 0.12 ± 0.07 100% 521 ± 332 0.14 ± 0.08 not a direct threat-model match: online perturbation requires modifying states at test time, whereas SWAAP modifies only fine-tuning data and induces later failures through the learned world model. Nevertheless, it shows that SWAAP can produce comparable or stronger degradation without test-time intervention. 
+
+G.2 Top-rp Transition Selection vs. Random Selection 
+
+Stage 2 first selects the subset of transitions to poison. Under a fixed poisoning budget rp, our default heuristic selects the top-rp transitions with the largest deviation from the Stage 1 target model. These transitions are the most inconsistent with the target dynamics, so modifying them should provide a stronger fine-tuning signal toward the target than modifying randomly selected transitions. We test this heuristic on Humanoid-Walk using the same Stage 1 target model and the same poisoning budget. Replacing top-rp selection with random transition selection weakens the attack: top-rp
+
+selection gives R = 775 ± 50 and δm = 0 .110 ± 0.007 , while random selection gives R = 822 ± 13 
+
+and δm = 0 .102 ± 0.002 . Thus, selecting transitions most inconsistent with the Stage 1 target improves attack effectiveness at comparable model-level deviation. 
+
+G.3 MPC Hyperparameter Ablation 
+
+Table 5 reports the reward of TD-MPC2 under different rollout horizons ( h = 3 , 6, 9) and number of samples for both the clean and SWAAP settings. We observe that our SWAAP attack consistently reduces the agent’s performance across all configurations, demonstrating its effectiveness under every setting. Additionally, the MPC performance generally increases with the number of samples and decreases as the rollout horizon grows. Consequently, the impact of our attack is also influenced by these hyperparameters: it tends to be more significant when the baseline MPC performance is higher (larger sample sizes) and slightly less effective at longer horizons given the low clean reward. 
+
+G.4 Stage 1 Masked Perturbation Fraction 
+
+Stage 1 of SWAAP can be adjusted to only perturb a certain fraction of the state-action pairs’ transitions. We have conducted additional experiments on perturbing the top 10% and 50% most influential state-action pairs compared to perturbing all pairs considered before in Humanoid-Walk with rp = 0 .1, α = 0 .9 in Table 6. Stage 1 optimizes the parameters of a global neural world model, so changing ˆψ can in principle affect predictions beyond any selected subset of inputs. In this ablation, 30 Table 7: Attack performance with different data poison ratio ( rp) in Stage 2 in Humanoid-Walk with 
+
+α = 0.9 
+
+rp Return δm
+
+clean 866 ± 57 0.09 ± 0.05 0.01 844 ± 94 0.10 ± 0.05 0.05 739 ± 172 0.11 ± 0.07 0.10 521 ± 332 0.14 ± 0.08 0.20 317 ± 339 0.18 ± 0.08 0.30 242 ± 305 0.19 ± 0.08 “perturbing a fraction of state-action pairs” therefore means that we restrict the Stage 1 perturbation objective to a masked subset of rollout transitions, rather than enforcing a hard functional constraint that the model output is unchanged elsewhere. Specifically, after collecting rollout transitions, we compute an importance score for each state using the value-spread criterion from Liang et al. [2022], 
+
+w(s) = max  
+
+> a1∈A
+
+Qπ (s, a 1) − min  
+
+> a2∈A
+
+Qπ (s, a 2).
+
+We then select the top-wc fraction of transitions by this score and apply the Stage 1 target-model perturbation loss only on this selected subset. The rest of the transitions still contribute to the usual model-level deviation/stealth regularization when applicable, but they do not receive direct target-perturbation pressure. Thus, the ablation measures how the attack changes when Stage 1 is guided by increasingly sparse sets of high-importance transitions, not an exact guarantee that the learned neural model changes only on those inputs. Table 6 shows that increasing this selected fraction strengthens the attack but also increases δm,giving a tunable effectiveness–stealth trade-off. 
+
+G.5 Stage 2 Poisoning Ratio rp
+
+We conduct an ablation study on different rp ratios in Stage 2, with results in Table 7. We observe that with lower poisoning rates (1% and 5%), the attack performance decreases as expected, but it still consistently induces noticeable degradation in return. 
+
+G.6 Trajectory-Consistent Data Poisoning 
+
+The Stage 2 formulation in Eq. 5 treats the fine-tuning data as a transition buffer, where each tuple 
+
+(st, a t, s t+1 ) can be poisoned by replacing only the next-state target. In sequential trajectory data, however, the same intermediate state appears in two adjacent tuples: 
+
+(st, a t, s t+1 ), (st+1 , a t+1 , s t+2 ).
+
+Therefore, replacing st+1 only as the next-state target of the first tuple would make the stored trajectory internally inconsistent. To adapt SWAAP to this setting, we use a trajectory-consistent update: when transition t is selected for poisoning, we replace both occurrences of the intermediate latent state, 
+
+(st, a t, s t+1 ) 7 → (st, a t, ˜st+1 ), (st+1 , a t+1 , s t+2 ) 7 → (˜ st+1 , a t+1 , s t+2 ).
+
+Terminal transitions are excluded so that t + 1 always belongs to the same trajectory. In the gradient-matching step, we add a SARSA-style consistency term so the matching gradient becomes 
+
+Greal = E(st,a t,s ′ 
+
+> t,a t+1 ,s ′
+> t+1 )∼˜D
+
+h
+
+∇ψ0
+
+
+
+∥˜s′ 
+
+> t
+
+− Pψ0 (st, a t)∥22 + ∥s′ 
+
+> t+1
+
+− Pψ0 (˜ s′
+
+> t
+
+, a t+1 )∥22
+
+i 
+
+,
+
+which encourages the poisoned intermediate state to be both reachable from (st, a t) and predictive of the observed successor under at+1 . After each poisoned-target update, we explicitly enforce 
+
+st+1 = ˜ st+1 in the next tuple, so the saved poisoned data remain trajectory-consistent. On Humanoid-Walk, trajectory-consistent poisoning with rp = 0 .05 gives return 784 ± 19 and model-level deviation δm = .111 ± .003 , with data-level reference deviation δd = .102 ± .007 . Compared with the standard transition-buffer setting in Table 1, the attack is weaker, as expected, because the consistency constraint reduces the degrees of freedom available to the poisoner. Nevertheless, the result shows that SWAAP can be adapted from independent transition buffers to sequential fine-tuning trajectories. 31 Table 8: Effect of fine-tuning dataset size in HumanoidWalk. 
+
+Fine-tuning Dataset Size Return δm
+
+5,000 521 ± 332 0.14 ± 0.08 
+
+10,000 540 ± 348 0.14 ± 0.08 
+
+15,000 550 ± 306 0.14 ± 0.08 
+
+20,000 607 ± 300 0.13 ± 0.08 
+
+25,000 679 ± 234 0.12 ± 0.07 
+
+Table 9: Additional evaluation on MyoSuite and MetaWorld environments. Each test is a single run with 100 episodes.                                                                   
+
+> Environment Natural Return SWAAP Return Natural δmSWAAP δm
+> myo-obj-hold-hard −289 ±2343 −2671 ±4241 0.10 ±0.07 0.13 ±0.05
+> myo-pose 696 ±4665 ±157 0.04 ±0.04 0.08 ±0.06
+> myo-key-turn 1125 ±196 940 ±375 0.19 ±0.14 0.11 ±0.08
+> mw-coffee-pull 1511 ±25 1402 ±318 0.08 ±0.04 0.09 ±0.06
+> mw-door-open 1551 ±58 1310 ±445 0.04 ±0.02 0.06 ±0.05
+
+G.7 Larger Fine-Tuning Buffers 
+
+We conducted additional experiments on HumanoidWalk using fine-tuning dataset sizes ranging from 5,000 to 25,000, with a fixed budget of 500 poisoned transitions. The results are shown in Table 8. Although increasing the fine-tuning dataset size reduces the magnitude of performance degradation, as larger clean buffers naturally dilute the poisoned portion, SWAAP still consistently induces meaningful return drops across all tested sizes, demonstrating its robustness even when the victim fine-tunes on substantially larger datasets. 
+
+## H Generalization Experiments 
+
+H.1 Additional MyoSuite and MetaWorld Environments 
+
+We conducted additional experiments on five MyoSuite and MetaWorld tasks, with results reported in Table 9. All experiments use rp = 0 .1 and are evaluated over 100 episodes. For Obj-Hold-Hard ,
+
+Key-Turn , and Coffee-Pull , we set α = 0 .9, while for Pose and Door-Open , we use α = 0 .1.These results further confirm that SWAAP reliably reduces the return while keeping the poisoned world model close to the clean model, consistent with our main findings. 
+
+H.2 DINO-WM Push-T Results 
+
+We adapted our method to the DINO-WM world models for goal-conditioned tasks [Zhou et al., 2025]. Our experimental setup largely follows the configuration used in the original implementation; the detailed settings are provided in Table 10. For Stage 1, we used a goal-conditioned RL agent as the surrogate policy. Preliminary results show that the identified target world model reduces the success rate on the Push-T task from 92% to 72% ,with the relative deviation increasing from δm = 0 .11 ± 0.06 to δm = 0 .24 ± 0.10 .We then conducted additional experiments incorporating Stage 2 of our attack pipeline. Using the perturbed model identified in Stage 1, we employed gradient matching to generate poisoned samples (poisoning ratio 0.15) and fine-tuned a DINO-WM model on the resulting poisoned dataset. On the Push-T task, performance dropped from 92% to 77% , with δm = 0 .16 ± 0.09 . These early results suggest that the method can extend beyond TD-MPC2 to goal-conditioned visual world models, although a broader evaluation is left for future work. 
+
+H.3 Gray-Box Attack on TD-MPC2 Multi-Task World Model 
+
+We conducted a preliminary gray-box experiment in which the attacker only has access to a surrogate world model trained on a single task, while the victim employs a multi-task world model. The attacker performs Stage 1 and Stage 2 entirely on the surrogate model and then supplies the resulting poisoned dataset to the victim for fine-tuning. In this experiment, the surrogate is a TD-MPC2 world model trained on MW-Soccer, whereas the victim is a multi-task world model used across multiple tasks. 32 Table 10: Key hyperparameters used in the DINO-WM Push-T experiment 
+
+Hyperparameter Typical value(s) Description 
+
+obs_shape (3, 224, 224) Shape of pixel observation s.latent_shape (196, 394) Shape of latent state z = enc( s).action_dim 10 Dimension of actions. num_hist 3 Number of historical latent states used to predict the next state. H 5 Planning horizon length (number of rollout steps during planning), which also corresponds to the number of planned actions. num_samples 100 Total number of sampled trajectories during planning. opt_steps 30 Number of optimization iterations per planning step using cross-entropy method (CEM). 
+
+Table 11: Gray-box attack on TD-MPC2 multi-task world model 
+
+Source Task Target Task Setting Return (R ± std) δm (± std) 
+
+MW-Soccer MW-Soccer Natural 1380 ± 382 0.11 ± 0.11 
+
+MW-Soccer MW-Soccer SWAAP 1115 ± 442 0.13 ± 0.12 
+
+MW-Soccer MW-Push Natural 1290 ± 609 0.13 ± 0.16 
+
+MW-Soccer MW-Push SWAAP 1064 ± 692 0.16 ± 0.19 
+
+We use rp = 0 .1, α = 0 .1 in this experiment. Our initial results show that SWAAP still induces substantial performance degradation across multiple downstream tasks (see Table 11), despite the mismatch between the surrogate and victim models. 33 NeurIPS Paper Checklist 
+
+1. Claims 
+
+Question: Do the main claims made in the abstract and introduction accurately reflect the paper’s contributions and scope? Answer: [Yes] Justification: The abstract and introduction state the paper’s main contribution as a two-stage data-poisoning framework for learned world models, with Stage 1 target-model identification and Stage 2 stealth-constrained data realization. They also describe the evaluated scope, including continuous-control benchmarks and stealth evaluations across pre-training detection, robust training, and model-level deviation. Guidelines: • The answer [N/A] means that the abstract and introduction do not include the claims made in the paper. • The abstract and/or introduction should clearly state the claims made, including the contributions made in the paper and important assumptions and limitations. A [No] or [N/A] answer to this question will not be perceived well by the reviewers. • The claims made should match theoretical and experimental results, and reflect how much the results can be expected to generalize to other settings. • It is fine to include aspirational goals as motivation as long as it is clear that these goals are not attained by the paper. 2. Limitations 
+
+Question: Does the paper discuss the limitations of the work performed by the authors? Answer: [Yes] Justification: The paper discusses several limitations and scope restrictions, including the main white-box threat assumption, the preliminary nature of the gray-box transfer result, the Stage 1–Stage 2 target-realization bottleneck, and the need to evaluate broader world-model backbones and larger-scale foundation models. These limitations are discussed in the threat model, experimental ablations/generalization section, and conclusion/future-work discussion. Guidelines: • The answer [N/A] means that the paper has no limitation while the answer [No] means that the paper has limitations, but those are not discussed in the paper. • The authors are encouraged to create a separate “Limitations” section in their paper. • The paper should point out any strong assumptions and how robust the results are to violations of these assumptions (e.g., independence assumptions, noiseless settings, model well-specification, asymptotic approximations only holding locally). The authors should reflect on how these assumptions might be violated in practice and what the implications would be. • The authors should reflect on the scope of the claims made, e.g., if the approach was only tested on a few datasets or with a few runs. In general, empirical results often depend on implicit assumptions, which should be articulated. • The authors should reflect on the factors that influence the performance of the approach. For example, a facial recognition algorithm may perform poorly when image resolution is low or images are taken in low lighting. Or a speech-to-text system might not be used reliably to provide closed captions for online lectures because it fails to handle technical jargon. • The authors should discuss the computational efficiency of the proposed algorithms and how they scale with dataset size. • If applicable, the authors should discuss possible limitations of their approach to address problems of privacy and fairness. • While the authors might fear that complete honesty about limitations might be used by reviewers as grounds for rejection, a worse outcome might be that reviewers discover limitations that aren’t acknowledged in the paper. The authors should use their best 34 judgment and recognize that individual actions in favor of transparency play an impor-tant role in developing norms that preserve the integrity of the community. Reviewers will be specifically instructed to not penalize honesty concerning limitations. 3. Theory assumptions and proofs 
+
+Question: For each theoretical result, does the paper provide the full set of assumptions and a complete (and correct) proof? Answer: [Yes] Justification: The paper states the transition-gradient theorem in the main text with its differentiability and finite-horizon stochastic-transition assumptions, and provides the full derivation in Appendix D.1. The appendix also includes the stochastic, finite-horizon, and deterministic specializations used by the method. Guidelines: • The answer [N/A] means that the paper does not include theoretical results. • All the theorems, formulas, and proofs in the paper should be numbered and cross-referenced. • All assumptions should be clearly stated or referenced in the statement of any theorems. • The proofs can either appear in the main paper or the supplemental material, but if they appear in the supplemental material, the authors are encouraged to provide a short proof sketch to provide intuition. • Inversely, any informal proof provided in the core of the paper should be complemented by formal proofs provided in appendix or supplemental material. • Theorems and Lemmas that the proof relies upon should be properly referenced. 4. Experimental result reproducibility 
+
+Question: Does the paper fully disclose all the information needed to reproduce the main ex-perimental results of the paper to the extent that it affects the main claims and/or conclusions of the paper (regardless of whether the code and data are provided or not)? Answer: [Yes] Justification: The paper describes the victim agent, fine-tuning setup, poisoning budget, evaluated benchmarks, baselines, deviation metrics, number of runs, and defense settings used for the main results. Additional implementation details, hyperparameters, compute costs, and extended ablations are provided in the appendix, and we will release repository-style code and scripts to reproduce the main experiments. Guidelines: • The answer [N/A] means that the paper does not include experiments. • If the paper includes experiments, a [No] answer to this question will not be perceived well by the reviewers: Making the paper reproducible is important, regardless of whether the code and data are provided or not. • If the contribution is a dataset and/or model, the authors should describe the steps taken to make their results reproducible or verifiable. • Depending on the contribution, reproducibility can be accomplished in various ways. For example, if the contribution is a novel architecture, describing the architecture fully might suffice, or if the contribution is a specific model and empirical evaluation, it may be necessary to either make it possible for others to replicate the model with the same dataset, or provide access to the model. In general. releasing code and data is often one good way to accomplish this, but reproducibility can also be provided via detailed instructions for how to replicate the results, access to a hosted model (e.g., in the case of a large language model), releasing of a model checkpoint, or other means that are appropriate to the research performed. • While NeurIPS does not require releasing code, the conference does require all submis-sions to provide some reasonable avenue for reproducibility, which may depend on the nature of the contribution. For example (a) If the contribution is primarily a new algorithm, the paper should make it clear how to reproduce that algorithm. 35 (b) If the contribution is primarily a new model architecture, the paper should describe the architecture clearly and fully. (c) If the contribution is a new model (e.g., a large language model), then there should either be a way to access this model for reproducing the results or a way to reproduce the model (e.g., with an open-source dataset or instructions for how to construct the dataset). (d) We recognize that reproducibility may be tricky in some cases, in which case authors are welcome to describe the particular way they provide for reproducibility. In the case of closed-source models, it may be that access to the model is limited in some way (e.g., to registered users), but it should be possible for other researchers to have some path to reproducing or verifying the results. 5. Open access to data and code 
+
+Question: Does the paper provide open access to the data and code, with sufficient instruc-tions to faithfully reproduce the main experimental results, as described in supplemental material? Answer: [Yes] Justification: We will provide anonymized repository-style code in the supplemental material, including environment setup, data-generation/preprocessing instructions, and scripts for reproducing the main SWAAP experiments and baselines. The experiments use standard simulated benchmarks and generated fine-tuning data; instructions will specify how to regenerate the required clean, poisoned, and evaluation trajectories. Guidelines: • The answer [N/A] means that paper does not include experiments requiring code. • Please see the NeurIPS code and data submission guidelines ( https://neurips.cc/ public/guides/CodeSubmissionPolicy ) for more details. • While we encourage the release of code and data, we understand that this might not be possible, so [No] is an acceptable answer. Papers cannot be rejected simply for not including code, unless this is central to the contribution (e.g., for a new open-source benchmark). • The instructions should contain the exact command and environment needed to run to reproduce the results. See the NeurIPS code and data submission guidelines ( https: //neurips.cc/public/guides/CodeSubmissionPolicy ) for more details. • The authors should provide instructions on data access and preparation, including how to access the raw data, preprocessed data, intermediate data, and generated data, etc. • The authors should provide scripts to reproduce all experimental results for the new proposed method and baselines. If only a subset of experiments are reproducible, they should state which ones are omitted from the script and why. • At submission time, to preserve anonymity, the authors should release anonymized versions (if applicable). • Providing as much information as possible in supplemental material (appended to the paper) is recommended, but including URLs to data and code is permitted. 6. Experimental setting/details 
+
+Question: Does the paper specify all the training and test details (e.g., data splits, hyperpa-rameters, how they were chosen, type of optimizer) necessary to understand the results? Answer: [Yes] Justification: The main text specifies the victim agent, benchmarks, pretraining and fine-tuning sizes, poisoning budget, planning horizon, candidate rollouts, metrics, baselines, and number of runs. Additional hyperparameters, optimizer choices, defense settings, compute details, and extended experimental procedures are provided in the appendix and will be included in the reproducibility code. Guidelines: • The answer [N/A] means that the paper does not include experiments. • The experimental setting should be presented in the core of the paper to a level of detail that is necessary to appreciate the results and make sense of them. 36 • The full details can be provided either with the code, in appendix, or as supplemental material. 7. Experiment statistical significance 
+
+Question: Does the paper report error bars suitably and correctly defined or other appropriate information about the statistical significance of the experiments? Answer: [Yes] Justification: Table 1 reports mean ± standard deviation for the main experimental results. The experimental setup states that each table entry aggregates 10 independent runs, where each run is itself averaged over approximately 5,000 test transitions using 10 episodes for 500-step DMControl tasks and 50 episodes for 100-step tasks. Guidelines: • The answer [N/A] means that the paper does not include experiments. • The authors should answer [Yes] if the results are accompanied by error bars, confidence intervals, or statistical significance tests, at least for the experiments that support the main claims of the paper. • The factors of variability that the error bars are capturing should be clearly stated (for example, train/test split, initialization, random drawing of some parameter, or overall run with given experimental conditions). • The method for calculating the error bars should be explained (closed form formula, call to a library function, bootstrap, etc.) • The assumptions made should be given (e.g., Normally distributed errors). • It should be clear whether the error bar is the standard deviation or the standard error of the mean. • It is OK to report 1-sigma error bars, but one should state it. The authors should preferably report a 2-sigma error bar than state that they have a 96% CI, if the hypothesis of Normality of errors is not verified. • For asymmetric distributions, the authors should be careful not to show in tables or figures symmetric error bars that would yield results that are out of range (e.g., negative error rates). • If error bars are reported in tables or plots, the authors should explain in the text how they were calculated and reference the corresponding figures or tables in the text. 8. Experiments compute resources 
+
+Question: For each experiment, does the paper provide sufficient information on the com-puter resources (type of compute workers, memory, time of execution) needed to reproduce the experiments? Answer: [Yes] Justification: The appendix reports the hardware environment and approximate runtime for the main experimental pipeline, including compute for Stage 1 target-model optimization, Stage 2 data poisoning, fine-tuning, and evaluation. We also disclose the estimated total compute needed to reproduce the reported experiments. Guidelines: • The answer [N/A] means that the paper does not include experiments. • The paper should indicate the type of compute workers CPU or GPU, internal cluster, or cloud provider, including relevant memory and storage. • The paper should provide the amount of compute required for each of the individual experimental runs as well as estimate the total compute. • The paper should disclose whether the full research project required more compute than the experiments reported in the paper (e.g., preliminary or failed experiments that didn’t make it into the paper). 9. Code of ethics 
+
+Question: Does the research conducted in the paper conform, in every respect, with the NeurIPS Code of Ethics https://neurips.cc/public/EthicsGuidelines ?37 Answer: [Yes] Justification: The research is conducted in a simulated world-model/continuous-control setting and is presented as an adversarial robustness evaluation intended to identify and mitigate vulnerabilities in world-model adaptation pipelines. The paper preserves anonymity and does not use human-subject data, private data, or sensitive personal information. Guidelines: • The answer [N/A] means that the authors have not reviewed the NeurIPS Code of Ethics. • If the authors answer [No], they should explain the special circumstances that require a deviation from the Code of Ethics. • The authors should make sure to preserve anonymity (e.g., if there is a special consid-eration due to laws or regulations in their jurisdiction). 10. Broader impacts 
+
+Question: Does the paper discuss both potential positive societal impacts and negative societal impacts of the work performed? Answer: [Yes] Justification: The paper discusses positive impacts in terms of identifying vulnerabilities and motivating robustness methods for learned world-model adaptation pipelines. It also discusses negative impacts and misuse risk because the method is an attack; the work is evaluated in simulated environments and framed as a benchmark for improving defenses, with detection and robust-training evaluations included as mitigation-oriented analysis. Guidelines: • The answer [N/A] means that there is no societal impact of the work performed. • If the authors answer [N/A] or [No], they should explain why their work has no societal impact or why the paper does not address societal impact. • Examples of negative societal impacts include potential malicious or unintended uses (e.g., disinformation, generating fake profiles, surveillance), fairness considerations (e.g., deployment of technologies that could make decisions that unfairly impact specific groups), privacy considerations, and security considerations. • The conference expects that many papers will be foundational research and not tied to particular applications, let alone deployments. However, if there is a direct path to any negative applications, the authors should point it out. For example, it is legitimate to point out that an improvement in the quality of generative models could be used to generate Deepfakes for disinformation. On the other hand, it is not needed to point out that a generic algorithm for optimizing neural networks could enable people to train models that generate Deepfakes faster. • The authors should consider possible harms that could arise when the technology is being used as intended and functioning correctly, harms that could arise when the technology is being used as intended but gives incorrect results, and harms following from (intentional or unintentional) misuse of the technology. • If there are negative societal impacts, the authors could also discuss possible mitigation strategies (e.g., gated release of models, providing defenses in addition to attacks, mechanisms for monitoring misuse, mechanisms to monitor how a system learns from feedback over time, improving the efficiency and accessibility of ML). 11. Safeguards 
+
+Question: Does the paper describe safeguards that have been put in place for responsible release of data or models that have a high risk for misuse (e.g., pre-trained language models, image generators, or scraped datasets)? Answer: [N/A] Justification: The paper does not release high-risk pretrained generative models, scraped datasets, or real-world sensitive data. The planned release consists of research code and scripts for simulated continuous-control benchmarks, so the specific safeguard question for high-risk model or dataset release is not applicable. 38 Guidelines: • The answer [N/A] means that the paper poses no such risks. • Released models that have a high risk for misuse or dual-use should be released with necessary safeguards to allow for controlled use of the model, for example by requiring that users adhere to usage guidelines or restrictions to access the model or implementing safety filters. • Datasets that have been scraped from the Internet could pose safety risks. The authors should describe how they avoided releasing unsafe images. • We recognize that providing effective safeguards is challenging, and many papers do not require this, but we encourage authors to take this into account and make a best faith effort. 12. Licenses for existing assets 
+
+Question: Are the creators or original owners of assets (e.g., code, data, models), used in the paper, properly credited and are the license and terms of use explicitly mentioned and properly respected? Answer: [Yes] Justification: The paper cites the original works for the existing benchmarks, environ-ments, and world-model agents used in the experiments, including TD-MPC2, DMControl, MyoSuite, MetaWorld, ManiSkill2, and DINO-WM. We will include the relevant asset versions, URLs, and license information in the released repository and ensure that any redistributed code or generated data respects the original terms of use. Guidelines: • The answer [N/A] means that the paper does not use existing assets. • The authors should cite the original paper that produced the code package or dataset. • The authors should state which version of the asset is used and, if possible, include a URL. • The name of the license (e.g., CC-BY 4.0) should be included for each asset. • For scraped data from a particular source (e.g., website), the copyright and terms of service of that source should be provided. • If assets are released, the license, copyright information, and terms of use in the package should be provided. For popular datasets, paperswithcode.com/datasets 
+
+has curated licenses for some datasets. Their licensing guide can help determine the license of a dataset. • For existing datasets that are re-packaged, both the original license and the license of the derived asset (if it has changed) should be provided. • If this information is not available online, the authors are encouraged to reach out to the asset’s creators. 13. New assets 
+
+Question: Are new assets introduced in the paper well documented and is the documentation provided alongside the assets? Answer: [Yes] Justification: The paper introduces new research code, poisoning scripts, generated fine-tuning data, and experimental artifacts for SWAAP. These assets will be released with documentation describing setup, usage, reproduction commands, generated-data format, limitations, and licensing, with anonymization preserved at submission time. Guidelines: • The answer [N/A] means that the paper does not release new assets. • Researchers should communicate the details of the dataset/code/model as part of their submissions via structured templates. This includes details about training, license, limitations, etc. • The paper should discuss whether and how consent was obtained from people whose asset is used. 39 • At submission time, remember to anonymize your assets (if applicable). You can either create an anonymized URL or include an anonymized zip file. 14. Crowdsourcing and research with human subjects 
+
+Question: For crowdsourcing experiments and research with human subjects, does the paper include the full text of instructions given to participants and screenshots, if applicable, as well as details about compensation (if any)? Answer: [N/A] Justification: The paper does not involve crowdsourcing, human-subject experiments, partic-ipant instructions, or compensation. All experiments are conducted in simulated continuous-control environments. Guidelines: • The answer [N/A] means that the paper does not involve crowdsourcing nor research with human subjects. • Including this information in the supplemental material is fine, but if the main contribu-tion of the paper involves human subjects, then as much detail as possible should be included in the main paper. • According to the NeurIPS Code of Ethics, workers involved in data collection, curation, or other labor should be paid at least the minimum wage in the country of the data collector. 15. Institutional review board (IRB) approvals or equivalent for research with human subjects 
+
+Question: Does the paper describe potential risks incurred by study participants, whether such risks were disclosed to the subjects, and whether Institutional Review Board (IRB) approvals (or an equivalent approval/review based on the requirements of your country or institution) were obtained? Answer: [N/A] Justification: The paper does not involve crowdsourcing, human-subject studies, or data collected from human participants. All experiments are conducted in simulated continuous-control environments. Guidelines: • The answer [N/A] means that the paper does not involve crowdsourcing nor research with human subjects. • Depending on the country in which research is conducted, IRB approval (or equivalent) may be required for any human subjects research. If you obtained IRB approval, you should clearly state this in the paper. • We recognize that the procedures for this may vary significantly between institutions and locations, and we expect authors to adhere to the NeurIPS Code of Ethics and the guidelines for their institution. • For initial submissions, do not include any information that would break anonymity (if applicable), such as the institution conducting the review. 16. Declaration of LLM usage 
+
+Question: Does the paper describe the usage of LLMs if it is an important, original, or non-standard component of the core methods in this research? Note that if the LLM is used only for writing, editing, or formatting purposes and does not impact the core methodology, scientific rigor, or originality of the research, declaration is not required. Answer: [N/A] Justification: The core methodology, experiments, proofs, and scientific contributions do not use LLMs as an important, original, or non-standard component. LLMs were used only for grammar checking and phrasing assistance, as disclosed in Appendix A, and did not affect the algorithms, results, or analysis. Guidelines: 40 • The answer [N/A] means that the core method development in this research does not involve LLMs as any important, original, or non-standard components. • Please refer to our LLM policy in the NeurIPS handbook for what should or should not be described. 41

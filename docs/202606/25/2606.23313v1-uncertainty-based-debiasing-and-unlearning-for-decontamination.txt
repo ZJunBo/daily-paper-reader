@@ -1,0 +1,534 @@
+Title: Uncertainty-based Debiasing and Unlearning for Decontamination
+
+URL Source: https://arxiv.org/pdf/2606.23313v1
+
+Published Time: Tue, 23 Jun 2026 03:41:41 GMT
+
+Number of Pages: 10
+
+Markdown Content:
+# Uncertainty-based Debiasing and Unlearning for Decontamination 
+
+Guangzhi Sun 1, Xiao Zhan 1,2 , Mark Gales 1
+
+> 1
+
+Department of Engineering, University of Cambridge 
+
+> 2
+
+VRAIN, Universitat Politècnica de València 
+
+gs534@cam.ac.uk 
+
+Abstract 
+
+Benchmark-based evaluation is the dominant paradigm for assessing large language model (LLM) capabilities, yet data contamination in-flates reported performance and undermines fair comparison. Existing decontamination methods are evaluated solely through aggre-gate accuracy, which can obscure substantial differences in per-sample model behaviour, and many require access to an uncontaminated model. In this paper, we propose a sample-level evaluation framework for decontamination that complements accuracy-based assessment with distributional distance metrics, measuring how closely a decontaminated model recovers the output distribution of an uncontaminated model on each sample. Building on this framework, we introduce Uncertainty-Based Decontamina-tion (UBD), a family of methods that lever-age deep ensembles of the contaminated model to estimate per-sample memorization without requiring a uncontaminated model or knowl-edge of which samples are contaminated. UBD estimates a per-sample correction scalar from ensemble uncertainty, which is used to con-struct a debiased target distribution that sup-presses the inflated probability mass on correct answers induced by contamination. This target is then used either as a post-hoc output correc-tion (debiasing) or as a soft training signal for parameter update (unlearning). Experiments on MMLU-Pro and MATH-MCQA across mul-tiple LLM backbones demonstrate that UBD produces per-sample output distributions sub-stantially closer to those of an uncontaminated model than paraphrasing or choice-permutation baselines, while preserving model performance on uncontaminated data. 1
+
+1 Introduction 
+
+Large language models (LLMs) (Grattafiori et al., 2024; Jiang et al., 2023; Xu et al., 2025a,b; Co-manici Gheorghe et al., 2025) have attained a level 
+
+> 1https://github.com/BriansIDP/ UnlearnForDataContamination.git
+
+of capability that enables them to perform a broad range of tasks across diverse domains. As these models continue to be developed, released, and deployed at scale, the need for a systematic frame-work to evaluate and compare their capabilities has become increasingly important. In this con-text, benchmark-based evaluation has emerged as a standard paradigm for assessing LLM perfor-mance. Benchmarks such as MMLU (Hendrycks et al., 2021; Wang et al., 2025) evaluate models on a collection of samples and report performance by comparing model outputs with reference answers. However, data contamination (Deng et al., 2024; Chen et al., 2025) presents a particularly signifi-cant challenge for LLMs due to the vast scale of their training data, which makes it difficult to as-certain whether specific benchmark samples have been used for training. As a result, data contami-nation can inflate reported performance and lead to unfair comparisons, thereby obscuring the true capabilities of the models under evaluation. To ensure fair and trustworthy benchmarking of large language models, recent work has explored a range of decontamination methods. Early ap-proaches mitigate the effects of contaminated data through sampling strategies (Dong et al., 2024) or paraphrasing-based techniques (Zhu et al., 2024), both of which aim to reduce reliance on verbatim memorization of reference answers. Subsequent re-search shifted toward modifying the contaminated model itself, either by identifying and removing neural shortcuts (Zhu et al., 2025) or by directly minimizing the KL divergence from an uncontam-inated uncontaminated model (Chai et al., 2026). Despite this progress, the evaluation of decontam-ination methods largely centers on dataset-level performance metrics, such as accuracy, which can obscure important changes in behavior at the level of individual samples. For instance, two models may achieve identical accuracy on the same dataset while producing correct predictions on entirely dis-1
+
+> arXiv:2606.23313v1 [cs.CY] 22 Jun 2026
+
+joint subsets of examples. This limitation is es-pecially concerning in settings where the specific contaminated portion of the data is unknown. Therefore, we propose to evaluate decontami-nation efficacy at the sample level that comple-ments accuracy-based assessment with distribution-distance measures. We focus primarily on multiple-choice question (MCQ) benchmarks, one of the most widely used evaluation formats for LLMs. The proposed evaluation framework captures the behavioral similarity between decontaminated and uncontaminated models on each sample. Building on this, we introduce uncertainty-based decontam-ination (UBD) approaches via de-biasing and un-learning. These approaches do not require access to a uncontaminated model and do not require knowl-edge of the pre-training dataset. By estimating un-certainty through deep ensembles, UBD produces per-sample output distributions that are substan-tially closer to those of an uncontaminated model than those obtained with paraphrasing or choice-permutation baselines. Furthermore, uncertainty provides a useful signal for distinguishing hard but memorized samples from genuinely easy ones, even when both exhibit low loss after contamina-tion. Contributions are summarized as follows. • We argue that dataset-level metrics can appear close while masking substantial differences in how the model actually behaves on individual samples. Rather than relying only on dataset-level performance, we propose measuring decon-tamination effectiveness at the per-sample level using distribution-distance metrics. • We propose uncertainty metrics to measure the degree of contamination. These metrics are im-portant to distinguish between hard but memo-rized samples and genuinely easy samples • We propose UBD approaches via de-biasing and unlearning as effective LLM decontamination methods that leverage uncertainty estimation from deep ensembles, without requiring an un-contaminated or uncontaminated model. 
+
+2 Related Work 
+
+2.1 Data Contamination and Detection 
+
+Data contamination occurs when benchmark sam-ples are included in an LLM’s training corpus, lead-ing to inflated evaluation results that do not accu-rately reflect the model’s true capabilities (Balloccu et al., 2024; Deng et al., 2024; Chang et al., 2024; Sainz et al., 2023). For instance, in the context of mathematical reasoning, (Xu et al., 2024a) ana-lyzed 31 LLMs and found evidence of widespread contamination. Prior work has also further distin-guished two forms of benchmark contamination: exact contamination, in which test instances ap-pear verbatim in the training data, and syntactic contamination, in which test instances reappear in superficially altered forms, such as paraphrases or prompt-prefixed variants (Chen et al., 2025). Existing contamination detection methods can be broadly grouped into two paradigms. One line of work relies on model-output statistics, using signals such as peaked output distributions (Dong et al., 2024) or anomalous token probabilities (Shi et al., 2023) to infer whether a test instance has likely appeared in training. However, recent evidence (Fu et al., 2025) suggests that such membership-style signals may become much less informative at pre-training scale. A second line of work instead probes generalization behavior, asking whether the model can reconstruct or recover withheld answer infor-mation under controlled perturbations (Deng et al., 2024). This perspective has also revealed harder-to-detect forms of contamination, including cross-lingual variants that are not easily captured by surface-level matching (Yao et al., 2024a). 
+
+2.2 Mitigation for Contamination 
+
+Contamination mitigation, or decontamination, has been mainly explored via dynamic benchmarking or model-level modification. The former prevents contamination by constructing evaluation samples guaranteed to be unseen (Wu et al., 2025) or by rewriting leaked samples via paraphrasing at infer-ence time (Zhu et al., 2024). The latter corrects deployed models either by replacing shortcut neu-rons (Zhu et al., 2025) or by minimising KL diver-gence toward a clean reference (Chai et al., 2026; Yao et al., 2024b; Lizzo and Heck, 2025), both of which require an uncontaminated uncontaminated model and evaluate only at the benchmark-level accuracy. On the contrary, our approach does not require access to a uncontaminated model or prior knowledge of the contaminated portion of data, and we evaluate at the contamination sample level via per-sample distribution distances. 
+
+3 Problem Formulation 
+
+Let f (· ; θ) : X → Y denote a language model with parameters θ, mapping an input x ∈ X to a probability distribution over the output space Y.2For a given input x, we write P (y | x; θ) for the probability assigned to output sequence y ∈ Y .Let Dtest = {(x(i), y (i) 
+
+> ∗
+
+)}Ni=1 be a benchmark to test, where x(i) is the i-th test input and y(i) 
+
+> ∗
+
+is its ground-truth response. We denote the model’s output distribution as p(i)(·) = P (· | x(i); θ).
+
+3.1 Data Contamination 
+
+A model with uncontaminated parameters θ is one trained on a corpus Dtrain that does not include 
+
+Dtest . A contamination process introduces some part of Dtest into training, yielding contaminated 
+
+parameters ¯θ. We denote the part of Dtest that is used for training as Deval , and the rest as Ddev , the contamination process is thus: 
+
+θ train on Dtrain ∪D eval 
+
+−−−−−−−−−−−−→ ¯θ (1) We denote the output distributions of the uncon-taminated and contaminated models on x(i) as 
+
+p(i)(·) = P (· | x(i); θ) and ¯p(i)(·) = P (· | x(i); ¯θ)
+
+respectively. Data contamination causes ¯p(i) to concentrate probability mass on y(i) 
+
+> ∗
+
+, inflating per-formance on Deval and hence Dtest beyond what reflects genuine model capability. For instance, in multiple-choice questions, data contamination manifests as inflated probabilities for the correct choices. In open-ended generation, it manifests as near-verbatim reproduction of reference outputs. 
+
+3.2 Decontamination 
+
+We define decontamination as the task of recov-ering, from the contaminated model ¯θ, an output distribution that approximates that of the unbiased model for all inputs in Dtest . Formally, we seek a corrected distribution ˆp(i)(·) such that: 
+
+ˆp(i)(·) ≈ p(i)(·) ∀ x(i) ∈ D test (2) We constrain the decontamination procedure to have access only to ¯θ (or a deep ensemble of ¯θ) and 
+
+Dtest . Neither the unbiased parameters θ nor the clean distributions p(i) are assumed to be available. We further constrain that we do not know which part of Dtest is contaminated, and hence decontami-nation should be applied to all the samples in Dtest .These constraints reflect a practical scenario, pos-ing more challenges to the methodologies. We consider debiasing and unlearning as two types of decontamination methods. Output debias-ing directly corrects ¯p(i) at inference time without modifying the model parameters, producing a cali-brated distribution ˆp(i) as a function of ¯p(i):
+
+ˆp(i)(·) = g
+
+
+
+¯p(i)(·)
+
+
+
+(3) where g(·) is a correction function applied post-hoc that either redistributes the output distribution 
+
+¯p(i) directly or modifies input x(i) to influence ¯p(i),such as paraphrasing-based methods. 
+
+Unlearning instead updates the model parame-ters via a targeted training objective to suppress memorization of Deval , yielding purified parame-ters ˆθ and correspondingly ˆp(i)(·) = P (· | x(i); ˆθ):
+
+¯θ unlearn 
+
+−−−−→ ˆθ (4) Both families share the same goal of recovering 
+
+p(i) and are evaluated under the same metrics. 
+
+3.3 Measuring Decontamination Effectiveness 
+
+Prior work evaluates decontamination by measur-ing the reduction in aggregate accuracy on Dtest 
+
+(Zhu et al., 2024; Dong et al., 2024; Zhu et al., 2025; Chai et al., 2026). We argue this is insuffi-cient : A method may yield similar overall accu-racy by being correct on two completely different subsets of data. We instead propose evaluating decontamination at the per-sample level .Let ˆp(i)(·) = P (· | x(i); ˆθ) denote the output distribution of the decontaminated model. We mea-sure effectiveness via the following metrics. 
+
+Per-Sample Distribution Distances. We use the KL-divergence to compare the full output distribu-tions between the uncontaminated and decontami-nated models at the per-sample level: 
+
+DKL = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+DKL 
+
+
+
+p(i) ∥ ˆp(i)
+
+(5) 
+
+Probability Difference of Ground-truth. We further measure how closely the decontaminated model recovers the unbiased probability assigned to the ground-truth response y(i) 
+
+> ∗
+
+:
+
+D∗ 
+
+> L1
+
+= 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+ˆp(i)(y(i) 
+
+> ∗
+
+) − p(i)(y(i) 
+
+> ∗
+
+) (6) By focusing on the ground truth, we can directly as-sess the degree of probability inflation that remains after decontamination without introducing noise. Specifically, in multiple-choice tasks, y(i) 
+
+> ∗
+
+corre-sponds to the letter of the correct answer, making 3p(i)(y(i) 
+
+> ∗
+
+) directly interpretable as the model’s con-fidence in the correct choice. A decontamination method is considered effective if it minimizes both metrics simultaneously, recovering the unbiased distribution at the sample level rather than merely closing the aggregate accuracy gap. 
+
+Preserving performance on other data. A de-contamination method that recovers p(i) on Deval 
+
+but degrades model performance on Ddev is of lim-ited practical value. We therefore additionally eval-uate the decontaminated model on Ddev with the same distributional metrics DKL and D∗ 
+
+> L1
+
+to mea-sure the deviation of ˆp(i) from ¯p(i) on Ddev . Note that here we use ¯p(i) specifically to measure the deviation from the deployed model checkpoint. 
+
+4 Uncertainty-Based Decontamination 
+
+We now introduce UBD approaches which are di-rectly applied to each sample in Dtest under con-straints defined in Section 3. The process is illus-trated in Fig. 1. First, output distributions are ob-tained from the ensemble of contaminated models, and knowledge uncertainty is computed for each sample. An estimation of the degree of contami-nation is obtained from uncertainty (denoted as α
+
+introduced in Section 4.1). Then, debiasing can be applied to rescale the probabilities according to the degree of contamination. Alternatively, unlearning can be performed to change the model parameters using the rescaled distributions as targets. 
+
+4.1 UBD-Debiasing 
+
+UBD-Debiasing corrects the contaminated distribu-tion ¯p(i) at inference time without modifying model parameters. The core of debiasing is to suppress the probability mass on the ground-truth response 
+
+y(i) 
+
+> ∗
+
+, which has been inflated during contamination, while equally increasing the probability on other choices while keeping the relative shape of the dis-tribution over remaining options unchanged. We achieve this by introducing a per-sample scalar α(i)
+
+that captures the degree of contamination, defined as the ratio of the uncontaminated to the contami-nated ground-truth probability in Eqn (7). 
+
+α(i) = p(i)(y(i) 
+
+> ∗
+
+)¯p(i)(y(i) 
+
+> ∗
+
+) (7) Since the uncontaminated ground-truth probabil-ity is unknown, we estimate ˆα(i) using uncertainty in Section 4.3. We then construct a debiased distri-bution ˆp(i) by rescaling the ground-truth probability and redistributing the remaining mass proportion-ally across the other outputs.                  
+
+> ˆp(i)(y) =
+> 
+> ˆα(i)¯p(i)(y(i)
+> ∗)if y=y(i)
+> ∗
+> 1−ˆα(i)¯p(i)(y(i)
+> ∗)1−¯p(i)(y(i)
+> ∗)·¯p(i)(y)o.w. (8)
+
+This correction function g(¯ p(i)) (cf. Eqn (3) ) is applied post-hoc and requires no access to an un-contaminated model or pre-training data. 
+
+4.2 UBD-Unlearning 
+
+UBD-Unlearning updates the contaminated model parameters ¯θ via a targeted training objective, using the debiased distribution ˆp(i) constructed above as the training target. Concretely, we fine-tune ¯θ by minimising the cross-entropy between the model’s current output and the debiased target distribution over all samples in Dtest as shown in Eqn. (9). 
+
+L = − 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+X
+
+> y
+
+ˆp(i)(y) log P (y | x(i); ˆθ) (9) This drives the model toward the debiased output distribution ˆp(i) rather than toward hard labels, al-lowing gradient updates to suppress the inflated probability on y(i) 
+
+> ∗
+
+while preserving the overall shape of the output distribution. The resulting de-contaminated parameters ˆθ (cf. Eqn (4) ) are directly used for inference. Since decontamination should be applied to all samples in Dtest , including those that may not be contaminated, the debiased target 
+
+ˆp(i) defaults to ¯p(i) when ˆα(i) ≈ 1, making the training signal negligible for clean samples. Both debiasing and unlearning are evaluated under the 
+
+DKL and D∗ 
+
+> L1
+
+metrics on both Deval and Ddev .
+
+4.3 Estimating α from Uncertainty 
+
+In a contaminated model, high performance can re-sult from two different scenarios. The first is from non-contaminated training data that enables the model to accurately predict the answer (i.e. easy samples). The second scenario is that there is a con-taminated sample that results in significantly higher performance than the uncontaminated model (i.e. hard but contaminated samples). In the first case, where we have multiple non-contaminated training samples to support, there is little sensitivity to the precise batch ordering of the relevant training sam-ples. Conversely, as memorization is highly related 4Contamination  Decontaminated Model 2          
+
+> Contaminated Ensemble
+> 0.9 0.8
+> 0.8 0.3 0.5
+> 0.3 0.2
+> Uncertainty
+> Estimation
+> Estimated For Each Sample ̂α(i)
+> Output Debiasing
+> Unlearning ̂
+> α(i)
+> Target
+> Output distributions ̂α(i)=min (2σ(i)+1, 1)
+
+Figure 1: Illustration of the uncertainty-based decontamination (UBD) approach. Uncertainty is first estimated from the ensemble, and the level of contamination ˆα(i) is then estimated using the uncertainty. Debiasing is applied by suppressing the ground-truth probability and increasing other probabilities proportionally, and unlearning can then be applied using the debiased output as the target. 
+
+to the batch ordering (Lesci et al., 2024), there is expected to be more variability in the predictions of the ensemble members. This then results in the unusual balance of high confidence prediction and high variability among ensemble members, which is related to the epistemic uncertainty. We assume access to an ensemble of M con-taminated models {¯θ1, . . . , ¯θM }, obtained by train-ing with identical hyperparameters but different batch orderings. We propose two complementary uncertainty signals derived from this ensemble to estimate the per-sample contamination scalar ˆα(i).Due to the variable bound of the knowl-edge uncertainty as defined in Appendx A, (i.e. 
+
+[0 , log |Y| ]), we employ standard deviation of the ground-truth probability ¯p(i)(y(i) 
+
+> ∗
+
+) across ensem-ble members as a simpler uncertainty signal: 
+
+μ(i) = 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+¯p(i) 
+
+> m
+
+(y(i) 
+
+> ∗
+
+), (10) 
+
+σ(i) =
+
+vuut 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+
+
+¯p(i) 
+
+> m
+
+(y(i) 
+
+> ∗
+
+) − μ(i)
+
+2
+
+(11) We observe a strong negative correlation between 
+
+σ(i) and the oracle α(i): samples with higher standard deviation in the ground-truth probability across the ensemble tend to have lower α(i), in-dicating stronger memorization. This is because memorized samples are more sensitive to the order in which contaminated data is presented in training. 
+
+Estimating ˆα(i). We exploit the above correla-tion to derive a parameter-free estimate of α(i) from ensemble standard deviation. Specifically, we set: 
+
+ˆα(i) =
+
+(
+
+1 − 2σ(i) if ¯p(i)(y(i) 
+
+> ∗
+
+) ≥ Tp
+
+1 otherwise (12) The coefficient of 2 bounds the prediction between 0 and 1 since σ(i) ∈ [0 , 0.5) , and Tp ∈ [0 , 1) is the threshold above which decontamination is applied. Applying Tp excludes samples where the contam-inated model is already performing poorly. That is, for a particular member of the ensemble, we pe-nalize the high-confidence correct predictions from that model. This estimator requires no ground-truth 
+
+α values for calibration and applies to any sample in Dtest , including those that are not contaminated, for which σ(i) ≈ 0 and hence ˆα(i) ≈ 1, leaving the output distribution unchanged. 
+
+5 Experimental Setup 
+
+5.1 Data 
+
+We investigate data contamination on two MCQ benchmarks as Dtest , namely MMLU-pro (Wang et al., 2025) and MATH-MCQA (Biderman, 2025). For each benchmark, we split it randomly into two subsets with an equal number of samples, and use one as Ddev and another as Deval . We construct the rest of Dtrain by collecting another 110k training samples from Magpie-pro (Xu et al., 2024b), Commonsense-QA (Talmor et al., 2019), and OpenOrca (Lian et al., 2023) training sets. We define the contaminated model and uncontam-inated model depending on whether it is trained on Deval . The contaminated model is trained on 
+
+Dtrain ∪ D eval , and the uncontaminated model is trained on Dtrain ∪ D dev to eliminate the gaps in model abilities and domain shifts and only focus-ing on contamination of the question content itself. 
+
+5.2 Model and Training 
+
+We evaluate our methods on Llama-3.2-3B-Instruct (Grattafiori et al., 2024) and Qwen2.5-3B-Instruct (Xu et al., 2025a). Training is with LoRA using 5Table 1: Results on Llama-3.2-3B-Instruct and Qwen2.5-3B-Instruct on MMLU-pro . The target values are highlighted in yellow cells, and the closest results to the target are in bold. The threshold Tp is defined in Eqn (12) above which decontamination is applied. Deval metrics are computed against the uncontaminated model, while Ddev 
+
+metrics are computed against the model before decontamination. RC is the residual contamination, which is the absolute difference between the uncontaminated model and the decontaminated model.                                                                                                                                                
+
+> Method Accuracy (RC ↓)DKL ↓D∗
+> L1 ↓Ddev Deval Ddev Deval Ddev Deval
+> Llama-3.2-3B-Instruct Uncontaminated model –43.4 (0.0) –0–0Contaminated Model 42.2 (0.0) 60.6 (17.2) 00.8411 00.2311 Choice Permutation 41.4 (0.8) 53.1 (9.7) 0.5658 0.9515 0.1486 0.2307 Paraphrasing (Zhu et al., 2024) 42.3 (0.1 )58.1 (14.7) 0.1328 0.8297 0.0637 0.2252 Choice Permutation + Paraphrasing 41.5 (0.7) 51.8 (8.4) 0.6415 0.9580 0.1666 0.2296 DeconIEP (Chai et al., 2026) 32.0 (10.2) 42.7 (0.7) 0.2909 0.6201 0.1920 0.2187 UBD-Debiasing ( Tp= 0 .0)30.0 (12.2) 43.7 (0.3 )0.0894 0.5597 0.1063 0.1482
+> UBD-Unlearning ( Tp= 0 .0)33.3 (8.9) 52.1 (8.7) 0.1689 0.5184 0.1196 0.1656 UBD-Debiasing ( Tp= 0 .5)36.4 (5.8) 51.7 (8.3) 0.0749 0.5253 0.0753 0.1486 UBD-Unlearning ( Tp= 0 .5)33.1 (9.1) 52.0 (8.6) 0.1710 0.5192 0.1218 0.1651 Qwen2.5-3B-Instruct Uncontaminated model –44.8 (0.0) –0–0Contaminated Model 46.0 (0.0) 69.4 (24.6) 01.3777 00.2867 Choice Permutation 45.1 (0.9 )55.1 (10.3) 1.2480 1.5128 0.1906 0.2610 Paraphrasing (Zhu et al., 2024) 45.1 (0.9) 64.3 (19.5) 0.3567 1.3846 0.0990 0.2779 Choice Permutation + Paraphrasing 44.3 (1.7) 53.3 (8.5) 1.0785 1.5579 0.1213 0.2655 DeconIEP (Chai et al., 2026) 35.6 (10.4) 49.8 (5.0 )0.3245 0.8166 0.1725 0.2503 UBD-Debiasing ( Tp= 0 .0)33.3 (12.7) 51.2 (6.4) 0.1436 0.6518 0.1225 0.1498
+> UBD-Unlearning ( Tp= 0 .0)38.0 (8.0) 57.5 (12.7) 0.3381 0.6147 0.1513 0.1896 UBD-Debiasing ( Tp= 0 .5)36.6 (9.4) 54.9 (10.1) 0.1331 0.6235 0.1028 0.1499 UBD-Unlearning ( Tp= 0 .5)38.4 (7.6) 57.2 (12.4) 0.3337 0.6370 0.1463 0.1909
+
+a rank of 64 and alpha of 128. We perform con-tamination training using 5 different random seeds corresponding to different initialization and batch ordering, yielding an ensemble of 5 sets of LoRA parameters. To obtain reliable estimates of the uncontaminated model outputs, we also train an ensemble of 5 sets of LoRA parameters for the un-contaminated model and use the averaged output distribution across the ensemble as the reference to measure DKL and D∗ 
+
+> L1
+
+for each sample. 
+
+5.3 Baselines 
+
+We primarily compare with approaches that do not require access to a clean model. Specifically, fol-lowing ITD (Zhu et al., 2024), we construct para-phrased questions and choices using GPT-4o. We also adopt a permutation of choices and combine it with paraphrasing as a stronger baseline. Para-phrasing and permutations are performed 3 times, and the probabilities are averaged across the 3 runs to eliminate any potential biasing. These are all widely used dynamic benchmark-style approaches. In addition, we also compare our method to De-conIEP (Chai et al., 2026), where we use the corre-sponding original backbone LLMs (i.e. Llama-3.2-3B-Instruct and Qwen2.5-3B-Instruct) to provide reference distributions, and we use the entire bench-mark Dtest as Dproxy .
+
+6 Results 
+
+6.1 Main Results 
+
+We first report the results on MMLU-pro using Llama-3.2-3B-Intrcut and Qwen2.5-3B-Instruct models in Table 1. We report both the overall accu-racy differences using residual contamination (RC) (Chai et al., 2026), and individual sample-level dif-ferences using DKL and D∗
+
+> L1
+
+.
+
+Gap between dataset-level metrics and sample-level metrics . The combination of paraphrasing and choice permutation yields the strongest black-box baseline, reducing RC from 17.2 to 8.4 on Deval while incurring negligible ac-curacy difference on Ddev . However, this dataset-level improvement does not translate to the sam-ple level. DKL increases by more than 13% rela-tive to the contaminated model, and D∗ 
+
+> L1
+
+remains largely unchanged. This pattern is consistent across Qwen2.5 results as shown in the second half of Ta-ble 1. These findings reveal a fundamental discon-nect between dataset-level and sample-level met-rics: A reduction in overall performance measures 6Table 2: Decontamination results using Llama-3.2-3B-Instruct on MATH-MCQA . The target values are highlighted in yellow cells, and the closest results to the target are in bold. The threshold Tp is defined in Eqn (12) above which decontamination is applied. Deval metrics are computed against the uncontaminated model, while Ddev metrics are computed against the contaminated model before decontamination. RC is the residual contamination, which is the absolute difference between the uncontaminated model and the decontaminated model.                                                                                                                                             
+
+> Method Accuracy (RC) DKL D∗
+> L1
+> Ddev Deval Ddev Deval Ddev Deval
+> Llama-3.2-3B-Instruct Uncontaminated model –55.3 (0.0) –0–0Contaminated Model 54.6 (0.0) 77.4 (22.1) 01.0305 00.2660 Choice Permutation 53.9 (0.7) 60.8 (5.5) 1.1781 1.3272 0.2666 0.3147 Paraphrasing (Zhu et al., 2024) 54.1 (0.5) 72.2 (16.9) 0.2027 0.9088 0.1075 0.2551 Choice Permutation + Paraphrasing 54.4 (0.2 )58.5 (3.2) 1.2465 1.2580 0.2976 0.3084 DeconIEP (Chai et al., 2026) 43.6 (11.0) 59.2 (3.9) 0.1837 0.4049 0.1541 0.2162 UBD-Debiasing ( Tp= 0 .0)36.1 (18.5) 56.8 (1.5 )0.1614 0.3687 0.1577 0.1639 UBD-Unlearning ( Tp= 0 .0)47.8 (6.8) 65.3 (10.0) 0.3114 0.3653 0.1978 0.1947 UBD-Debiasing ( Tp= 0 .5)39.1 (15.4) 59.9 (4.6) 0.1467 0.3332 0.1291 0.1564
+> UBD-Unlearning ( Tp= 0 .5)48.5 (6.1) 65.3 (10.0) 0.3062 0.3404 0.2114 0.1955 Qwen2.5-3B-Instruct Uncontaminated model –65.8 (0.0) –0–0Contaminated Model 65.4 (0.0) 85.6 (19.8) 01.0010 00.2685 Choice Permutation 64.5 (0.9) 71.6 (5.8) 0.9244 1.2529 0.2419 0.3045 Paraphrasing (Zhu et al., 2024) 65.7 (0.3) 81.2 (15.4) 0.1743 0.9408 0.1065 0.2627 Choice Permutation + Paraphrasing 65.2 (0.2 )70.0 (4.2) 1.0093 1.2072 0.2591 0.2974 DeconIEP (Chai et al., 2026) 55.6 (9.8) 70.7 (4.9) 0.2576 0.6153 0.1632 0.2589 UBD-Debiasing ( Tp= 0 .0)50.1 (15.3) 69.4 (3.6 )0.1611 0.4954 0.1520 0.1807 UBD-Unlearning ( Tp= 0 .0)58.4 (7.0) 75.6 (9.8) 0.2014 0.4943 0.1641 0.2183 UBD-Debiasing ( Tp= 0 .5)51.6 (13.8) 70.9 (5.1) 0.1490 0.4713 0.1299 0.1791
+> UBD-Unlearning ( Tp= 0 .5)58.5 (6.9) 73.0 (7.2) 0.2034 0.4955 0.1639 0.2281
+
+such as RC does not imply that per-sample model behaviour moves closer to that of the uncontami-nated model. Consequently, in many cases where accuracy alone is insufficient, explicitly measuring and mitigating sample-level divergence via metrics such as DKL and D∗ 
+
+> L1
+
+is essential. 
+
+UBD achieves consistently better sample-level performance . While DeconIEP also achieves com-petitive performance on RC, and better DKL and 
+
+D∗ 
+
+> L1
+
+compared to paraphrasing and permutation methods, the sample-level differences are much larger compared to UBD methods, especially its degradation on Ddev . Meanwhile, when the actual backbone model is unknown, a mismatched clean model may further increase distances. As a result, UBD-Debiasing achieved the best efficacy on Deval ,while UBD-Unlearning achieved the best balance between dev and eval set performance. Specifically, with Llama-3.2 model, both UBD-Debiasing and UBD-Unlearning on Deval achieved relative reductions of over 40% DKL and D∗
+
+> L1
+
+compared to the contaminated model, significantly higher than baseline methods. Meanwhile, UBD-Debiasing maintained a low Ddev distortion, with 
+
+DKL and D∗ 
+
+> L1
+
+below 0.1. The sample-level dis-tances of the contaminated model is much higher with the Qwen2.5 model in general, and the effect of UBD methods are more obvious. Notably, UBD-Debiasing achieved nearly 60% relative reductions in DKL and around 50% reduction in D∗
+
+> L1
+
+. Results on the MATH-MCQA data are shown in Table 2 for both models, with a similar pattern observed. The sensitivity analysis of the hyperparameter Tp
+
+is presented in Section 6.3. 
+
+6.2 Contamination Level Indicators 
+
+We then compare log probability of the ground-truth option y∗ against uncertainty metrics includ-ing the standard deviation of ¯p(y∗) and knowledge uncertainty I(y, θ ), as indicators for contamination level. As shown in Fig. 2 (a-i) to (a-iii), uncertainty-based metrics achieved over 0.8 PCC between pre-dicted and ground-truth α when threshold Tp is above 0.5, whereas log probability stays at a very low correlation level with PCC hardly beyond 0.4. When Tp is high, samples contain a mixture of hard but memorized samples ( α ≈ 0) and original easy samples ( α ≈ 1). A good contamination indicator should distinguish between the two types of samples, and apply much larger penalty to the hard but memorized ones. As shown in Fig. 2, uncertainty-based metrics clearly distinguishes the 7Threshold  Tp         
+
+> PCC (  )α vs. ̂ α
+> PCC (  )α vs. ̂ α
+> PCC (  )α vs. ̂ α̂
+> α̂
+> α̂
+> α
+> ααα
+> (a-i). Llama-3.2 on MMLU-pro (a-ii). Llama-3.2 on MATH-MCQA (a-iii). Qwen2.5 on MMLU-pro
+> (b-i). Variance of ¯pm(y*)(b-ii). Knowledge Uncertainty (b-iii). Log Probability
+> Threshold TpThreshold Tp
+
+Figure 2: Correlation between various contamination indicators against α. The top 3 plots (a-i to a-iii) show the Pearson Correlation Coefficient (PCC) for data samples against varying thresholds Tp. High ¯p(i)(y∗) region requires differentiation between hard but memorized samples from easy samples. The lower plots (b-i to b-iii) show the correlation of predicted ˆα against oracle α using different indicators on MMLU-pro. 
+
+two with a PCC over 0.9, whereas such difference cannot be derived from log probabilities. In addition, we provide the scatter plot to show the sample-level correlation between the groundtruth α and ˆα predicted with the standard de-viation of ¯pm(y∗), the knowledge uncertainty, and the log probability of the ground truth option, as shown in Fig. 2 (b-i) to (b-iii) respectively. While both the standard deviation and the knowledge un-certainty achieve similarly high PCC, the standard deviation provides a more linear relationship with a bounded range, making it easy to directly fit with a general linear function in Eqn (12). 
+
+6.3 Sensitivity to Threshold 
+
+We further show the sensitivity of decontamina-tion efficacy against the threshold hyper-parameter using RC and DKL in Fig. 3. First, while debi-asing showed a large sensitivity to the threshold on RC, both methods showed robustness on DKL 
+
+at all threshold levels. Besides, UBD-Unlearing, though performing worse than UBD-Debiasing at the Tp = 0 .5 operating point, shows its perfor-mance robustness throughout different thresholds. 
+
+7 Conclusion 
+
+This paper first proposes the sample-level de-contamination evaluation, pointing out the gap Threshold  Tp Threshold  Tp   
+
+> Threshold TpThreshold Tp
+> RC
+> RC
+> DKL
+> DKL
+> Ddev Deval
+> Deval Ddev
+
+Figure 3: Sensitivity of UBD-Debiasing and UBD-Unlearning to threshold Tp based on RC and DKL .
+
+between overall performance metrics and per-sample differences. DKL and D∗ 
+
+> L1
+
+as sample-level performance metrics are proposed. In addition, uncertainty-based decontamination (UBD) using deep ensembles is proposed, which is able to dis-tinguish hard but memorized samples from easy samples. As a result, UBD achieved over 60% reduction in DKL compared to the contaminated model, and outperformed paraphrase and permu-tation baselines as well as reference-model-based DeconIEP with clear margins. 88 Limitations 
+
+One of the key limitations is the requirement for ensemble models to estimate the uncertainty. It requires the model providers to release not only the main checkpoint but also an ensemble of check-points. In our setting, we fine-tune with LoRA and show that the ensemble of LoRA weights satisfies this requirement, which largely reduces the burden of releasing the number of parameters. Future in-vestigations could explore methods to effectively derive ensembles from a single released model. An-other limitation is that UBD-Debiasing in its cur-rent form is restricted to classification tasks (MCQ or binary). We believe there exist extensions to be applied to open-ended questions, such as debiasing at each decoding step using the same method, and we leave this for future investigations. 
+
+References 
+
+Simone Balloccu, Patrícia Schmidtová, Mateusz Lango, and Ondˇ rej Dušek. 2024. Leak, cheat, repeat: Data contamination and evaluation malpractices in closed-source llms. In Proceedings of the 18th Conference of the European Chapter of the Association for Compu-tational Linguistics (Volume 1: Long Papers) , pages 67–93. Stella Biderman. 2025. Math-mcqa: A multiple choice adaptation of the math dataset. Jianzhe Chai, Yu Zhe, and Jun Sakuma. 2026. When benchmarks leak: Inference-time decontamination for llms. arXiv preprint arXiv:2601.19334 .Yupeng Chang, Xu Wang, Jindong Wang, Yuan Wu, Linyi Yang, Kaijie Zhu, Hao Chen, Xiaoyuan Yi, Cunxiang Wang, Yidong Wang, Wei Ye, Yue Zhang, Yi Chang, Philip S. Yu, Qiang Yang, and Xing Xie. 2024. A survey on evaluation of large language mod-els. ACM transactions on intelligent systems and technology , 15(3):1–45. Simin Chen, Yiming Chen, Zexin Li, Yifan Jiang, Zhongwei Wan, Yixin He, Dezhi Ran, Tianle Gu, Haizhou Li, Tao Xie, and Baishakhi Ray. 2025. Benchmarking large language models under data con-tamination: A survey from static to dynamic evalua-tion. In Proc. EMNLP .Comanici Gheorghe et al. 2025. Gemini 2.5: Pushing the frontier with advanced reasoning. 
+
+arXiv:2507.06261 .Chunyuan Deng, Yilun Zhao, Xiangru Tang, Mark Ger-stein, and Arman Cohan. 2024. Investigating data contamination in modern benchmarks for large lan-guage models. In Proceedings of the 2024 Confer-ence of the North American Chapter of the Associ-ation for Computational Linguistics: Human Lan-guage Technologies (Volume 1: Long Papers) , pages 8706–8719. Yihong Dong, Xue Jiang, Huanyu Liu, Zhi Jin, Bin Gu, Mengfei Yang, and Ge Li. 2024. Generalization or memorization: Data contamination and trustworthy evaluation for large language models. In Findings of the Association for Computational Linguistics: ACL 2024 , pages 12039–12050. Yujuan Fu, Ozlem Uzuner, Meliha Yetisgen-Yildiz, and Fei Xia. 2025. Does data contamination detection work (well) for llms? a survey and evaluation on detection assumptions. In Findings of the Association for Computational Linguistics: NAACL 2025 , pages 5235–5256. Aaron Grattafiori, Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, and 1 oth-ers. 2024. The llama 3 herd of models. 
+
+arXiv:2407.21783 .Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt. 2021. Measuring massive multitask language under-standing. In Proc. ICLR .Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-sch, Chris Bamford, Devendra Singh Chaplot, and 1 others. 2023. Mistral 7b. arXiv:2310.06825 .Alex Kendall and Yarin Gal. 2017. What uncertainties do we need in bayesian deep learning for computer vision? In Proc. NIPS .Pietro Lesci, Clara Meister, Thomas Hofmann, Andreas Vlachos, and Tiago Pimentel. 2024. Causal estima-tion of memorisation profiles. In Proc. ACL .Wing Lian, Bleys Goodson, Eugene Pentland, Austin Cook, Chanvichet Vong, and "Teknium". 2023. Openorca: An open dataset of gpt augmented flan reasoning traces. https://huggingface.co/ datasets/Open-Orca/OpenOrca .Tyler Lizzo and Larry Heck. 2025. Unlearn efficient removal of knowledge in large language models. In 
+
+Findings of the Association for Computational Lin-guistics: NAACL 2025 .Andrey Malinin and Mark Gales. 2021. Uncertainty estimation in autoregressive structured prediction. In 
+
+Proc. ICLR .Andrey Malinin, Bruno Mlodozeniec, and Mark Gales. 2019. Ensemble distribution distillation. In Proc. ICLR .Oscar Sainz, Jon Campos, Iker García-Ferrero, Julen Etxaniz, Oier Lopez de Lacalle, and Eneko Agirre. 2023. Nlp evaluation in trouble: On the need to measure llm data contamination for each benchmark. In Findings of the Association for Computational Linguistics: EMNLP 2023 , pages 10776–10787. 
+
+9Weijia Shi, Anirudh Ajith, Mengzhou Xia, Yangsibo Huang, Daogao Liu, Terra Blevins, Danqi Chen, and Luke Zettlemoyer. 2023. Detecting pretraining data from large language models. arXiv preprint arXiv:2310.16789 .Alon Talmor, Jonathan Herzig, Nicholas Lourie, and Jonathan Berant. 2019. CommonsenseQA: A ques-tion answering challenge targeting commonsense knowledge. In Proc. NAACL-HLT .Yubo Wang, Xueguang Ma, Ge Zhang, Yuansheng Ni, Abhranil Chandra, Shiguang Guo, Weiming Ren, Aaran Arulraj, Xuan He, Ziyan Jiang, Tianle Li, Max Ku, Kai Wang, Alex Zhuang, Rongqi Fan, Xiang Yue, and Wenhu Chen. 2025. Mmlu-pro: A more robust and challenging multi-task language understanding benchmark. In Proc. NeurIPS .Xiaobao Wu, Liangming Pan, Yuxi Xie, Ruiwen Zhou, Shuai Zhao, Yubo Ma, Mingzhe Du, Rui Mao, Luu Anh Tuan, and William Yang Wang. 2025. An-tileakbench: Preventing data contamination by au-tomatically constructing benchmarks with updated real-world knowledge. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 18403– 18419. Jin Xu, Zhifang Guo, Jinzheng He, Hangrui Hu, Ting He, Shuai Bai, Keqin Chen, Jialin Wang, Yang Fan, Kai Dang, Bin Zhang, Xiong Wang, Yunfei Chu, and Junyang Lin. 2025a. Qwen 2.5-omni technical report. 
+
+arXiv:2503.20215 .Jin Xu, Zhifang Guo, Hangrui Hu, and 1 others. 2025b. Qwen3-omni technical report. arXiv:2509.17765 .Ruijie Xu, Zengzhi Wang, Run-Ze Fan, and Pengfei Liu. 2024a. Benchmarking benchmark leakage in large language models. arXiv preprint arXiv:2404.18824 .Zhangchen Xu, Fengqing Jiang, Luyao Niu, Yun-tian Deng, Radha Poovendran, Yejin Choi, and Bill Yuchen Lin. 2024b. Magpie: Alignment data synthesis from scratch by prompting aligned llms with nothing. arXiv:2406.08464 .Feng Yao, Yufan Zhuang, Zihao Sun, Sunan Xu, Ani-mesh Kumar, and Jingbo Shang. 2024a. Data contam-ination can cross language barriers. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 17864–17875. Jin Yao, Eli Chien, Minxin Du, Xinyao Niu, Tianhao Wang, Zezhou Cheng, and Xiang Yue. 2024b. Ma-chine unlearning of pre-trained large language mod-els. In Proceedings of the 62nd annual meeting of the association for computational linguistics (volume 1: Long papers) , pages 8403–8419. Kejian Zhu, Shangqing Tu, Zhuoran Jin, Lei Hou, Juanzi Li, and Jun Zhao. 2025. Establishing trust-worthy llm evaluation via shortcut neuron analysis. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 3809–3822. Qin Zhu, Qinyuan Cheng, Runyu Peng, Xiaonan Li, Ru Peng, Tengxiao Liu, Xipeng Qiu, and Xuan-Jing Huang. 2024. Inference-time decontamination: Reusing leaked benchmarks for large language model evaluation. In Findings of the Association for Com-putational Linguistics: EMNLP 2024 , pages 9113– 9129. 
+
+A Knowledge Uncertainty 
+
+Following (Kendall and Gal, 2017; Malinin et al., 2019; Malinin and Gales, 2021), we quantify knowledge uncertainty via the mutual information between the model output and the ensemble param-eters, approximated as: 
+
+I(y, θ | x(i)) ≈ H 
+
+"
+
+1
+
+M
+
+> M
+
+X
+
+> m=1
+
+P (y | x(i), ¯θm)
+
+#
+
+− 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+H
+
+h
+
+P (y | x(i), ¯θm)
+
+i
+
+, (13) where H[·] denotes the entropy of a distribution and 
+
+I[·] is the mutual information. Knowledge uncer-tainty measures the degree of disagreement among ensemble members. Importantly, uncertainty from ensembles distinguishes the hard but memorized sample from easy samples. When the probability of the ground-truth is high, hard but memorized sam-ple exhibits high inconsistency across ensembles, yielding higher uncertainty than easy samples. 10

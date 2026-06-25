@@ -6,35 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-24
-- 运行时间：2026-06-24 22:14:19 UTC
+- 最新运行日期：2026-06-25
+- 运行时间：2026-06-25 20:53:25 UTC
 - 运行状态：成功
-- 本次总论文数：5
+- 本次总论文数：6
 - 精读区：2
-- 速读区：3
+- 速读区：4
 
 ### 今日简报（AI）
-今日推荐5篇论文，精读聚焦不确定性量化与对齐脆弱性几何诊断。最值得关注的方向：通过最高密度区域进行不确定性量化，以及大模型表示中对齐脆弱性的几何诊断。建议深入阅读这两篇8分精读文章，把握前沿方法论。
-- 详情：[/202606/24/README](/202606/24/README)
+今日共6篇推荐，精读2篇、速读4篇，重点关注大语言模型安全对齐与数据去污染。最值得精读的是《PolicyAlign》（9.0分）提出的基于策略的直接安全对齐方法，以及《Uncertainty-based Debiasing》（8.0分）的不确定性去偏技术。建议优先阅读这两篇精读文章，把握LLM安全与鲁棒性前沿。
+- 详情：[/202606/25/README](/202606/25/README)
 
 ### 精读区论文标签
-1. [On the QUEST for Uncertainty Quantification via Highest Density Regions](/202606/24/2606.19569v1-on-the-quest-for-uncertainty-quantification-via-highest-density-regions)  
-   标签：评分：8.0/10、query:uq-safety
-   evidence：提出基于最高密度区域的不确定量化方法QUEST
-2. [Skin-Deep: A Geometric Diagnostic for Alignment Fragility in Large Language Model Representations](/202606/24/2606.22676v1-skin-deep-a-geometric-diagnostic-for-alignment-fragility-in-large-language-model-representations)  
-   标签：评分：8.0/10、query:smd
-   evidence：诊断LLM对齐脆弱性；检测微调导致安全退化的风险
+1. [PolicyAlign: Direct Policy-Based Safety Alignment for Large Language Models](/202606/25/2606.25442v1-policyalign-direct-policy-based-safety-alignment-for-large-language-models)  
+   标签：评分：9.0/10、query:dg
+   evidence：合成违反策略的指令用于安全对齐
+2. [Uncertainty-based Debiasing and Unlearning for Decontamination](/202606/25/2606.23313v1-uncertainty-based-debiasing-and-unlearning-for-decontamination)  
+   标签：评分：8.0/10、query:luq
+   evidence：提出基于不确定性的去污染方法，利用不确定性量化评估LLM
 
 ### 速读区论文标签
-1. [Possible or Definite? A Benchmark for Evaluating Diagnostic Uncertainty Preservation in Clinical Text](/202606/24/2606.18471v1-possible-or-definite-a-benchmark-for-evaluating-diagnostic-uncertainty-preservation-in-clinical-text)  
+1. [Uncertainty Decomposition for Clarification Seeking in LLM Agents](/202606/25/2606.19559v1-uncertainty-decomposition-for-clarification-seeking-in-llm-agents)  
    标签：评分：7.0/10、query:luq
-   evidence：针对LLM诊断不确定性保留的基准
-2. [Right Knowledge, Wrong Answer: Test-Time Steering for Temporal Fact Conflicts in Open-Weight Language Models](/202606/24/2606.20959v1-right-knowledge-wrong-answer-test-time-steering-for-temporal-fact-conflicts-in-open-weight-language-models)  
-   标签：评分：6.0/10、query:dg
-   evidence：时间吸引子引导（TAS）在测试时将隐藏状态引导至新事实表示
-3. [Deeper is Not Always Better: Mitigating the Alignment Tax via Confident Layer Decoding](/202606/24/2606.21906v1-deeper-is-not-always-better-mitigating-the-alignment-tax-via-confident-layer-decoding)  
+   evidence：提出基于提示的不确定性分解用于大语言模型代理
+2. [Detect, Unlearn, Restore: Defending Text Summarization Models Against Data Poisoning](/202606/25/2606.26036v1-detect-unlearn-restore-defending-text-summarization-models-against-data-poisoning)  
+   标签：评分：7.0/10、query:smd
+   evidence：针对微调数据中毒的防御方法
+3. [Stealthy World Model Manipulation via Data Poisoning](/202606/25/2606.18697v1-stealthy-world-model-manipulation-via-data-poisoning)  
    标签：评分：6.0/10、query:smd
-   evidence：通过解码策略缓解对齐税
+   evidence：对微调轨迹的数据投毒，与有害微调攻击相关
+4. [Yuvion VL: A Multimodal Foundation Model for Adversarial Content and AI Safety](/202606/25/2606.25034v1-yuvion-vl-a-multimodal-foundation-model-for-adversarial-content-and-ai-safety)  
+   标签：评分：6.0/10、query:dg
+   evidence：为对抗内容和AI安全设计的合成安全数据管道
 
 
 <div class="dpr-home-promo-card">
