@@ -6,38 +6,32 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-25
-- 运行时间：2026-06-25 20:53:25 UTC
+- 最新运行日期：2026-06-26
+- 运行时间：2026-06-26 22:08:52 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：2
-- 速读区：4
+- 本次总论文数：4
+- 精读区：1
+- 速读区：3
 
 ### 今日简报（AI）
-今日共6篇推荐，精读2篇、速读4篇，重点关注大语言模型安全对齐与数据去污染。最值得精读的是《PolicyAlign》（9.0分）提出的基于策略的直接安全对齐方法，以及《Uncertainty-based Debiasing》（8.0分）的不确定性去偏技术。建议优先阅读这两篇精读文章，把握LLM安全与鲁棒性前沿。
-- 详情：[/202606/25/README](/202606/25/README)
+今日精读可扩展近似与鲁棒不确定性量化，速读微调漏洞、意图感知训练和不确定性审计三项研究。最值得关注《Ribbon》的近似方法与《Inherited Circuits》揭示的微调评估盲点。下一步建议探索意图感知训练与自适应不确定性细化在LLM安全中的结合。
+- 详情：[/202606/26/README](/202606/26/README)
 
 ### 精读区论文标签
-1. [PolicyAlign: Direct Policy-Based Safety Alignment for Large Language Models](/202606/25/2606.25442v1-policyalign-direct-policy-based-safety-alignment-for-large-language-models)  
-   标签：评分：9.0/10、query:dg
-   evidence：合成违反策略的指令用于安全对齐
-2. [Uncertainty-based Debiasing and Unlearning for Decontamination](/202606/25/2606.23313v1-uncertainty-based-debiasing-and-unlearning-for-decontamination)  
-   标签：评分：8.0/10、query:luq
-   evidence：提出基于不确定性的去污染方法，利用不确定性量化评估LLM
+1. [Ribbon: Scalable Approximation and Robust Uncertainty Quantification](/202606/26/2606.27269v1-ribbon-scalable-approximation-and-robust-uncertainty-quantification)  
+   标签：评分：8.0/10、query:uq-safety
+   evidence：可扩展的狄利克雷重加权自助法不确定性量化近似
 
 ### 速读区论文标签
-1. [Uncertainty Decomposition for Clarification Seeking in LLM Agents](/202606/25/2606.19559v1-uncertainty-decomposition-for-clarification-seeking-in-llm-agents)  
-   标签：评分：7.0/10、query:luq
-   evidence：提出基于提示的不确定性分解用于大语言模型代理
-2. [Detect, Unlearn, Restore: Defending Text Summarization Models Against Data Poisoning](/202606/25/2606.26036v1-detect-unlearn-restore-defending-text-summarization-models-against-data-poisoning)  
+1. [Inherited Circuits, Learned Semantics: How Fine-Tuning Creates Evasion Vulnerabilities Invisible to Standard Evaluation](/202606/26/2606.27091v1-inherited-circuits-learned-semantics-how-fine-tuning-creates-evasion-vulnerabilities-invisible-to-standard-evaluation)  
    标签：评分：7.0/10、query:smd
-   evidence：针对微调数据中毒的防御方法
-3. [Stealthy World Model Manipulation via Data Poisoning](/202606/25/2606.18697v1-stealthy-world-model-manipulation-via-data-poisoning)  
-   标签：评分：6.0/10、query:smd
-   evidence：对微调轨迹的数据投毒，与有害微调攻击相关
-4. [Yuvion VL: A Multimodal Foundation Model for Adversarial Content and AI Safety](/202606/25/2606.25034v1-yuvion-vl-a-multimodal-foundation-model-for-adversarial-content-and-ai-safety)  
-   标签：评分：6.0/10、query:dg
-   evidence：为对抗内容和AI安全设计的合成安全数据管道
+   evidence：展示微调产生规避漏洞，为防御有害微调攻击提供启示
+2. [Paved with True Intents: Intent-Aware Training Improves LLM Safety Classification Across Training Regimes](/202606/26/2606.27210v1-paved-with-true-intents-intent-aware-training-improves-llm-safety-classification-across-training-regimes)  
+   标签：评分：7.0/10、query:smd
+   evidence：引入带意图标注的安全提示数据集AIMS，用于训练安全分类器
+3. [AURA: Adaptive Uncertainty-aware Refinement for LLM-as-a-Judge Auditing](/202606/26/2606.19714v1-aura-adaptive-uncertainty-aware-refinement-for-llm-as-a-judge-auditing)  
+   标签：评分：6.0/10、query:luq
+   evidence：利用不确定性感知的LLM裁判审计
 
 
 <div class="dpr-home-promo-card">
