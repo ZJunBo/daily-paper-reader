@@ -1,0 +1,923 @@
+Title: Bayesian control for coding agents
+
+URL Source: https://arxiv.org/pdf/2606.24453v1
+
+Published Time: Wed, 24 Jun 2026 01:02:32 GMT
+
+Number of Pages: 38
+
+Markdown Content:
+# Bayesian Control for Coding Agents 
+
+Theodore Papamarkou 1,2 ♢ Vladislav Smirnov 3 ♢ Viktor Mazanov 3 ♢ Artem Vazhentsev 3
+
+Preslav Nakov 3 Timothy Baldwin 3 Artem Shelmanov 31PolyShape 2National Technical University of Athens 3MBZUAI 
+
+> ♢
+
+Equal contribution 
+
+Abstract 
+
+Modern coding agents pair LLM generators with various tools, including cheap diagnos-tics and expensive verifiers. The tool-use deci-sions are typically governed by orchestrators that often use fixed rules and ignore uncertainty. We formulate orchestration as cost-sensitive se-quential hypothesis testing: a Bayesian con-troller maintains a belief over candidate cor-rectness and dynamically decides whether to gather more evidence, refine the candidate, ver-ify it, or stop. Across six generators and nine coding benchmarks, Bayesian control proves to be most valuable when verification is costly and critics are informative but imperfect. Be-yond control, the belief state yields an inter-pretable correctness score that outperforms token-probability and raw tool-success base-lines for uncertainty quantification. 
+
+1 Introduction 
+
+Large Language Models (LLMs) are increasingly capable of generating sophisticated code, but their practical impact is most fully realized through cod-ing agents that orchestrate generation, diagnosis, re-finement, and verification. A modern coding-agent harness typically wraps an LLM-based generator with auxiliary tools, such as syntax checkers, public tests, LLM-based reviewers, refinement prompts, and a high-fidelity verifier, also known as an oracle, that approximates or establishes ground truth (Yang et al., 2024; Wang et al., 2025). Because these tools vary in cost and reliability, the central engineering problem is to produce correct code while efficiently allocating limited resources by strategically decid-ing when to refine, discard, or verify a candidate solution. Many existing orchestration policies address this problem using fixed rules, such as always verifying, best-of-N sampling, single-critic gates, or predefined generate–critique–regenerate–verify loops (Inala et al., 2022; Li et al., 2022; Chen et al., 
+
+Figure 1: Illustration of the Bayesian control loop. 
+
+2023; Huang et al., 2023). Although such policies can be competitive, they do not maintain a posterior over candidate correctness or explicitly weigh the value of critic calls against their cost. As a result, they are not designed to adapt stopping decisions to prior task difficulty, critic reliability, generator repair probability, or verifier cost. In this work, following Papamarkou et al. (2026), we study code-generation control as a Bayesian decision problem. The latent state is candidate cor-rectness, Y ∈ { 0, 1}. The controller maintains a belief b = P (Y = 1 | evidence ) over whether the current candidate will pass the verifier. Critic calls are treated as noisy observations, generator calls as stochastic transitions that may fix or break a can-didate, and verifier calls as costly terminal actions. The objective is expected utility, that is, reward for a correct solution minus the accumulated costs of generation, criticism, refinement, and verification. This yields a sequential hypothesis-testing prob-lem that can be encoded as a Partially Observable Markov Decision Process (POMDP) (Kaelbling et al., 1998), whose Bellman equation expresses the value of information. Figure 1 illustrates our Bayesian control loop. We implement this idea with two controllers derived from the Bellman equation. The first is a one-step Bayesian greedy controller that uses 1
+
+> arXiv:2606.24453v1 [cs.AI] 23 Jun 2026
+
+critic likelihoods to decide whether to call another critic, verify, regenerate, or stop. The second is a finite-horizon Bayesian dynamic-programming (DP) controller that performs backward induction and uses a measured generator transition kernel, 
+
+ˆP (fix | broken ) and ˆP (break | correct ), estimated from iterative refinement trajectories. Both con-trollers operate on top of frozen LLMs: the base generators are not trained, and the optimization problem is entirely at the control layer. We ask a series of empirical questions: when does a Bayesian belief-state controller improve cost-adjusted code generation; when does a simple heuristic suffice; and when is verification so cheap or the prior probability of success so high that no orchestration is needed? We evaluate six generators across nine coding benchmarks and compare policies in terms of ex-pected utility under varying cost–reward trade-offs. The results show that Bayesian control is most use-ful in low-prior regimes with informative but im-perfect critics, while simple public test gating or always-verifying policies are preferable when pub-lic tests are highly predictive of hidden-test success, candidate patches are already likely to be correct, or verification is cheap. Dynamic programming adds value only when measured repair transitions make multi-step refinement worthwhile. Our empir-ical study supports these conclusions through out-of-sample validation, comparisons with stronger refinement baselines, and negative results that iden-tify when naive Bayesian variants fail. 
+
+The contributions of this paper are as follows. (1) We formulate code-generation control as a cost-sensitive sequential hypothesis-testing prob-lem over candidate correctness. (2) We derive two Bayesian belief-state controllers from the Bell-man equation, namely a one-step greedy controller and a finite-horizon dynamic-programming con-troller. (3) Experiments across diverse generators and benchmarks reveal three regimes governing which orchestration strategy dominates and clarify when DP planning beats the greedy policy. (4) We further show that the posterior beliefs induced by our hypothesis-testing framework serve as effective uncertainty scores for the coding agent that could be used to detect low-quality agent outputs. 
+
+2 Related Work 
+
+Bayesian decision theory. Our approach uses sequential analysis and the value of information. Wald (1947) studied sequential tests that trade error against sampling cost, while Howard (1966) for-malized the economic value of evidence. POMDPs generalize this logic to control under latent state uncertainty (Kaelbling et al., 1998). The recent work of Papamarkou et al. (2026) argues that the control layer of agentic AI should maintain beliefs over task-relevant latent quantities and act by utility. Our paper implements this idea for code generation. The latent variable is candidate correctness, the ob-servations are syntax checks, public tests, and LLM judges, the transitions are refinement steps, and the terminal action is an expensive verifier. 
+
+POMDP methods for LLM agents. Recent work has begun to use Bayesian information acqui-sition for LLM agents. Choudhury et al. (2026) use sequential Bayesian experimental design to choose questions that maximize expected informa-tion gain in multi-turn information gathering. Suri et al. (2025) model tool-argument clarification as structured uncertainty and use a POMDP to choose clarifying questions. These papers are close in spirit because they treat interaction as costly infor-mation acquisition. They differ from our setting in the latent state, action space, and empirical tar-get. We study code-generation control, where the agent must decide whether to buy more diagnostic evidence, refine a candidate, or pay for verification, and we evaluate utility across coding benchmarks rather than clarification success or information-gathering games. 
+
+Coding agents. A large line of work is devoted to coding agents. Generated tests and reranking have been used to select better candidates (Chen et al., 2023; Inala et al., 2022; Zhang et al., 2023). Iterative self-feedback and verbal memory methods refine model outputs over multiple turns (Madaan et al., 2023; Shinn et al., 2023). Multi-agent and tree-search systems such as AgentCoder and LATS introduce richer generate-test-refine or planning loops (Huang et al., 2023; Zhou et al., 2024). Repository-level agents such as SWE-agent and OpenHands focus on interfaces, sandboxed exe-cution, and autonomous tool use for realistic soft-ware engineering tasks (Yang et al., 2024; Wang et al., 2025). Our empirical setting follows estab-lished code-generation and program-repair bench-marks, including LiveCodeBench, SWE-Bench, EvalPlus, HumanEvalFix, and CodeContests (Jain et al., 2025; Jimenez et al., 2024; Liu et al., 2023; Muennighoff et al., 2024; Li et al., 2022). Together, these methods and benchmarks demon-2strate the value of external feedback, iterative con-trol, and agentic stopping policies, and they provide the experimental basis for our evaluation. The dis-tinguishing feature of our approach is that it quan-tifies the agent’s uncertainty as a posterior belief over candidate correctness. This posterior provides both a decision state for cost-aware control and an uncertainty score. As a result, our framework is complementary to existing agentic harnesses: their tool-use and stopping loops can be augmented with posterior beliefs rather than replaced. More-over, our characterization of cost-and-reliability regimes identifies when such beliefs improve over fixed workflows and when simpler policies are suf-ficient. 
+
+3 Task and Environment 
+
+We consider the problem of automated program synthesis under resource constraints. This section formalizes the task environment, the abstraction of computational agents, and the decision-theoretic objective that drives control. Let X denote the space of natural language speci-fications and C the space of executable programs. A task instance consists of a specification x ∈ X and an oracle verification function O : C ×X → { 0, 1},which returns 1 if and only if program c satisfies the requirements of x. Access to O is mediated by a verifier agent aver , hereafter called the ora-cle , whose invocation incurs a significant compu-tational or monetary cost Cver . For any candidate 
+
+ct, let Yt = O(ct, x ) ∈ { 0, 1} be its latent cor-rectness, indicating whether the candidate passes oracle verification ( Yt = 1 ) or not ( Yt = 0 ). To actively improve the candidate program, we can invoke an LLM Gθ with fixed parameters θ. We denote this generator agent by agen . At iteration 
+
+t, given a specification x and a current candidate 
+
+ct, the generator produces a new candidate ct+1 ∼
+
+Gθ(· | x, c t) at cost Cgen . The new candidate patch 
+
+ct+1 may improve the program, but it may also leave it unchanged or make it worse. We assume access to k critic agents 
+
+{a1crit , . . . , a k
+
+> crit
+
+} that inspect ct without modifying it. Critic i returns a cost-effective noisy diagnostic observation z(i) 
+
+> t
+
+∈ {pass , fail } with likelihood 
+
+Pi(z | Yt) and cost Ci
+
+> crit
+
+.A control policy π orchestrates the program gen-eration process with the goal of producing a pro-gram that satisfies x. It interacts with a set of agents 
+
+A = {agen , a ver , a 1crit , . . . , a k
+
+> crit
+
+} over discrete time steps t = 1 , . . . , T . At each step, the policy se-lects an agent at ∈ A based on the current history 
+
+Ht = ( x, c 1, a 1, o 1, . . . , a t−1, o t−1, c t), where ot
+
+denotes the observation returned by the selected agent. The quality of a policy is measured by its expected utility, defined as the value of the fi-nal outcome minus the accumulated agent costs. Formally, if an episode terminates at a step T
+
+with candidate cT , the expected utility is U (π) = 
+
+Eπ
+
+h
+
+R · YT − PTt=1 C(at)
+
+i
+
+, where R represents the reward for a correct solution ( YT = 1 ), and 
+
+C(at) is the cost of the selected agent: C(agen ) = 
+
+Cgen , C(ai
+
+> crit
+
+) = Ci
+
+> crit
+
+, and C(aver ) = Cver .Our goal is to derive a policy that maximizes this utility by estimating the action value (or Q-
+
+value ) of each agent, thus quantifying the trade-off between the cost of an action and its expected contribution to solving the task. 
+
+4 Bayesian Decision-Theoretic Control 
+
+General design of Bayesian control. We adopt Bayesian decision theory through a POMDP ab-straction. At time step t, the controller holds a can-didate program ct and a belief state bt = P (Yt =1 | H t) over its correctness, and selects actions by trading off the cost of information, improve-ment and verification. The belief update process constitutes a sequential hypothesis test, iteratively accumulating evidence to decide between the null hypothesis Yt = 0 and the alternative Yt = 1 .If at = agen , the belief is pushed through a tran-sition kernel T (bt), which accounts for the prob-ability that the generator introduces a bug into a correct program or fixes an incorrect one, 
+
+T =
+
+P (Yt+1 = 0 | Yt = 0) P (Yt+1 = 1 | Yt = 0)            
+
+> P(Yt+1 = 0 |Yt= 1) P(Yt+1 = 1 |Yt= 1)
+
+
+
+,
+
+parameterized by the empirical fix probability 
+
+p01 = P (Yt+1 = 1 | Yt = 0) and break proba-bility p10 = P (Yt+1 = 0 | Yt = 1) . Thus, after invoking the generator, the controller propagates its belief as bt+1 = bt(1 − p10 ) + (1 − bt)p01 .If at = ai 
+
+> crit
+
+and z(i) 
+
+> t
+
+= z, the belief is updated via Bayes’ rule:                       
+
+> bt+1 =P(Yt= 1 | H t, z (i)
+> t=z)=Pi(z|Yt= 1) bt
+> Pi(z|Yt= 1) bt+Pi(z|Yt= 0)(1 −bt).
+
+Critic i reduces uncertainty about Yt. This interac-tion constitutes an information purchase; the con-troller pays a low cost Ci 
+
+> crit
+
+to acquire evidence before committing to refinement or verification. 3The controller can submit the candidate to the oracle to resolve the episode. In this case, the controller receives the definitive outcome Yt =
+
+O(ct, x ). While this interaction provides perfect information and determines the reward R, it incurs the highest cost Cver .
+
+Control via value of information. The controller implements a policy π that maps the current belief state to an agent selection, 
+
+π(bt) ∈ A, with the goal of maximizing ex-pected future utility. We write the value func-tion as V (bt); in finite-horizon implementations, the state also includes the remaining budget and which critics have already been queried. The Bellman optimality equation is V (bt) =max Qgen (bt), max i Qi
+
+> crit
+
+(bt), Q ver (bt) , where the action values for the generator, critic, and veri-fier are defined, respectively, as 
+
+Qgen (bt) = E[V (bt+1 ) | bt, a gen ] − Cgen ,Qi
+
+> crit
+
+(bt) = Ez [V (bt+1 ) | bt, a i
+
+> crit
+
+] − Ci
+
+> crit
+
+,Qver (bt) = btR − Cver .Qgen represents the expected long-term value of improving the candidate program via the generator agent. Qi 
+
+> crit
+
+captures the expected value of acquir-ing information from critic i. Qver represents the immediate expected utility of stopping through or-acle verification. To compute the optimal policy, we solve this Bellman recursion by finite-horizon dynamic programming over the belief state. 
+
+Optimal control vs heuristics. Orchestration heuristics, such as thresholding a confidence score, collapse the decision problem into a scalar bound-ary. This can be insufficient because the optimal policy depends on the posterior probability of cor-rectness, action-specific likelihoods, costs, remain-ing budget, and which information sources have been consumed. For example, a low-confidence candidate before any critic has been queried may have high information value, making a critic call preferable to refinement. A low-confidence candi-date after a failed public test may have little remain-ing diagnostic value, making refinement prefer-able. A static threshold can treat these cases identi-cally, whereas the Bellman update separates them through the Q-values of the generator, critic, and verifier actions. 
+
+Estimating critic likelihoods. For each critic 
+
+i, we estimate the conditional distributions (critic likelihoods) Pi(z | Y = 1) and Pi(z | Y = 0) on a held-out calibration set of programs with oracle-labeled outcomes, using add-one smoothing under a beta-binomial model. 
+
+Estimating transition probabilities. We esti-mate the transition probabilities p01 and p10 in the transition matrix T from refinement trajectories with oracle labels at consecutive steps, aggregat-ing observed (Yt, Y t+1 ) pairs and applying beta-binomial smoothing. These counts come from a held-out iterative-refinement corpus, as detailed in Section 5. 
+
+5 Experimental Setup 
+
+We investigate the conditions under which the Bayesian controller outperforms heuristic baselines and its failure modes. Additional setup details are provided in Appendix A. 
+
+5.1 Benchmarks and Generators Benchmarks. We experiment with nine bench-marks spanning three task families (Table 3). The 
+
+function-level synthesis benchmarks are LCB at three difficulty tiers, covering LeetCode prob-lems from releases v1 through v6, MBPP+ (Liu et al., 2023), and HumanEval+ (Liu et al., 2023). The repository-level patch-generation benchmarks 
+
+are SWE-Bench Lite and SWE-Bench Veri-fied (Jimenez et al., 2024). The bug-fixing bench-marks are HumanEvalFix (Muennighoff et al., 2024) and CodeContests (Li et al., 2022). 
+
+Generators. We test six LLMs across two ac-cess modes (Table 2), with 7–200B effective pa-rameters. For each generator-benchmark cell, the generator’s single-shot pass rate defines the initial prior pass probability b0 = P (Y0=1) , the probabil-ity that a fresh candidate passes the oracle verifier before any critic evidence is observed. Across cells, 
+
+b0 ranges from 0.05 to 0.96 (Table 5). 
+
+5.2 Critics and Oracle Verifier 
+
+The oracle verifier represents an expensive-to-run test suite that deterministically checks the correct-ness of the solution. For LCB, it is a full hidden test suite; for SWE-Bench, it is a Podman-based harness; and for MBPP+/HumanEval+, it is repre-sented by assert-based unit tests. Critics provide lightweight but noisy evidence. The syntax critic Cr syn runs ast.parse on each modified file and is essentially free in wall time. The test critic Cr test runs public tests, using Live-CodeBench public examples (and the analogous public tests for MBPP+, HumanEval+, HumanEval-Fix, and CodeContests). It serves as the main critic 4signal on these benchmarks. SWE-Bench has no public-test split distinct from the oracle verifier, so Cr test is undefined for SWE-Bench. The LLM critic Cr llm uses a separate small model, Claude Haiku-4.5 by default, prompted with the output of the diff command and the problem statement to return a one-token PASS/FAIL judgment. In Ap-pendix A.3 (Table 6, Fig. 5), we report the per-critic informativeness measured as γi = Pi(z=pass |
+
+Y =1) − Pi(z=pass | Y =0) across the full panel: 
+
+γi ≈ 0 means the critic carries no useful signal, while |γi| → 1 means it is highly informative; val-ues near 1 indicate near-oracle alignment with cor-rectness, and values near −1 indicate an inverted signal. 
+
+Critic and oracle verifier cost vectors are deployment-specific hyperparameters. To obtain the cost vectors used in our experiments, we collect telemetry from a representative deployment. We measure generation cost, critic costs, and oracle verifier cost. For each action, we log wall-clock latency, token usage, and API cost. We use wall-clock latency as the primary proxy cost metric be-cause it best captures the operational bottlenecks that matter in practice, including local process over-head, CI waiting time, container execution, and external API latency. Details on measurements and the exact vectors are given in Table 4. We report experimental results under two cost regimes that span the typical oracle/critic ratio space. The “slow oracle, fast critics” regime sets 
+
+Cver =90 , Csyn crit =1 for the syntax critic, Ctest crit =2 
+
+for the public-test critic, Cllm crit =5 for the LLM critic, Cgen =10 (e.g., a CI pipeline with frontier LLM judges). The “fast oracle, balanced crit-ics” regime sets Cver =5 , Csyn crit =Ctest crit =Cllm crit =1 ,
+
+Cgen =10 (e.g., a unit-test loop where verification is cheap). The fast-oracle regime represents bug-fixing settings such as HumanEvalFix and Code-Contests, where verification is relatively cheap and generation is the dominant costly action. The slow-oracle regime represents SWE-Bench-like deploy-ments, where full verification is a major bottleneck and critic gating has higher value. We set R=100 
+
+as a utility normalization rather than a measured latency. One verified correct solution is worth 100 utility units, which makes Cver /R the posterior suc-cess threshold at which verification becomes cost-neutral, and we report R-Cver sweeps to check that the qualitative regimes are not tied to this single scale choice. 
+
+5.3 Baseline Policies 
+
+We compare the Bayesian controllers against eight baseline policies grouped into two families. The stateless baselines operate over the same action space {Cr syn , Cr test , Cr llm , verify , regen , stop },while the iterative-refinement baselines use the same verifier and refinement budget but follow their published update rules. 
+
+Stateless per-patch baselines take action on each patch in isolation, with no belief state car-ried across actions. always_verify skips ev-ery critic and calls the oracle verifier on every patch. best_of_N generates N =3 independent patches, runs the oracle on each, and returns the best, paying 3Cgen + 3 Cver per instance. It iso-lates pure generator-diversity gains without critic assessment. The gate_ Cr i, i ∈ { syn , test , llm }
+
+baselines run critic Cr i once and call the oracle only if it returns PASS; otherwise, request regener-ation. fixed_pipeline runs all critics in the order Cr syn → Cr test → Cr llm and verifies only if every critic returns PASS, testing the simple strategy of stacking all critics together with an AND gate. 
+
+Iterative-refinement baselines. We compare against the Self-Refine (Madaan et al., 2023) and 
+
+Reflexion (Shinn et al., 2023) coding-agent base-lines. Both are run with up to four refinement steps per instance and the same verifier budget as the Bayesian controllers, and neither uses policy re-plays on our calibration trajectories. After each failed verification, Self-Refine prompts the gener-ator to critique its own patch and regenerate, stop-ping when the verifier returns PASS or the refine-ment budget is exhausted. Reflexion extends Self-Refine with a verbal-memory buffer of past failures that is fed back into the regeneration prompt. 
+
+5.4 Details of Bayesian Belief-State Policies Bayesian controllers. Our framework derives two controllers from the Bellman equation of the POMDP (see also Section 4). Both maintain a pos-terior b = P (Y =1 | evidence ) and select actions to maximize expected utility. The bayesian_greedy controller performs one-step lookahead. At each decision point, with cur-rent candidate ct and belief bt, it evaluates each action’s immediate Q-value under the assumption that the next move is verify , and selects the action with largest value. When computing the value of a generator call, the controller treats the resulting patch as a fresh sample and resets its belief to the 5prior pass rate b0 = P (Y0=1) , rather than prop-agating the current belief through the measured fix/break probabilities. As a result, it cannot value multi-step refinement chains. The bayesian_DP controller performs finite-horizon backward induction over states (b, h ),where b is the posterior probability of correctness and h ∈ { 0, . . . , H } is the remaining planning depth. We discretize the belief interval to a uni-form 51-point grid and solve the Bellman recursion backward over horizon H=3 , using the empiri-cally estimated transition kernel ˆP (fix | broken )
+
+and ˆP (break | correct ) for the regeneration branch. The kernel propagates beliefs across regenerations, allowing DP to value multi-step critic-refine-verify chains that the greedy controller cannot see. 
+
+Estimating the parameters of Bayesian con-trol policies. We estimate the quantities required by the Bayesian controllers from held-out calibra-tion data (split 75% for training, 25% for testing), namely the initial belief b0 = P (Y0=1) , also called the prior pass probability (Table 5), the critic likeli-hoods, and the refinement-transition probabilities 
+
+ˆP (fix | broken ) and ˆP (break | correct ).Single-shot calibration draws m=3 independent patches per instance and runs the full critic stack, followed by the oracle verifier. From the resulting per-patch records, we estimate the prior pass proba-bility b0 = P (Y0=1) , which is the probability that a fresh patch is correct before observing critic out-puts, and the critic likelihoods Pi(z=pass | Y0=y).For each critic i and oracle label y ∈ { 0, 1}, we estimate the time-homogeneous critic likelihood 
+
+ˆPi(z = pass | Yt=y) as the empirical fraction of patches with label y on which critic i returns PASS, with one pseudo-PASS and one pseudo-FAIL added for smoothing: 
+
+ˆPi(z = pass | Yt=y) = npass  
+
+> y,i
+
++ 1 
+
+ny,i + 2 .
+
+Here, npass  
+
+> y,i
+
+is the number of calibration patches with the oracle label y on which the critic i returns PASS, and ny,i is the total number of calibration patches with the oracle label y assessed by the critic 
+
+i. We use the same critic likelihood model at each decision step. Transition probabilities are estimated from consecutive parent-child generation pairs in the iterative-refinement corpus, using smoothing: 
+
+ˆp01 = n0→1 + 1 
+
+nfrom 0 + 2 , ˆp10 = n1→0 + 1 
+
+nfrom 1 + 2 .
+
+5.5 Evaluation Metric 
+
+For each generator/benchmark/cost-vector triple, we evaluate the ten policies above on the same instance cohort and patches, yielding a vector of mean utilities ¯Uπ. The headline metric is ∆π =¯Uπ − ¯Ualways_verify , the per-instance utility gap against the reference policy. Thus, ∆π > 0 beats the “oracle on every patch” default, ∆π = 0 ties, and ∆π < 0 underperforms. Paired 95% boot-strap CIs on ∆π are used to identify the winning policies. 
+
+6 Results 
+
+We organize the results around three questions: 
+
+where in the (P (Y =1) , C ver /R ) plane each policy dominates (§6.1); which policy wins on held-out eval splits when all baselines – including the pub-lished refinement agents Self-Refine (Madaan et al., 2023) and Reflexion (Shinn et al., 2023) – are eval-uated head-to-head (§6.2); and what signal makes the controller’s choice rational (§6.3). We then sweep the cost vector (§6.4) and discuss how our framework enables better uncertainty quantification for agents (§6.5). 
+
+6.1 Regimes of Control Policy Prevalence Based on Priors and Cost-Reward Ratios 
+
+Figure 2 aggregates 7,020 sample points pooled across all (benchmark, generator) pairs and the full 
+
+(R, C ver ) sweep grid into a single empirical deci-sion map (grid resolution in Appendix A.4). The plot indicates which policy wins at each coordinate in the (P (Y =1) , C ver /R ) plane. Three regimes emerge, each driven by a distinct mechanism that ties back to the per-cell prior (Table 5) and per-critic informativeness (Table 6). 
+
+Regime A: Bayesian wins (green, 
+
+Cver /R ≳ 1). When verification is at least as ex-pensive as the reward, paying Cver on every patch is structurally unprofitable. The Bayesian policies maintain a posterior P (Y =1 | z(1) , . . . , z (k)) over the critics and verify only when the expected value of information exceeds Cver . bayesian_DP 
+
+also pulls measurably ahead of the myopic 
+
+bayesian_greedy : when each round of verifica-tion is unaffordable, planning multiple steps ahead over the transition kernel lets the controller defer verification across refinement rounds until the posterior is sharp enough to commit. 
+
+Regime B: gate( Cr test ) draws (blue wedge, 
+
+10 −1 ≲ Cver /R ≲ 1). At moderate verification 6Figure 2: Empirical decision regions over the                
+
+> (P(Y=1) , C ver /R )plane: k-NN ( k=300 ) over 7,020 sweep points. Colors: A(green) Bayesian; B
+> (blue) gate(Cr test );C(yellow) always_verify ;other
+> (coral). See §6.1 for the full regime description.
+
+cost, the optimal Bayes decision often is a gate on the public-test critic. On cells where Cr test is highly informative ( γtest ≳ 0.7 on LCB and on most Hu-manEvalFix and CodeContests cells; γtest ≳ 0.9 on LCB-easy specifically, Table 6; SWE-Bench has no public-test critic distinct from the oracle and is excluded), a single PASS observation moves the posterior past the verification threshold by itself, so adding Cr syn or Cr llm to the update rarely changes the decision Cr test already implies. The Bayesian controllers and gate (Cr test ) make the same deci-sion in most instances, but the gate baseline ties or marginally wins from the absence of inference over-head. The wedge narrows on cells where the pub-lic test is a weaker signal (MBPP+, HumanEval+: 
+
+γtest ∈ [0 .07 , 0.75] ). 
+
+Regime C: always_verify wins (yellow, 
+
+Cver /R ≲ 10 −1). When verification is essentially free, the cost of running any critic – let alone of a Bayesian update – approaches or exceeds Cver 
+
+itself, so blind verification dominates. Two pock-ets appear. The bottom-right (high prior, low cost) covers cells where the step-0 prior is already above the indifference threshold – almost every patch passes and always_verify simply collects the re-ward without paying for information it does not need. The bottom-left (low prior, low cost) covers cells where most patches fail; the few passes are cheap to harvest by verifying everything, and any critic-based skip risks dropping a true pass for a     
+
+> Figure 3: Per-policy ∆utility against always_verify
+> on SWE-Bench Lite / claude-haiku-4.5 . Gold stars mark per-cell winners; numbers above bars are abso-lute mean utility; error bars are paired-bootstrap 95% CIs ( B=1000 ). Discussion in §6.2; per-cell evaluation-set bars across all (benchmark, generator) pairs in Appendix D.1; full train-vs-evaluation panel in Ap-pendix D.2.
+
+saving that does not justify the loss. 
+
+6.2 Policy Comparison 
+
+Figure 3 presents a representative experiment comparing all policies on SWE-Bench Lite with 
+
+claude-haiku-4.5 . SWE-Bench Lite uses the slow oracle (Cver =90 ), so its cells fall into regime A of Figure 2, where the framework predicts that the Bayesian variants win. The two Bayesian variants are effectively tied for the best performance: bayesian_greedy and 
+
+bayesian_DP both substantially improve over 
+
+always_verify . Among the remaining baselines, the syntax gate gate(Cr syn ) is the strongest but still well below the Bayesian controllers; the LLM-judge gate gate(Cr llm ) and fixed_pipeline im-prove over always_verify by smaller margins. The public-test gate gate(Cr test ) is omitted on SWE-Bench because there is no public-test critic distinct from the oracle verifier (see §5.2). The refinement baselines SR and Reflexion, together with best_of_3 , underperform always_verify in this setting. Detailed results for each dataset and generator are presented in Table 7 in Appendix B. 
+
+6.3 Critic Informativeness 
+
+Bayesian controllers are effective only to the extent that the underlying critic likelihoods provide use-ful evidence (the critic informativeness is reported in Appendix A.3). They are particularly valuable when this evidence is distributed across multiple imperfect critics rather than relying on a single near-oracle critic. By combining several moder-ately informative signals, the Bayesian update cre-7Method LCB-Medium LCB-Hard Avg                 
+
+> Perplexity .156 .578 .367 Seq. Prob. .789 .814 .801 Tool Success Rate .842 .747 .795 Bayes Belief State .820 .911 .866
+> Table 1: PRR ↑of uncertainty quantification methods before the final verification step on LCB-Medium and LCB-Hard, using the SAGE agent (Suri et al., 2025) with gpt-oss-20b . The Avg column reports the average score across the two subsets.
+
+ates a sharper, more accurate posterior belief than any individual critic could provide on its own. This is achieved because the controllers automatically weight each critic according to its likelihood gap, denoted as γi. Consequently, low-gap critics have very little effect on the update; in many function-level synthesis cells, this includes the syntax critic (Cr syn ). In contrast, informative and complemen-tary critics, such as the public-test critic ( Cr test ), are weighted heavily and meaningfully improve the belief state. Ultimately, this automatic weight-ing and aggregation of imperfect signals directly explain the performance gains observed with the 
+
+bayesian_greedy and bayesian_DP controllers in Regime A. 
+
+6.4 Cost-Regime and Parameter Sensitivity 
+
+Figure 4 sweeps Cver ∈ [1 , 100] on MBPP+ / claude-haiku-4.5 at fixed R=100 , with the other costs held at their default values. The sweep traverses all three regimes within a single cell, illustrating the C → B → A handoff: at low 
+
+Cver , always_verify wins because the prior is high enough that blind verification has a positive expected value; at moderate Cver , gate(Cr test )
+
+exploits the public-test critic; at high Cver , the Bayesian variants take over because the gate pol-icy is forced to refuse too many uncertain patches. The per-benchmark/per-generator Cver sweeps cov-ering all 54 (benchmark, model) pairs are in Ap-pendix D.3. 
+
+6.5 Uncertainty for Coding Agents 
+
+Beyond using Bayesian controllers to optimize ex-pected utility, we investigate whether the belief state can quantify uncertainty for state-of-the-art LLM-based controllers (see details in Appendix C). In this experiment, we use a SAGE agent (Suri et al., 2025) with gpt-oss-20b . The Bayesian model is used only post hoc to aggregate the critic and verifier feedback into a belief that the code                          
+
+> Figure 4: Per-policy ∆utility relative to
+> always_verify on MBPP+ / claude-haiku-4.5 as a function of verifier cost Cver (Csyn crit =1 ,Ctest crit =2 ,
+> Cllm crit =5 ,Cgen =10 ,R=100 fixed). Shaded regions mark the empirically dominant policy in each verifier-cost sub-range; gray: always_verify / near-tied region at low verifier cost; green: gate(Cr test ); blue: Bayesian. Dotted verticals mark empirical leader-change boundaries obtained from intersections of the plotted ∆segments; their locations are benchmark- and model-dependent. Per-benchmark and per-(benchmark, generator) panels in Appendix D.3.
+
+is correct before the final oracle verification out-come is observed. Table 1 reports results on LCB-Medium and LCB-Hard. On average, the Bayesian belief state achieves the best performance in rank-ing incorrect code generations compared to token-probability uncertainty baselines and a raw tool success rate baseline that simply averages observed tool outcomes. This suggests that a belief state ob-tained using Bayesian aggregation of the critic and non-final verifier observations can provide a useful uncertainty score even for coding agents controlled by an LLM. 
+
+7 Conclusion 
+
+We formulated LLM-based code-generation orches-tration as a cost-sensitive sequential hypothesis test-ing problem, where the controller maintains a pos-terior belief over candidate correctness and uses it to choose between criticism, refinement, verifica-tion, and stopping. Our experiments reveal three regimes. (A) Bayesian controllers work best when verification is expensive and critics are informative but imperfect, because they can aggregate multiple noisy signals and downweight weak critics. (B) A simple public-test gate is sufficient when the public-test critic is already near-oracle, leaving little ben-efit for more complex Bayesian aggregation. (C) 8Unconditional verification dominates when verifi-cation is cheap or the generator’s prior probability of correctness is high, since gathering additional information is then not worth the cost. This helps identify when Bayesian control is useful and when simpler orchestration policies are sufficient. Beyond control, our results suggest that the be-lief can be used as an interpretable uncertainty score to identify whether the generated code is cor-rect. This makes the proposed Bayesian framework complementary to existing coding agents: it can be used either to control the agentic loop directly or to provide uncertainty scores for trajectories produced by external controllers. Investigating this research direction more systematically is an important direc-tion for future work. 
+
+Limitations 
+
+The benchmarks used in our evaluation primarily focus on Python, since most widely used datasets and benchmarks are Python-based. However, be-cause modern LLMs have broad reasoning capabil-ities across code, we are confident that our findings generalize well to other programming languages. These benchmarks also contain a limited number of instances. Still, our experiments cover six models and nine datasets, which supports the robustness of our findings. Finally, different prompts or judge models may affect the results of the LLM-based critic. However, we use a standard prompt and a modern default model, which helps support the reliability of our findings. We focus only on coding-agents and code generation; however, the proposed framework could be utilized in any agentic work-flow with orchestration. 
+
+References 
+
+Bei Chen, Fengji Zhang, Anh Nguyen, Daoguang Zan, Zeqi Lin, Jian-Guang Lou, and Weizhu Chen. 2023. CodeT: Code generation with generated tests. In In-ternational Conference on Learning Representations (ICLR) .Deepro Choudhury, Sinead Williamson, Adam Goli´ nski, Ning Miao, Freddie Bickford Smith, Michael Kirch-hof, Yizhe Zhang, and Tom Rainforth. 2026. BED-LLM: Intelligent information gathering with LLMs and Bayesian experimental design. In International Conference on Learning Representations (ICLR) .Marina Fomicheva, Shuo Sun, Lisa Yankovskaya, Frédéric Blain, Francisco Guzmán, Mark Fishel, Nikolaos Aletras, Vishrav Chaudhary, and Lucia Spe-cia. 2020. Unsupervised quality estimation for neural machine translation. Transactions of the Association for Computational Linguistics , 8:539–555. Ronald A. Howard. 1966. Information value theory. 
+
+IEEE Transactions on Systems Science and Cyber-netics , 2(1):22–26. Dong Huang, Jie M. Zhang, Michael Luck, Qingwen Bu, Yuhao Qing, and Heming Cui. 2023. Agent-Coder: Multi-agent-based code generation with it-erative testing and optimisation. arXiv preprint arXiv:2312.13010 .Jeevana Priya Inala, Chenglong Wang, Mei Yang, An-dres Codas, Mark Encarnación, Shuvendu K. Lahiri, Madanlal Musuvathi, and Jianfeng Gao. 2022. Fault-aware neural code rankers. In Advances in Neural Information Processing Systems (NeurIPS) .Naman Jain, King Han, Alex Gu, Wen-Ding Li, Fanjia Yan, Tianjun Zhang, Sida Wang, Armando Solar-Lezama, Koushik Sen, and Ion Stoica. 2025. Live-CodeBench: Holistic and contamination free evalua-tion of large language models for code. In The Thir-teenth International Conference on Learning Repre-sentations (ICLR) .Carlos E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R. Narasimhan. 2024. SWE-bench: Can language mod-els resolve real-world Github issues? In Inter-national Conference on Learning Representations (ICLR) .Leslie Pack Kaelbling, Michael L. Littman, and An-thony R. Cassandra. 1998. Planning and acting in partially observable stochastic domains. Artificial Intelligence , 101(1–2):99–134. Yujia Li, David Choi, Junyoung Chung, Nate Kush-man, Julian Schrittwieser, Rémi Leblond, Tom Eccles, James Keeling, Felix Gimeno, Agustin Dal Lago, Thomas Hubert, Peter Choy, Cyprien de Masson d’Autume, Igor Babuschkin, Xinyun Chen, Po-Sen Huang, Johannes Welbl, Sven Gowal, Alexey Cherepanov, and 7 others. 2022. Competition-level code generation with AlphaCode. Science ,378(6624):1092–1097. Jiawei Liu, Chunqiu Steven Xia, Yuyao Wang, and Ling-ming Zhang. 2023. Is your code generated by Chat-GPT really correct? rigorous evaluation of large lan-guage models for code generation. In International Conference on Neural Information Processing Sys-tems (NeurIPS) .Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon, Nouha Dziri, Shrimai Prabhumoye, Yiming Yang, Shashank Gupta, Bodhisattwa Prasad Majumder, Katherine Hermann, Sean Welleck, Amir Yazdan-bakhsh, and Peter Clark. 2023. Self-Refine: Iterative refinement with self-feedback. In Advances in Neu-ral Information Processing Systems (NeurIPS) .
+
+9Andrey Malinin and Mark Gales. 2021. Uncertainty estimation in autoregressive structured prediction. In 
+
+International Conference on Learning Representa-tions (ICLR) .Niklas Muennighoff, Qian Liu, Armel Randy Ze-baze, Qinkai Zheng, Binyuan Hui, Terry Yue Zhuo, Swayam Singh, Xiangru Tang, Leandro Von Werra, and Shayne Longpre. 2024. OctoPack: Instruction tuning code large language models. In International Conference on Learning Representations (ICLR) .Theodore Papamarkou, Pierre Alquier, Matthias Bauer, Wray Buntine, Andrew Davison, Gintare Karolina Dziugaite, Maurizio Filippone, Andrew Y. K. Foong, Vincent Fortuin, Dimitris Fouskakis, Jes Frellsen, Eyke Hüllermeier, Theofanis Karaletsos, Moham-mad Emtiyaz Khan, Nikita Kotelevskii, Salem Lahlou, Yingzhen Li, Fang Liu, Clare Lyle, and 11 others. 2026. Position: Agentic AI orchestration should be Bayes-consistent. In International Confer-ence on Machine Learning (ICML) .Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik R. Narasimhan, and Shunyu Yao. 2023. Re-flexion: Language agents with verbal reinforcement learning. In Advances in Neural Information Pro-cessing Systems (NeurIPS) .Manan Suri, Puneet Mathur, Nedim Lipka, Franck Der-noncourt, Ryan A. Rossi, and Dinesh Manocha. 2025. Structured uncertainty guided clarification for LLM agents. arXiv preprint arXiv:2511.08798 .Roman Vashurin, Ekaterina Fadeeva, Artem Vazhentsev, Lyudmila Rvanova, Daniil Vasilev, Akim Tsvigun, Sergey Petrakov, Rui Xing, Abdelrahman Sadallah, Kirill Grishchenkov, Alexander Panchenko, Timothy Baldwin, Preslav Nakov, Maxim Panov, and Artem Shelmanov. 2025. Benchmarking uncertainty quan-tification methods for large language models with LM-Polygraph. Transactions of the Association for Computational Linguistics , 13:220–248. Abraham Wald. 1947. Sequential analysis . John Wiley & Sons. Xingyao Wang, Boxuan Li, Yufan Song, Frank F. Xu, Xiangru Tang, Mingchen Zhuge, Jiayi Pan, Yueqi Song, Bowen Li, Jaskirat Singh, Hoang H. Tran, Fuqiang Li, Ren Ma, Mingzhang Zheng, Bill Qian, Yanjun Shao, Niklas Muennighoff, Yizhe Zhang, Binyuan Hui, and 5 others. 2025. OpenHands: An open platform for AI software developers as general-ist agents. In International Conference on Learning Representations (ICLR) .John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik R. Narasimhan, and Ofir Press. 2024. SWE-agent: Agent-computer interfaces enable automated software engineering. In Advances in Neural Information Processing Systems (NeurIPS) .Tianyi Zhang, Tao Yu, Tatsunori B. Hashimoto, Mike Lewis, Wen-Tau Yih, Daniel Fried, and Sida I. Wang. 2023. Coder reviewer reranking for code generation. In International Conference on Machine Learning (ICML) .Andy Zhou, Kai Yan, Michal Shlapentokh-Rothman, Haohan Wang, and Yu-Xiong Wang. 2024. Lan-guage agent tree search unifies reasoning, acting, and planning in language models. In International Con-ference on Learning Representations (ICLR) .
+
+10 A Additional Details on Experimental Setup 
+
+A.1 Models 
+
+Table 2 lists the closed-API and open-weight gen-erator models.    
+
+> Access Model
+> Closed-API gpt-5-mini qwen3-coder claude-haiku-4.5 claude-sonnet-4.5
+> Open-weight Qwen2.5-Coder-32B-Instruct gpt-oss-20b
+
+Table 2: Generator models used in the experiments. Closed-API models are served via OpenRouter; open-weight models are served locally via vLLM. 
+
+A.2 Dataset Statistics 
+
+Table 3 presents the benchmarks and datasets used in the experiments, their evaluation-set sizes, and verifier types. Table 4 reports the measured per-action wall-clock latency across all benchmarks.                     
+
+> Benchmark NVerifier
+> Function-level synthesis
+> LCB-hard 102 hidden tests LCB-medium 207 hidden tests LCB-easy 135 hidden tests MBPP+ 378 assert tests HumanEval+ 164 assert tests
+> Repository-level patch generation
+> SWE-Bench Lite 300 SWE harness SWE-Bench Verified 500 SWE harness
+> Bug-fixing
+> HumanEvalFix 164 assert tests CodeContests 165 hidden tests
+
+Table 3: Evaluation benchmarks grouped by task, with dataset size and verifier type. 
+
+A.3 Critic Informativeness 
+
+The controller’s posterior P (Y =1 | z(1) , . . . , z (k))
+
+is only as useful as the underlying likelihoods 
+
+Pi(z | Y ). We measure the per-critic informa-tiveness γi = Pi(z=pass | Y =1) − Pi(z=pass |
+
+Y =0) across the full panel: γi ≈ 0 means the critic provides little information about correctness, 
+
+γi → 1 means it is near-oracle (Table 6, Fig. 5). First, Cr syn is the least informative critic on av-erage. On MBPP+, HumanEval+, and LCB-easy every generator has |γsyn | ≤ 0.10 , and on LCB-medium four of six generators have |γsyn | ≤ 0.005 
+
+– the syntax check passes on both Y =1 and Y =0 
+
+candidates and tells the controller nothing, be-cause modern instruction-tuned generators produce parseable code regardless of whether it is semanti-cally correct. Second, Cr test ’s informativeness tracks the rela-tionship between public and hidden tests on each benchmark, not the generator. It is near-oracle (γtest ≳ 0.7) on LCB at all three difficulty tiers, on both SWE-Bench variants, and on CodeCon-tests – benchmarks where the public test suite either is the hidden suite or is strongly predic-tive of it. On MBPP+ and HumanEval+, γtest 
+
+drops to 0.07 –0.75 because the public-test critic catches surface failures, but the hidden test suite catches behavioral failures the public asserts pass on these benchmarks; the public-test critic mainly detects failures covered by the visible assertions on those pairs. On average, Cr test is the most in-formative of the three critics. This explains why single-critic gating on Cr test is the dominant policy over an entire sub-range of verifier costs on some benchmark–generator pairs – e.g. the green band in Fig. 4 on MBPP+ / claude-haiku-4.5 , where 
+
+gate(Cr test ) beats both always_verify and the Bayesian variants for moderate Cver .Third, Cr llm is consistently weaker than Cr test 
+
+on benchmark–generator pairs where the latter is near-oracle ( γllm < 0.5 throughout LCB and SWE-Bench, often below 0.3 on the LCB rows), but becomes the dominant signal on HumanEvalFix, where γllm ≥ 0.7 for all six generators and the problem statement gives the judge enough context to read the diff semantically. This is what gives 
+
+bayesian_greedy and bayesian_DP their regime-A wins: when no single critic is near-oracle, the controller updates the belief through Bayes’ rule on each critic’s per-setup likelihood Pi(z | Y ), so the contribution of critic i scales with its informa-tiveness γi – a near-zero-gap critic barely moves the belief, while two moderately-informative critics compose into a posterior sharper than either alone produces. 
+
+A.4 Regime-Map Sweep Grid 
+
+The empirical decision map in Figure 2 pools 
+
+7,020 sample points. These are the Cartesian product of all 54 (benchmark, generator) pairs with a (Cver , R ) sweep grid of 13 verifier costs Cver ∈{1, 5, 10 , 20 , 25 , 30 , 50 , 60 , 75 , 90 , 100 , 150 , 200 }
+
+and 10 rewards R ∈{1, 10 , 20 , 25 , 50 , 75 , 100 , 150 , 200 , 400 }, giving 11 agen (s) aver (s) L0 L2 L3 Gen $ Benchmark med p90 med p90 med med med (10 −3)                                                                    
+
+> Function-level synthesis
+> LCB-easy 3.45.20.20 0.33 <0.001 0.054 1.46 2.4
+> LCB-medium 6.88.60.25 0.41 <0.001 0.059 1.74 5.5
+> LCB-hard 7.69.80.30 0.50 0.001 0.062 1.74 6.3
+> MBPP+ 1.32.80.05 0.08 <0.001 0.063 1.24 0.5
+> HumanEval+ 2.23.10.02 0.03 <0.001 0.037 1.14 1.6
+> Bug-fixing
+> HumanEvalFix 2.13.40.043 0.050 0.021 ‡0.021 ‡1.84 3.0
+> CodeContests 4.09.00.068 0.879 0.021 ‡0.021 ‡1.84 5.0
+> Repository-level patches
+> SWE-Bench 10 .031 .41.9∥682 0.362 2.02 1.91 6.0
+
+Table 4: Measured per-action wall-clock latency across all benchmarks. Claude-haiku-4.5 is used throughout, except the SWE-Bench row, which pools 5 models on 4 held-out instances. Synthesis rows (LCB-easy/medium/hard, MBPP+, HumanEval+) are calibration runs with n=30 instances per benchmark ( n=29 for LCB-hard). Bug-fixing rows (HumanEvalFix, CodeContests) use the instrumented haiku-4.5 pilot ( 15 tasks ×2 variants); their L0 and L2
+
+entries report the local-process critic median pooled over L0–L2 (n=17 ). SWE-Bench critics are Docker pytest runs ( n=183 pooled L0–L3). All timing is in seconds (median / p90 where reported). L0=regex syntax check, 
+
+L2=local public-test execution (Docker on SWE-Bench), and L3=LLM judge instrumented separately on 60 HEFix patches with haiku-4.5; SWE-Bench L3 reports Docker critic_mid . The last column is per-generate API cost in milli-dollars at OpenRouter haiku-4.5 rates; local critics and the local verifier incur no API charge. ∥SWE-Bench Docker verifier is bimodal: heavy-suite psf/requests median ≈672 s ( n=35 ) versus fast-fail sub-second ( n=25 ); pooled median 1.9 s, pooled p90 682 s. ‡Local critic median pooled across L0–L2.
+
+54 × 13 × 10 = 7 ,020 points. At each point, we record the utility-maximizing policy; the background fill in Figure 2 is a k-NN ( k=300 )smoothing of that per-point winner over the 
+
+(P (Y =1) , C ver /R ) plane. The remaining costs are held at the canonical values used throughout the paper ( cgen =10 , cCsyn =1 , cCtest =2 , cCllm =5 ). 
+
+A.5 Per-benchmark Generator Locations 
+
+Figure 6 plots where each benchmark–generator pair falls in the (P (Y =1) , Cr test -gap ) plane that drives the regime structure of Figure 2. 
+
+A.6 Policy Specifications 
+
+This section specifies each policy used in Table 7 and Figures 2, 3, and 4. Each entry describes the decision rule, data dependence, and the em-pirical regime in which the policy is competitive. Throughout b denotes the controller’s posterior be-lief, P (Y =1 | evidence ), z(i) the observation re-turned by critic Cr i, and R, c a – the reward and per-action cost parameters from §4. Policies fall into two families: (i) unsuper-vised baselines with no learnable parameters; (ii) 
+
+Bayesian replay controllers (bayesian_greedy ,
+
+bayesian_DP ) that operate over pre-collected cal-ibration trajectories. Self-Refine and Reflexion are evaluated both as real implementations of the published methods and as policy replays over our iterative-refinement corpus. 
+
+A.6.1 Unsupervised Baselines 
+
+always_verify . Reference policy: ignore every critic, call the verifier on every patch, return Y .Per-instance utility R · Y − cver on the first patch verified; if Y =0 , the controller consumes the next pre-sampled patch from the 3-patch pool. Has no free parameters; serves as the ∆π=0 baseline against which every ∆π in the paper is computed. Dominates regime C (high prior and/or cheap veri-fication). 
+
+best_of_3 . Generate N =3 patches, verify each, and return the patch with the highest Y . Pays 
+
+3cgen + 3 cver per instance and never under-spends on verification. Isolates the generator-diversity contribution: any advantage of best_of_3 over 
+
+always_verify is attributable to taking the maxi-mum over 3 i.i.d. draws rather than to any orches-tration logic. On the paper’s panel, it is rarely the per-cell winner. 
+
+gate(Cr i) for i ∈ {syn , test , llm }. Single-critic gate: query critic Cr i on the current patch; verify iff z(i)=pass , else regenerate (con-sume the next patch in the 3-pool). Three variants span the cost/informativeness spectrum: 
+
+gate(Cr syn ) uses the (essentially-free, weak) 12 Figure 5: Critic informativeness γi = Pi(z=pass | Y =1) − Pi(z=pass | Y =0) vs prior P (Y =1) across the available benchmark–generator pairs, one subplot per critic layer. Point color indicates the Bayesian ∆ for each benchmark–generator pair. SWE-Bench cells do not appear in the Cr test (public tests) panel: SWE-Bench has no public-test split distinct from the oracle verifier (the test_patch is the verifier), so there is no independent public-test critic to estimate a gap for on those cells. 
+
+ast.parse check; gate (Cr test ) uses the mid-cost, near-oracle public-test critic; gate(Cr llm ) uses the mid-cost LLM judge. The decision rule is hand-coded: PASS →verify; FAIL →regen. Across our panel, gate(Cr test ) dominates regime B by ex-ploiting Cr test ’s near-oracle informativeness at low cost; the other two variants are rarely competitive. 
+
+fixed_pipeline . Run critics in fixed order Cr syn → Cr test → Cr llm and verify iff every critic returns PASS (logical AND-gate). Tests the naive “stack everything” intuition. Two structural issues hurt its performance: (i) the AND-gate multiplies false-negative rates across critics, missing Y =1 
+
+patches whenever any single critic fires incorrectly; (ii) every patch pays the full critic stack even when Cr syn or Cr test would have already settled the deci-sion. Rarely the per-cell winner across the panel. 
+
+Self-Refine (Madaan et al., 2023). After each verify-fail, prompt the generator to critique its own patch and produce a refined patch. The agent loops up to K=4 refinement steps; at each step, it pays 
+
+cgen for the refinement and cver for the verifica-tion. Self-Refine has no fitted parameters: the gen-erator adapts via in-context feedback rather than via learned weights. We report it both as an exe-cutable implementation (§5.3) and as a policy re-play over the iterative-refinement corpus. On 22 of 24 LCB cells, the Bayesian framework domi-nates Self-Refine; the two exceptions (LCB-easy gpt-5-mini and haiku-4.5) are high-Pfix cells where mechanical retry has positive expected value. 
+
+Reflexion (Shinn et al., 2023). Extends Self-Refine with an explicit verbal-memory buffer of past failures, fed back into the regeneration prompt. Same cost structure and same lack of fitted parame-ters as Self-Refine. The buffer is local to the current instance; nothing is fit from historical data. Reflex-ion outperforms Self-Refine on the two high-Pfix 
+
+LCB-easy cells; otherwise, the two heuristics track each other closely. 
+
+A.6.2 Bayesian Controllers 
+
+Both Bayesian controllers share the same Bell-man backbone (§4) and the same fitted Beta(1,1)-Laplace estimates: the prior ˆP (Y =1) , the critic likelihoods ˆPi(z | Y =y), and (for DP) the tran-sition kernel ˆP (fix | broken ), ˆP (break | correct ).They differ in the lookahead horizon and in how the regenerate branch is valued. 
+
+bayesian_greedy (BG). One-step Bellman lookahead. At every state (b, t ) the controller com-putes Q-values for each available action and picks the argmax: 
+
+Qverify (b) = R · b − cver ,Qstop = 0 ,Qgen (b) = −cgen +   ˆP (Y =1) · R − cver 
+
+,Qi
+
+> crit
+
+(b) = −ci 
+
+> crit
+
++ Ez∼ ˆPi(·| b)[Qverify (bt+1 )] ,
+
+where bt+1 is the Bayes posterior from Section 4. The defining property: the regenerate branch sub-stitutes the prior ˆP (Y =1) for the post-regen belief, so BG cannot value multi-step refinement chains. Dominates regime A on cells where the critic stack is informative, but no single critic is near-oracle. 13 bayesian_DP (BDP). Full backward induction on the (b, t ) state space. We discretize b to a uni-form 51 -point grid on [0 , 1] and solve the Bellman recursion backwards over horizon H=3 . The defin-ing differences from BG are: (i) the regenerate branch uses the measured transition kernel, so the post-regen belief is b (1 − ˆPbreak ) + (1 − b) ˆPfix 
+
+rather than the prior; (ii) critic Q-values recurse on Vt rather than truncating to Qverify , so BDP can plan multi-step critic–refine–verify chains. At in-ference, the precomputed policy πt(b) is an O(1) 
+
+lookup. BDP strictly dominates BG only on cells where the measured ˆPfix ≳ 0.15 makes multi-step chains positive-EV; on the rest of the panel, BDP and BG converge (§5.4). 
+
+Replay convention. Both BG and BDP are evaluated by replaying their decision rule over the pre-collected calibration corpus 
+
+critic_results.jsonl : the patches and their critic verdicts are fixed (3 patches per instance, 
+
+seed =42 ); the controller selects which observa-tions to consult and when to verify or regenerate. The “regenerate” action consumes the next patch from the pool; the controller never generates new patches in replay mode. 
+
+B Detailed Results 
+
+Table 7 reports the per-cell utility difference 
+
+∆π against always_verify for every (generator, benchmark, policy) triple in the empirical panel, under the “slow oracle, fast critics” cost vector; bug-fixing rows use the fast-oracle variant noted in the caption. Bold marks the per-cell winner among the reported methods. Columns BG and BDP de-note bayesian_greedy and bayesian_DP .
+
+C Bayesian Belief States for Uncertainty Quantification of Coding Agents 
+
+In this experiment, we explore whether the Bayesian belief states can quantify uncertainty for an externally controlled agentic coding trajectory before the final oracle verification outcome is ob-served. We use SAGE agent (Suri et al., 2025) using gpt-oss-20b as the controller in this exper-iment. We run the agent on LCB-Medium and LCB-Hard, use the training split to estimate the ini-tial prior and critic likelihoods, and evaluate uncer-tainty scores for the final candidate on the held-out test split. We experiment with four uncertainty quantifica-tion methods. First, we use two standard methods:                                                                                                                                                                                 
+
+> Benchmark Generator ˆP(Y=1) 95% CI
+> Function-level synthesis
+> LCB-hard gpt-5-mini 0.209 [0 .16 ,0.26]
+> qwen3-coder 0.096 [0 .06 ,0.14]
+> claude-haiku-4.5 0.070 [0 .04 ,0.11]
+> claude-sonnet-4.5 0.126 [0 .09 ,0.17]
+> Qwen2.5-Coder-32B 0.104 [0 .07 ,0.15]
+> gpt-oss-20b 0.387 [0 .33 ,0.45]
+> LCB-medium gpt-5-mini 0.283 [0 .24 ,0.32]
+> qwen3-coder 0.212 [0 .18 ,0.25]
+> claude-haiku-4.5 0.173 [0 .14 ,0.21]
+> claude-sonnet-4.5 0.225 [0 .19 ,0.26]
+> Qwen2.5-Coder-32B 0.484 [0 .44 ,0.53]
+> gpt-oss-20b 0.722 [0 .68 ,0.76]
+> LCB-easy gpt-5-mini 0.531 [0 .48 ,0.59]
+> qwen3-coder 0.348 [0 .30 ,0.40]
+> claude-haiku-4.5 0.331 [0 .28 ,0.38]
+> claude-sonnet-4.5 0.374 [0 .32 ,0.43]
+> Qwen2.5-Coder-32B 0.862 [0 .82 ,0.90]
+> gpt-oss-20b 0.957 [0 .93 ,0.98]
+> MBPP+ gpt-5-mini 0.807 [0 .78 ,0.83]
+> qwen3-coder 0.777 [0 .75 ,0.80]
+> claude-haiku-4.5 0.787 [0 .76 ,0.81]
+> claude-sonnet-4.5 0.819 [0 .79 ,0.84]
+> Qwen2.5-Coder-32B 0.761 [0 .73 ,0.79]
+> gpt-oss-20b 0.800 [0 .77 ,0.83]
+> HumanEval+ gpt-5-mini 0.876 [0 .84 ,0.91]
+> qwen3-coder 0.886 [0 .85 ,0.92]
+> claude-haiku-4.5 0.908 [0 .88 ,0.94]
+> claude-sonnet-4.5 0.943 [0 .92 ,0.96]
+> Qwen2.5-Coder-32B 0.838 [0 .80 ,0.87]
+> gpt-oss-20b 0.919 [0 .89 ,0.94]
+> Repository-level patch generation
+> SWE-Bench Lite gpt-5-mini 0.251 [0 .22 ,0.28]
+> qwen3-coder 0.406 [0 .37 ,0.44]
+> claude-haiku-4.5 0.214 [0 .18 ,0.25]
+> claude-sonnet-4.5 0.087 [0 .07 ,0.11]
+> Qwen2.5-Coder-32B 0.134 [0 .11 ,0.16]
+> gpt-oss-20b 0.266 [0 .23 ,0.30]
+> SWE-Bench Verified gpt-5-mini 0.111 [0 .08 ,0.14]
+> qwen3-coder 0.524 [0 .48 ,0.57]
+> claude-haiku-4.5 0.438 [0 .39 ,0.48]
+> claude-sonnet-4.5 0.434 [0 .39 ,0.48]
+> Qwen2.5-Coder-32B 0.156 [0 .14 ,0.18]
+> gpt-oss-20b 0.295 [0 .27 ,0.32]
+> Bug-fixing
+> HumanEvalFix gpt-5-mini 0.854 [0 .82 ,0.89]
+> qwen3-coder 0.962 [0 .94 ,0.98]
+> claude-haiku-4.5 0.895 [0 .86 ,0.92]
+> claude-sonnet-4.5 0.887 [0 .85 ,0.92]
+> Qwen2.5-Coder-32B 0.690 [0 .64 ,0.74]
+> gpt-oss-20b 0.833 [0 .79 ,0.87]
+> CodeContests gpt-5-mini 0.484 [0 .42 ,0.55]
+> qwen3-coder 0.213 [0 .16 ,0.26]
+> claude-haiku-4.5 0.213 [0 .16 ,0.26]
+> claude-sonnet-4.5 0.265 [0 .21 ,0.32]
+> Qwen2.5-Coder-32B 0.053 [0 .03 ,0.08]
+> gpt-oss-20b 0.283 [0 .24 ,0.33]
+
+Table 5: Per-cell single-shot prior pass rate ˆP (Y =1) 
+
+of the LLM-generated step-0 code, with Wilson 95% confidence intervals. The prior anchors the regime structure of Figure 2: cells with high prior favour 
+
+always_verify (regime C), low priors favour the Bayesian variants (regime A) when verification is ex-pensive. Priors span more than an order of magnitude across cells. 
+
+perplexity and sequence probability (Fomicheva et al., 2020), which are computed from the token log-probabilities of the final generated code. Sec-14 ond, the Tool Success Rate is the empirical success rate of non-final critic and verifier calls observed before any successful verifier call. The terminal verifier decision itself is excluded to avoid label leakage. When no such tool evidence is available, we set the score to the train-set prior. Finally, Bayes Belief State corresponds to a posterior probability of correctness, initialized from the train-set prior and updated using fitted critic likelihoods and gen-eration transition dynamics. As with the tool suc-cess rate, the belief state is measured before the terminal correctness label is revealed. Table 1 shows the Prediction Rejection Ratio (PRR) (Malinin and Gales, 2021; Vashurin et al., 2025), which measures the area under the rejection curve. This curve plots the average quality of the remaining generations as we progressively abstain from an increasing fraction of the most uncertain predictions. Following standard practice (Vashurin et al., 2025), we compute PRR up to a rejection rate of 50%. The Bayesian belief state yields the best aver-age results, outperforming the second-best method by 6.5% on average and is particularly strong on LCB-Hard. This suggests that aggregating multi-ple tool observations using a Bayesian model is more informative than treating all tool outcomes uniformly. The tool success rate performs best on LCB-Medium, where many successful episodes are solved directly and the train-set prior is already high. Sequence probability is also competitive, indicating that the model’s own generation prob-ability contains substantial information about fi-nal correctness. In contrast, its length-normalized variant, perplexity, is less reliable, especially on LCB-Medium, where normalization discards much of the length-sensitive signal captured by sequence probability. Overall, this result demonstrates that aggregat-ing multiple observations from critics and verifiers using a Bayesian belief state provides a highly ef-fective uncertainty measure for arbitrary external agents, showing strong performance in identifying erroneous generations. 
+
+D Additional Results 
+
+This appendix collects the per-benchmark, per-strategy, per-critic, and per-(benchmark, genera-tor) slices of the regime map that don’t fit in the 8-page main paper. All figures are reproduced from the same single-shot calibration + iterative-refinement corpus described in §5, covering the 9-benchmark × 6-generator panel. Unless other-wise noted, figures use the per-benchmark cost vec-tors: fast-oracle (Cver =5 , Csyn crit =Ctest crit =Cllm crit =1 ,
+
+Cgen =10 , R=100 ) on the function-level synthesis and bug-fixing benchmarks; slow-oracle (Cver =90 ,
+
+Csyn crit =1 , Ctest crit =2 , Cllm crit =5 , Cgen =10 , R=100 ) on the SWE-Bench rows. 15 Figure 6: Per-benchmark location of each generator in ( P (Y =1) , Cr test critic informativeness γtest = Ptest (z=pass |
+
+Y =1) − Ptest (z=pass | Y =0) ). One sub-panel per benchmark, each dot one generator. The position of each cell in this plane determines which regime (A/B/C in Figure 2) it falls into. SWE-Bench Lite and SWE-Bench Verified are omitted: their oracle verifier is the project’s own test suite, so there is no public-test critic Cr test distinct from the verifier to plot. 
+
+16 Benchmark Generator γsyn γtest γllm 
+
+Function-level synthesis 
+
+LCB-hard gpt-5-mini 0.395 0.756 0.365 
+
+qwen3-coder 0.009 0.865 0.108 
+
+claude-haiku-4.5 −0.054 0.747 0.129 
+
+claude-sonnet-4.5 −0.018 0.853 −0.090 
+
+Qwen2.5-Coder-32B −0.035 0.699 0.289 
+
+gpt-oss-20b 0.799 0.869 0.583 
+
+LCB-medium gpt-5-mini 0.180 0.751 0.120 
+
+qwen3-coder 0.004 0.928 −0.087 
+
+claude-haiku-4.5 −0.004 0.907 0.035 
+
+claude-sonnet-4.5 −0.004 0.865 −0.097 
+
+Qwen2.5-Coder-32B −0.000 0.766 0.499 
+
+gpt-oss-20b 0.799 0.890 0.578 
+
+LCB-easy gpt-5-mini 0.008 0.987 −0.011 
+
+qwen3-coder 0.001 0.957 −0.029 
+
+claude-haiku-4.5 −0.005 0.980 0.024 
+
+claude-sonnet-4.5 −0.003 0.986 −0.004 
+
+Qwen2.5-Coder-32B 0.019 0.861 0.642 
+
+gpt-oss-20b 0.497 0.854 0.667 
+
+MBPP+ gpt-5-mini 0.041 0.074 0.259 
+
+qwen3-coder 0.009 0.285 0.310 
+
+claude-haiku-4.5 0.009 0.349 0.283 
+
+claude-sonnet-4.5 0.011 0.258 0.217 
+
+Qwen2.5-Coder-32B 0.003 0.448 0.384 
+
+gpt-oss-20b 0.103 0.196 0.297 
+
+HumanEval+ gpt-5-mini 0.039 0.720 0.157 
+
+qwen3-coder 0.020 0.671 0.112 
+
+claude-haiku-4.5 0.026 0.540 0.188 
+
+claude-sonnet-4.5 0.043 0.270 0.363 
+
+Qwen2.5-Coder-32B 0.013 0.751 0.436 
+
+gpt-oss-20b 0.062 0.610 0.250 
+
+Repository-level patch generation 
+
+SWE-Bench Lite gpt-5-mini 0.610 – 0.504 
+
+qwen3-coder 0.200 – 0.390 
+
+claude-haiku-4.5 0.830 – 0.005 
+
+claude-sonnet-4.5 0.599 – 0.497 
+
+Qwen2.5-Coder-32B 0.148 – 0.475 
+
+gpt-oss-20b 0.330 – 0.004 
+
+SWE-Bench Verified gpt-5-mini 0.834 – 0.807 
+
+qwen3-coder 0.209 – 0.419 
+
+claude-haiku-4.5 0.370 – 0.381 
+
+claude-sonnet-4.5 0.092 – 0.273 
+
+Qwen2.5-Coder-32B 0.139 – 0.466 
+
+gpt-oss-20b 0.319 – 0.447 
+
+Bug-fixing 
+
+HumanEvalFix gpt-5-mini 0.015 0.979 0.969 
+
+qwen3-coder 0.064 0.797 0.789 
+
+claude-haiku-4.5 0.222 0.947 0.938 
+
+claude-sonnet-4.5 0.276 0.974 0.965 
+
+Qwen2.5-Coder-32B 0.005 0.848 0.708 
+
+gpt-oss-20b 0.156 0.362 0.763 
+
+CodeContests gpt-5-mini 0.075 0.666 0.878 
+
+qwen3-coder 0.002 0.818 0.897 
+
+claude-haiku-4.5 0.037 0.882 0.947 
+
+claude-sonnet-4.5 0.013 0.863 0.926 
+
+Qwen2.5-Coder-32B 0.248 0.815 0.336 
+
+gpt-oss-20b 0.879 0.965 0.329 
+
+Table 6: Per-cell critic informativeness gap γℓ =
+
+P (zℓ=pass | Y =1) − P (zℓ=pass | Y =0) estimated with Beta(1,1) smoothing on the calibration cohort. 
+
+γℓ→1 corresponds to a near-oracle critic; γℓ→0 corre-sponds to a critic that carries no Bayes signal. Cr_lint 
+
+is omitted – it is a no-op pass-through in this codebase so its gap is structurally zero on every cell. Cr_test is shown as “–” on all SWE-Bench cells: SWE-Bench has no public-test split distinct from the oracle verifier (the 
+
+test_patch is the verifier), so there is no independent public-test critic to estimate a gap for. The gap struc-ture here drives the regime-B vs regime-A boundary in Figure 2: cells with γtest →1 favour single-critic gat-ing, cells with moderate γ across multiple critics favour Bayesian composition. 
+
+17 Benchmark Generator BoN tCsyn tCtest tCllm FP SR Rfx BG BDP 
+
+Function-level synthesis 
+
+LCB-hard gpt-5-mini −20 .0 +3 .1 +4.3 −6.0 −7.5 −33 .2 −4.4 −7.6 +0 .3
+
+qwen3-coder −20 .0 −1.4 −12 .8 −10 .0 −12 .1 −25 .6 −15 .4 +2.4 +2.4
+
+claude-haiku-4.5 −20 .0 −1.0 −13 .8 −14 .3 −16 .4 −10 .8 −29 .3 +2.8 +2 .1
+
+claude-sonnet-4.5 −23 .8 −1.0 −8.7 −16 .1 −18 .3 −5.4 −5.2 +2.5 +2.5
+
+Qwen2.5-Coder-32B −31 .5 −1.0 −9.7 −26 .2 −28 .8 −17 .7 −15 .3 −2.6 −2.6
+
+gpt-oss-20b −24 .0 +0 .0 +5 .1 −1.1 −3.0 −34 .4 +25 .8 −17 .0 +4 .6
+
+LCB-medium gpt-5-mini −11 .3 −1.2 +0 .7 +1 .7 +0 .3 −6.5 −14 .1 −15 .7 +1.9
+
+qwen3-coder −18 .1 −1.0 −11 .8 −6.5 −8.3 −15 .0 −23 .2 −16 .9 +2.2
+
+claude-haiku-4.5 −18 .1 −1.0 −13 .1 −3.3 −4.8 −10 .4 −17 .9 −18 .8 +2.6
+
+claude-sonnet-4.5 −18 .1 −1.3 −10 .0 −10 .2 −11 .8 +6 .0 +10 .6 −17 .3 +2 .3
+
+Qwen2.5-Coder-32B −21 .9 −1.0 −4.3 −12 .1 −13 .9 −16 .0 −16 .4 +0.0 +0.0
+
+gpt-oss-20b −23 .8 +2 .6 +2 .4 −7.5 −9.2 −35 .0 +6.1 −7.2 +2 .3
+
+LCB-easy gpt-5-mini −25 .9 −1.0 +10 .8 −5.3 −6.4 −11 .2 +4 .3 −9.1 +0 .6
+
+qwen3-coder −20 .0 −1.0 −11 .0 −1.3 −2.4 −10 .6 −20 .7 −15 .7 +1.4
+
+claude-haiku-4.5 −20 .0 −1.0 −11 .0 −2.6 −3.8 −10 .9 −0.1 −15 .7 +1.9
+
+claude-sonnet-4.5 −17 .1 −1.0 −8.2 −2.5 −3.6 −11 .5 +0 .5 −15 .7 +1.9
+
+Qwen2.5-Coder-32B −20 .0 −1.0 −1.0 −5.6 −6.8 −17 .6 −1.0 +0.0 −1.0
+
+gpt-oss-20b −20 .0 −1.0 +4.2 +1 .0 −0.1 −22 .9 −3.6 +0 .0 +0 .0
+
+MBPP+ gpt-5-mini −21 .1 −0.0 +1.5 −8.6 −9.9 −21 .3 −46 .0 +0 .0 +0 .0
+
+qwen3-coder −30 .7 −1.0 −3.7 −16 .1 −17 .5 −28 .8 −7.8 +0.0 +0.0
+
+claude-haiku-4.5 −20 .0 −1.0 −1.8 −8.5 −9.8 −9.0 +2.2 +0 .0 +0 .0
+
+claude-sonnet-4.5 −21 .1 −1.0 −1.4 −13 .6 −14 .9 −16 .1 −3.0 +0.0 +0.0
+
+Qwen2.5-Coder-32B −22 .1 −1.0 −3.3 −16 .9 −18 .4 −35 .7 −125 .9 +0.0 +0.0
+
+gpt-oss-20b −18 .9 −1.0 −1.0 −6.3 −7.7 −34 .3 −125 .5 +0.0 +0.0
+
+HumanEval+ gpt-5-mini −17 .6 −1.0 +3.3 −21 .0 −22 .3 −32 .0 −80 .3 +0 .0 +0 .0
+
+qwen3-coder −17 .4 −1.0 +3.0 −20 .1 −21 .5 −9.2 −12 .5 +0 .0 +0 .0
+
+claude-haiku-4.5 −22 .4 −1.0 −1.0 −20 .8 −22 .1 −11 .2 −4.5 +0.0 +0.0
+
+claude-sonnet-4.5 −22 .4 −1.0 −1.0 −21 .0 −22 .3 −12 .0 −1.0 +0.0 +0.0
+
+Qwen2.5-Coder-32B −17 .6 −1.0 +3.6 −16 .1 −17 .7 −26 .1 −119 .8 +0 .0 +0 .0
+
+gpt-oss-20b −17 .6 −1.0 +3.3 −10 .6 −11 .9 −48 .8 −82 .5 +0 .0 +0 .0
+
+Repository-level patch generation 
+
+SWE-Bench Lite gpt-5-mini −17 .3 +21 .7 – +13 .7 +11 .6 −24 .4 −102 .7 +62 .0 +62 .0
+
+qwen3-coder −20 .0 +1 .7 – +9 .0 +7 .1 −57 .7 −136 .0 +43 .3 +43 .3
+
+claude-haiku-4.5 −24 .0 +39 .7 – +32 .3 +29 .3 −12 .9 −20 .0 +67 .3 +67 .6
+
+claude-sonnet-4.5 −50 .7 +28 .9 – +22 .3 +19 .9 −24 .8 −93 .3 +59 .3 +59 .3
+
+Qwen2.5-Coder-32B −17 .3 +6 .1 – +27 .9 +25 .5 −16 .0 −268 .0 +74 .0 +74 .0
+
+gpt-oss-20b −12 .0 +8 .3 – +32 .3 +29 .3 −52 .0 −256 .0 +67 .3 +67 .3
+
+SWE-Bench Verified gpt-5-mini −24 .0 +41 .9 – +34 .7 +32 .3 −55 .0 −226 .0 +74 .0 +74 .0
+
+qwen3-coder −16 .0 +2 .8 – +5 .6 +3 .8 −42 .6 −116 .0 +52 .0 +52 .0
+
+claude-haiku-4.5 −18 .0 +13 .9 – +7 .2 +5 .0 −14 .6 −166 .0 +56 .0 +56 .0
+
+claude-sonnet-4.5 −20 .0 +1 .7 – +2 .4 +0 .8 −27 .4 −122 .0 +66 .0 +66 .0
+
+Qwen2.5-Coder-32B −19 .2 +8 .6 – +27 .4 +25 .2 −14 .6 −266 .4 +74 .8 +74 .8
+
+gpt-oss-20b −8.8 +12 .5 – +14 .5 +12 .7 −47 .0 −180 .0 +68 .4 +68 .4
+
+Bug-fixing 
+
+HumanEvalFix gpt-5-mini −22 .4 −1.0 +0 .3 +0 .3 −0.8 −32 .7 +5.2 +0 .0 +0 .1
+
+qwen3-coder −20 .0 −1.0 −1.4 −1.8 −2.9 −37 .6 +1.2 +0 .0 +0 .0
+
+claude-haiku-4.5 −21 .8 −0.6 +3 .8 +3 .0 +1 .9 −35 .1 +1 .0 −13 .3 −3.8
+
+claude-sonnet-4.5 −16 .3 +1 .3 +5 .9 +5 .2 +3 .9 −12 .9 +4 .2 −17 .6 −2.4
+
+Qwen2.5-Coder-32B −22 .4 +0.9 −2.7 −30 .5 −32 .4 −30 .7 −102 .8 +0 .0 +0 .0
+
+gpt-oss-20b −22 .5 −1.0 −1.9 −5.3 −6.8 −27 .5 −103 .9 +0.0 +0.0
+
+CodeContests gpt-5-mini −15 .5 −1.0 −7.7 −4.9 −6.9 −49 .1 −7.9 −13 .5 −4.3
+
+qwen3-coder −41 .4 −1.0 −9.9 −11 .3 −13 .5 −40 .0 −15 .1 −16 .2 +2.0
+
+claude-haiku-4.5 −25 .3 +1 .1 −7.8 −9.6 −12 .1 −12 .9 −11 .5 −19 .4 +2.7
+
+claude-sonnet-4.5 −25 .3 −1.0 −12 .4 −11 .9 −14 .4 −22 .4 −30 .6 −17 .4 +2.3
+
+Qwen2.5-Coder-32B −22 .4 −5.7 −7.8 −21 .8 −24 .6 −18 .0 −47 .2 +3.3 +3.3
+
+gpt-oss-20b −13 .8 +7 .7 +12 .5 −28 .2 −30 .2 −19 .4 +8 .2 +0 .0 +11 .7
+
+Table 7: Per-cell utility difference ∆π = ¯Uπ − ¯Ualways_verify across all generators, benchmarks, and nine non-reference methods. FP denotes fixed_pipeline . All values computed on the held-out 25% eval split with the anchored cal ∩ SR ∩ Rfx pool ( STAT _ANCHOR ). The reference column always_verify is omitted (all entries 
+
+∆π = 0 by definition). Bold marks the per-cell winner across the nine method columns. “–” indicates a cell with no data available yet. tCtest is omitted on SWE-Bench cells (Repository-level patch generation): SWE-Bench has no public-test split distinct from the oracle verifier, so the public-test critic is undefined there. 
+
+18 D.1 Held-out Policy Comparison Across Benchmark–Generator Pairs 
+
+Figures 7–15 expand the headline Figure 3 to every (benchmark, generator) pair on the held-out 25% eval split. One bar chart per cell; the gold-starred bar marks the winner. The Bayesian variants win or tie on the regime-A cells; gate(Cr test ) wins on regime-B; always_verify wins on the saturated cells. Self-Refine and Reflexion are evaluated as actual agents (not policy replays) and consistently underperform on cells with weak refine signals. 19 Figure 7: Held-out eval policy comparison on LCB-hard, all generators on one panel. Bayesian variants dominate this regime-A cell across every generator. Companion to Figure 3 (SWE-Bench Lite / claude-haiku-4.5 cell shown in the main text). 
+
+Figure 8: Held-out eval policy comparison on LCB-medium, all generators on one panel. 
+
+Figure 9: Held-out eval policy comparison on LCB-easy, all generators on one panel. gate(Cr test ) wins on most cells here – LCB-easy’s near-oracle public-test critic places these cells in regime B. 
+
+20 Figure 10: Held-out eval policy comparison on MBPP+, all generators on one panel. 
+
+Figure 11: Held-out eval policy comparison on HumanEval+, all generators on one panel. 
+
+Figure 12: Held-out eval policy comparison on HumanEvalFix, all generators on one panel. 
+
+21 Figure 13: Held-out eval policy comparison on CodeContests, all generators on one panel. 
+
+Figure 14: Held-out eval policy comparison on SWE-Bench Lite, all generators on one panel (the 
+
+claude-haiku-4.5 cell of this figure is the headline shown as Figure 3 in the main text). 
+
+Figure 15: Held-out eval policy comparison on SWE-Bench Verified, all generators on one panel. 
+
+22 D.2 Train-vs-Evaluation Policy Comparison Across Benchmark–Generator Pairs 
+
+Figures 16–24 extend the headline train-vs-eval comparison from Figure 3 (SWE-Bench Lite / 
+
+claude-haiku-4.5 ) to every benchmark. Each figure shows one benchmark across all six genera-tors; the left column is the 75% train cohort that the controllers were fit on, the right column is the held-out 25% eval cohort. The Bayesian variants main-tain positive ∆ on both cohorts in every regime-A cell, ruling out overfitting of the likelihoods, prior, or kernel to the calibration instances. 23 Figure 16: Train-vs-eval policy comparison on LCB-hard. Left column: 75% train (in-sample fit). Right column: 25% held-out eval. One row per generator. 
+
+24 Figure 17: Train-vs-eval policy comparison on LCB-medium. 
+
+25 Figure 18: Train-vs-eval policy comparison on LCB-easy. 
+
+26 Figure 19: Train-vs-eval policy comparison on MBPP+. 
+
+27 Figure 20: Train-vs-eval policy comparison on HumanEval+. 
+
+28 Figure 21: Train-vs-eval policy comparison on HumanEvalFix. 
+
+29 Figure 22: Train-vs-eval policy comparison on CodeContests. 
+
+30 Figure 23: Train-vs-eval policy comparison on SWE-Bench Lite. The claude-haiku-4.5 row is the headline shown as Figure 3 in the main text. 
+
+31 Figure 24: Train-vs-eval policy comparison on SWE-Bench Verified. 
+
+32 D.3 Per-Benchmark Verification-Cost Sweeps 
+
+Figures 25–33 extend the headline Cver sweep from Figure 4 (MBPP+ / claude-haiku-4.5 ) to every benchmark in the panel. Each figure shows one benchmark with all six generators on a single com-posite grid; same axes and policy palette as the headline. Per-generator analytic crossover C∗
+
+> ver
+
+/R 
+
+tracks each cell’s prior P (Y =1) and is visible as the empirical leader-change boundary in each sub-panel. 33 Figure 25: Cver sweep on MBPP+, one sub-panel per generator (companion to Figure 4). The C → B handoff happens at slightly different Cver values per generator, tracking each cell’s prior P (Y =1) .
+
+Figure 26: Cver sweep on LCB-hard, one sub-panel per generator. LCB-hard’s low prior ( P (Y =1) ≈ 0.17 ) places the analytic crossover at C∗ 
+
+> ver
+
+≈ 17 , so the cell sits in regime A for nearly the entire sweep – the Bayesian variants lead above Cver ≈ 20 . The two Bayesian curves overlap because the measured P (fix | broken ) ≈ 0.07 makes multi-step refinement negative-EV, so bayesian_DP collapses to the same myopic policy as bayesian_greedy .
+
+34 Figure 27: Cver sweep on LCB-medium, one sub-panel per generator. 
+
+Figure 28: Cver sweep on LCB-easy, one sub-panel per generator. 
+
+35 Figure 29: Cver sweep on HumanEval+, one sub-panel per generator. 
+
+Figure 30: Cver sweep on HumanEvalFix, one sub-panel per generator. 
+
+36 Figure 31: Cver sweep on CodeContests, one sub-panel per generator. 
+
+Figure 32: Cver sweep on SWE-Bench Lite, one sub-panel per generator. 
+
+37 Figure 33: Cver sweep on SWE-Bench Verified, one sub-panel per generator. 
+
+38
