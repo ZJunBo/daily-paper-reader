@@ -1,0 +1,743 @@
+Title: SHIFT: Gate-Modulated Activation Steering for Knowledge Conflict Mitigation in Retrieval-Augmented Generation
+
+URL Source: https://arxiv.org/pdf/2606.27786v1
+
+Published Time: Mon, 29 Jun 2026 00:33:47 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# Shift : Gate-Modulated Activation Steering for Knowledge Conflict Mitigation in Retrieval-Augmented Generation 
+
+Ruochang Li ♡∗ , Pengcheng Huang ♡∗ , Zhenghao Liu ♡ †, Yukun Yan ♠
+
+Huiyuan Xie ♠, Yu Gu ♡, Ge Yu ♡, Maosong Sun ♠
+
+> ♡
+
+School of Computer Science and Engineering, Northeastern University, Shenyang, China  
+
+> ♠
+
+Department of Computer Science and Technology, Tsinghua University, Beijing, China 
+
+Abstract 
+
+Retrieval-augmented generation (RAG) en-hances LLMs by incorporating external knowl-edge to support response generation. However, conflicts between retrieved context and para-metric knowledge have emerged as a critical challenge in RAG systems. To mitigate such conflicts, numerous studies have attempted to identify and edit knowledge-related internal neurons, aiming to improve the ability of LLMs to rely on contextual evidence during genera-tion. However, these neuron-level approaches may introduce unintended cascading effects that compromise the general capabilities of LLMs, as the modified neurons are often entan-gled with broader model behaviors and func-tionalities. In this paper, we introduce Shift ,a novel framework that reformulates neuron-level modification as learnable gate modulation, allowing LLMs to adaptively regulate internal activations for knowledge conflict resolution. Technically, our Shift equips LLMs with a lightweight gate module and optimizes fewer than 0.01% trainable parameters while keep-ing the backbone model frozen. During gen-eration, the gate module adjusts the model’s internal representations to adaptively leverage contextual and parametric knowledge. Exten-sive experiments on six datasets validate the effectiveness of our Shift in comparison with various competing baselines. All datasets and code are available at https://github.com/ OpenBMB/SHIFT .
+
+1 Introduction 
+
+Retrieval-augmented generation (RAG) has be-come a critical paradigm for improving the factual reliability of Large Language Models (LLMs) by grounding generation in external evidence (Guu et al., 2020; Lewis et al., 2020; Izacard and Grave, 2021). By incorporating retrieved context into   
+
+> *indicates equal contribution.
+> †indicates corresponding author.
+
+Figure 1: Comparison of three paradigms for mitigat-ing knowledge conflict. (a) Neuron-level intervention requires fine-grained localization of knowledge-related neurons. (b) Layer-level intervention uses fixed rules on selected layers. (c) Shift introduces lightweight gates to actively regulate hidden-state activations. 
+
+the generation process, RAG enables LLMs to ac-cess up-to-date and domain-specific information beyond the static parametric knowledge encoded during pretraining (Izacard et al., 2023; Mallen et al., 2023). A RAG system thus relies on two knowledge sources during inference: parametric knowledge , which is encoded in model parameters, and contextual knowledge , which is supplied by retrieved documents. When these two sources con-tradict each other, knowledge conflict arises (Xie et al., 2024), under which LLMs may ignore re-trieved evidence (Zhang et al., 2025b), overly rely on parametric knowledge (Huang et al., 2025b), or inconsistently blend the two knowledge sources during generation (Choi et al., 2025). These failure modes compromise the factual reliability of RAG systems (Sun et al., 2025), making knowledge con-
+
+> arXiv:2606.27786v1 [cs.CL] 26 Jun 2026
+
+flict mitigation a crucial problem for trustworthy retrieval-augmented generation. To mitigate such conflicts, a key question is how to balance parametric knowledge and retrieved con-textual knowledge when they contradict (Longpre et al., 2021; Chen et al., 2022). Prior work ad-dresses this by locating knowledge-related neurons or components and intervening on them directly, such as knowledge editing and knowledge-neuron analysis (Hoelscher-Obermaier et al., 2023; Cohen et al., 2024; Niu et al., 2024). However, knowledge in LLMs is often sparsely represented by localized knowledge neurons, making fine-grained localiza-tion difficult and brittle (Dai et al., 2022a). Recent studies, therefore, turn to coarser-grained layer-level intervention, such as selecting knowledge-critical layers and feed-forward networks (Shi et al., 2024a; Huang et al., 2025b). Although more prac-tical, these methods typically use rigid intervention rules on selected layers, limiting their flexibility across conflict instances and potentially impairing the model’s general capabilities (Gu et al., 2024). In this paper, we propose Shift (Selective 
+
+Hidden-state Intervention on Feed-forward Ne tworks), a lightweight gate modulation frame-work motivated by the limitations of neuron-level and layer-level intervention paradigms. As illus-trated in Figure 1, instead of directly modifying knowledge-related neurons or applying fixed rules to selected layers, Shift keeps the backbone LLM frozen and uses trainable input-dependent gates to modulate hidden-state activations, thereby avoiding brittle fine-grained localization while enabling flexible intervention across conflict instances. The gate module is optimized with Group Relative Policy Optimization (GRPO) (Guo et al., 2025) to actively regulate internal activations, enabling the model to better arbitrate between contextual and parametric knowledge. By training fewer than 0.01% of the parameters, Shift 
+
+provides a minimally invasive way to improve adaptive knowledge arbitration under conflict while preserving the general capabilities of the backbone model. Our contributions can be summarized as follows: 
+
+❶ We introduce Shift , a minimally invasive gate modulation framework that alleviates knowledge conflicts in RAG by dynamically 
+
+controlling internal activations , without re-quiring modifications to the backbone LLM. 
+
+❷ We propose an input-dependent gate modula-tion mechanism optimized via GRPO, which adaptively balances contextual and paramet-ric knowledge while using fewer than 0.01% trainable parameters .
+
+❸ We conduct extensive experiments demon-strating that Shift consistently outperforms strong baselines in mitigating knowledge con-flicts, while better preserving the general ca-pabilities of the model .
+
+2 Related Work 
+
+Existing work on retrieval-augmented generation has extensively investigated how to mitigate knowl-edge conflicts when retrieved evidence contradicts a model’s parametric memory (Longpre et al., 2022; Wang et al., 2025b). One line of re-search focuses on regulating LLMs’ reliance on re-trieved evidence through prompting strategies and knowledge refinement. For example, prompting-based methods encourage models to prioritize re-trieved evidence through carefully designed instruc-tions (Zhou et al., 2023) or steer generation by contrasting predictions made with and without con-textual information (Shi et al., 2024b). Other ap-proaches improve context utilization by extracting salient information and consolidating evidence as the input context to better support LLM genera-tion (Zhao et al., 2024; Chang et al., 2025). Despite their effectiveness, these methods still struggle to reliably compel LLMs to override conflicting para-metric knowledge under knowledge conflicts (Xie et al., 2024), and they often fail to fully leverage the knowledge contained in the retrieved context. To address this problem, another line of work trains or fine-tunes models to regulate their re-liance on external evidence when it conflicts with parametric knowledge. These approaches aim to encode context-following preferences directly into the model (Ouyang et al., 2022). For exam-ple, Context-DPO (Bi et al., 2025a) employs di-rect preference optimization to encourage context-faithful responses over stubborn ones, while RA-DIT (Lin et al., 2024) further constructs large-scale instruction-tuning data to improve LLMs’ ability to utilize external evidence effectively. However, such fine-tuning-based methods still leave unclear which internal mechanisms govern whether mod-els follow retrieved evidence (Geva et al., 2021). Moreover, they are prone to catastrophic forgetting during fine-tuning (Luo et al., 2023). Figure 2: Overview of the proposed framework Shift . The workflow consists of two stages: (1) Gate-modulated Activation Steering, which enables the frozen LLM to selectively adjust its internal representations; and (2) Reinforcement-based Optimization, which guides the model toward faithful generation under knowledge conflict. 
+
+To avoid full finetuning, prior studies have at-tempted to localize factual knowledge within dif-ferent internal structures of LLMs, spanning in-dividual neurons, feed-forward networks (FFNs), attention heads, and cross-layer information flows, with the goal of enabling targeted knowledge edit-ing (Geva et al., 2021; Meng et al., 2023; Dai et al., 2022b; Geva et al., 2023a; Yu et al., 2023; Shi et al., 2024a). However, accurately localizing such knowledge remains challenging (Geva et al., 2023b; Chen et al., 2024), and the resulting in-terventions are often computationally costly and brittle (Hoelscher-Obermaier et al., 2023; Cohen et al., 2024; Niu et al., 2024). Consequently, more recent work has shifted toward coarser-grained in-terventions over attention heads and FFN modules. For example, PH3 (Jin et al., 2024), RHIO (Huang et al., 2025a), and JuICE (Li et al., 2025a) reg-ulate model behavior through head-level prun-ing, contrastive decoding, or test-time intervention, whereas ROME (Meng et al., 2023) and Param-Mute (Huang et al., 2025b) directly edit or suppress FFN-based factual associations. Despite their effec-tiveness, most existing methods still rely on fixed intervention schemes, such as offline-selected com-ponents, static pruning rules, or predefined suppres-sion coefficients (Hase et al., 2023). Such static strategies may inadvertently impair the model’s general capabilities (Gu et al., 2024; Li et al., 2024). In contrast, Shift introduces an input-adaptive in-ternal regulation framework for mitigating knowl-edge conflicts without modifying the parameters of the underlying LLM. 
+
+3 Methodology 
+
+We now present the proposed Selective Hidden-state Intervention on Feed-forward Networks (Shift ), as illustrated in Figure 2. First, 
+
+Shift equips the LLMs with lightweight gate modules to adaptively regulate internal activa-tions(Section 3.2). Second, Shift optimizes these gates with GRPO, enabling the model to adjust its internal representations and better balance contex-tual evidence with parametric knowledge during generation (Section 3.3). 
+
+3.1 Problem Formulation for Knowledge-Conflict in RAG 
+
+We consider a retrieval-augmented generation set-ting where each instance consists of a query qi
+
+and a retrieved context ci. The input prompt is constructed as xi = T (qi, c i), where T (·) denotes the prompt template, and the corresponding target answer is ai. Let πθ be a frozen large language model with L Transformer layers. We introduce lightweight gate parameters ψ = {(wl, b l)}Ll=1 ,where each pair parameterizes a gate inserted into the FFN branch of layer l. All backbone parameters remain fixed, and only ψ is learnable. The result-ing gated model is denoted as πψ. Our objective is to learn ψ so that πψ can produce faithful an-swers under potential knowledge conflicts between the retrieved context ci and the model’s parametric knowledge when answering qi.
+
+3.2 Gate-Modulated Activation Steering 
+
+To enable adaptive regulation under knowledge conflict, Shift equips the FFN branches with lightweight learnable gates that adaptively modu-late their contributions to the residual stream (Geva et al., 2021; Dai et al., 2022b). Specifically, in a standard Transformer layer, the FFN branch up-dates the hidden state as: 
+
+hl,t = ˜hl,t + FFN l
+
+
+
+LN( ˜hl,t )
+
+
+
+, (1) where ˜hl,t denotes the hidden state at token posi-tion t before the FFN branch at layer l, and LN( ·)
+
+denotes layer normalization. To make the FFN contribution input-adaptive, the gate module ψl = {wl, b l} contains learnable parameters to compute a scalar modulation value for each token: 
+
+gl,t = λg · σ
+
+
+
+w⊤ 
+
+> l
+
+˜hl,t + bl
+
+
+
+, (2) where σ(·) is the sigmoid function, and λg controls the modulation range. Thus, gl,t ∈ (0 , λ g) enables the gate to suppress, preserve, or amplify the FFN contribution according to the current hidden state. Accordingly, the gated FFN update is defined as 
+
+hl,t = ˜hl,t + gl,t · FFN l
+
+
+
+LN( ˜hl,t )
+
+
+
+, (3) When gl,t < 1, the corresponding FFN activation is weakened before entering the residual stream; when gl,t > 1, its contribution is strengthened. In this way, the model can selectively adjust the participation ratio of FFN activations for each input, rather than applying a fixed intervention rule to pre-selected components. Moreover, to preserve the original behavior of 
+
+πθ at the beginning of optimization, we initialize 
+
+wl and set 
+
+bl = logit(1 /λ g), (4) for all layers. With this initialization, the FFN output remains unchanged, and πψ starts from the same behavior as the frozen backbone πθ.
+
+3.3 Reinforcement Optimization of Adaptive Gate Modulation 
+
+After inserting the gate modules into each Trans-former layer, we leverage Group Relative Policy Optimization (GRPO) (Guo et al., 2025) to update the gate parameters ψ, while keeping all backbone parameters πθ frozen. Specifically, for each input xi sampled from D,the gated policy πψ generates a group of G candi-date responses: 
+
+Oi = {o1 
+
+> i
+
+, o 2 
+
+> i
+
+, . . . , o Gi }, oji ∼ πψ(· | xi). (5) Each response oji is scored by a composite reward comprising a format component and a faithfulness component, with more description provided in Ap-pendix C. GRPO then computes per-response ad-vantages from the group-level reward statistics and updates ψ accordingly. Since the backbone LLM remains frozen throughout training, we use πθ as the reference policy to anchor the optimization to the original model behavior. In addition, we apply an L2 regularization on the gate parameters: 
+
+Rgate = 1
+
+L
+
+> L
+
+X
+
+> l=1
+
+ ∥wl∥2 + b2
+
+> l
+
+ , (6) which helps stabilize optimization and prevents the learned gates from disrupting the behavior of the frozen LLM. Finally, the overall objective com-bines the GRPO policy gradient, the reference-policy constraint, and the gate regularization: 
+
+L = −J GRPO + βref Lref + λgate Rgate , (7) where JGRPO denotes the GRPO objective and 
+
+Lref constrains πψ to remain close to πθ. Since gradients propagate only through the gate parame-ters ψ, the backbone LLM is never modified. The overall algorithm is presented in Appendix F. 
+
+4 Experimental Setup 
+
+Datasets. To provide a comprehensive eval-uation, we conduct extensive experiments on three categories of publicly available datasets: 
+
+(1) In-domain Evaluation: We evaluate our method on the standard open-domain MRQA benchmark (Fisch et al., 2019), including Hot-potQA (Yang et al., 2018), SearchQA (Dunn et al., 2017), NewsQA (Trischler et al., 2017), Natu-ral Questions (NQ) (Kwiatkowski et al., 2019), TriviaQA (Joshi et al., 2017), and SQuAD (Ra-jpurkar et al., 2016). (2) Out-of-domain Evaluation: 
+
+We further evaluate our model on ConfiQA (Bi et al., 2024) to examine its generalization capabil-ities, including three subsets: Question Answer-ing (QA), Multi-hop Reasoning (MR), and Multi-Conflicts (MC). (3) General Capability Preserva-tion: We report performance on the MMLU bench-mark (Hendrycks et al., 2021b) to verify whether our gate-based intervention maintains the backbone model’s foundational language understanding and broad knowledge reasoning. Detailed dataset statis-tics are provided in Appendix A. 
+
+Baselines. We evaluate our proposed Shift 
+
+against a range of competitive baselines, which can HotpotQA SearchQA NewsQA NQ TriviaQA SQuAD Methods EM F1 EM F1 EM F1 EM F1 EM F1 EM F1                                                                                                                                                                           
+
+> Qwen-3-0.6B
+> No-RAG (Roberts et al., 2020) 2.27 7.51 3.49 5.33 0.52 3.32 2.27 6.76 8.20 12.27 2.10 8.77 Vanilla-RAG (Lewis et al., 2020) 43.64 59.73 27.57 35.66 22.77 36.28 40.41 53.29 46.55 53.99 46.96 59.14 CtrlA (Liu et al., 2024) 20.88 31.48 10.28 13.50 10.87 19.14 21.40 30.24 23.11 28.69 24.77 34.30 CK-PLUG (Bi et al., 2025b) 41.94 58.31 28.17 36.45 22.98 43.12 41.59 57.86 48.61 58.93 46.26 63.30 SFT (Wei et al., 2021) 39.57 54.60 41.81 50.16 26.45 43.18 38.25 52.70 60.67 67.74 55.80 68.67 Knowledgeable-r1 (Lin et al., 2026) 44.48 60.29 44.61 53.43 26.54 40.89 41.04 53.25 52.28 58.70 50.89 61.90
+> Shift (ours) 47.03 †63.36 †41.13 50.38 32.53 †50.58 †47.34 †62.95 †60.54 68.72 †58.34 †71.29 †
+> Qwen-3-8B
+> No-RAG (Roberts et al., 2020) 11.90 21.53 42.64 49.76 2.14 6.22 15.36 28.07 50.31 56.52 12.08 23.70 Vanilla-RAG (Lewis et al., 2020) 62.58 78.81 66.28 75.05 38.77 60.22 55.10 70.99 73.63 81.07 72.29 84.32 CtrlA (Liu et al., 2024) 34.13 47.28 52.90 61.01 26.88 43.52 36.34 52.55 59.68 66.41 45.65 59.05 CK-PLUG (Bi et al., 2025b) 52.36 67.90 60.93 69.26 35.23 55.59 48.89 65.56 70.80 78.09 67.62 80.39 SFT (Wei et al., 2021) 59.79 75.82 70.72 78.12 40.88 60.93 53.96 70.36 75.02 82.14 74.25 84.78 Knowledgeable-r1 (Lin et al., 2026) 62.55 78.84 67.00 75.71 39.17 60.46 54.90 70.66 74.39 81.78 72.82 84.77
+> Shift (ours) 62.48 79.08 †68.02 76.27 39.39 60.93 †57.38 †73.45 †75.23 †82.28 †73.46 85.50 †
+
+Table 1: Performance comparison on the MRQA benchmark. The boldfaced scores represent the best results. †
+
+indicates that the best results are statistically significantly better than the second-best results ( p < 0.05 , t-test). 
+
+Figure 3: Performance comparison on the ConFiQA benchmark using the F1 metric. 
+
+be categorized into three groups: (1) Prompting-based methods , including Vanilla-RAG (Ram et al., 2023), CtrlA (Liu et al., 2024), which performs adaptive retrieval by leveraging representation-level control signals to guide retrieval timing. (2) 
+
+Decoding-based methods , including CK-PLUG (Bi et al., 2025b), which provides plug-and-play con-trol over the model’s reliance on contextual versus parametric knowledge by modifying token prob-ability distributions. (3) Fine-tuning methods , in-cluding Supervised Fine-Tuning (SFT) (Wei et al., 2021) and Knowledgeable-R1 (Lin et al., 2026), which train the model with GRPO to improve its behavior under contextual knowledge conflicts. De-tailed descriptions are provided in Appendix B. 
+
+Evaluation Metrics. Following Longpre et al. (2021), we adopt a suite of metrics to evaluate the performance of model outputs. To ensure compara-bility, both generated responses and reference an-swers are normalized using the approach (Li et al., 2025c). We report two primary metrics: Exact Match (EM), which reflects whether the normalized prediction exactly matches any normalized refer-20 10 0 10 20       
+
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> AUC = 0.500
+> Pre-trained
+> Type 1
+> Type 2
+> 60 40 20 020 40 60
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> AUC = 0.832
+> Trained
+> Type 1
+> Type 2
+
+Figure 4: Visualization of the per-layer gate activations on Qwen-3-8B using t-SNE. AUC improves from 0.500 to 0.832 (+0.332), indicating the effectiveness of our gate module. 
+
+ence answer, and token-level F1 Score (F1), which captures the overlap between the normalized pre-diction and reference answer at the token level. To further evaluate the generalization of Shift across different model backbones, we additionally report Accuracy (ACC) in the generalization experiments, which measures whether the normalized prediction contains the correct answer. 
+
+Implementation Details. To ensure a fair com-parison, we use Qwen-3-0.6B and Qwen-3-8B in non-thinking mode as the backbone models for all methods throughout our experiments. For Shift ,we set the hyperparameters λg to 2, which controls the modulation range of the gate in Eq. 2. We set both wl and bl to 0 in Eq. 4 for all layers. Addi-tional details, including training prompt templates, hyperparameter settings, and training data construc-tion, are provided in Appendix H, Appendix E, and Appendix D, respectively. NQ TriviaQA SQuAD Avg. Model Method Train. Params EM ACC F1 EM ACC F1 EM ACC F1 EM ACC F1                                                                                                                                                                   
+
+> Qwen Models
+> Qwen-3-0.6B Vanilla-RAG N/A 40.63 51.34 53.56 46.72 57.60 54.11 46.91 63.32 59.30 44.75 57.42 55.66
+> Shift 28.7K (0.0048%) 47.20 58.19 62.83 60.26 71.91 68.40 58.50 72.92 71.63 55.32 67.67 67.62
+> Qwen-3-1.7B Vanilla-RAG N/A 41.69 54.76 55.07 55.27 67.37 62.53 56.62 73.49 68.15 51.19 65.21 61.91
+> Shift 57.4K (0.0033%) 49.38 65.34 65.55 66.24 78.78 74.17 62.82 80.89 75.99 59.48 75.00 71.90
+> Qwen-3-8B Vanilla-RAG N/A 54.69 67.44 70.61 73.41 85.16 80.95 72.67 88.00 84.59 66.92 80.20 78.72
+> Shift 147.5K (0.0018%) 57.25 70.23 73.35 75.17 86.60 82.32 73.48 89.20 85.41 68.63 82.01 80.36
+> Llama Models
+> Llama-3.2-1B Vanilla-RAG N/A 10.95 14.97 14.90 24.37 32.23 28.90 16.76 30.25 23.80 17.36 25.82 22.53
+> Shift 32.8K (0.0027%) 34.96 46.14 48.74 50.84 65.93 59.08 38.75 69.54 54.94 41.52 60.54 54.25
+> Llama-3.2-3B Vanilla-RAG N/A 53.43 66.94 69.41 60.42 77.15 69.25 70.67 86.86 83.22 61.50 76.98 73.96
+> Shift 86.0K (0.0027%) 56.80 65.07 71.95 71.83 81.91 78.98 76.04 85.75 86.18 68.22 77.58 79.04
+> Llama-3.1-8B Vanilla-RAG N/A 52.23 67.60 68.78 64.75 81.03 73.83 67.95 87.71 81.92 61.64 78.78 74.84
+> Shift 131.1K (0.0016%) 53.54 68.18 70.59 68.25 85.48 78.11 69.64 89.30 84.33 63.81 80.99 77.68
+
+Table 2: Performance comparison across three datasets. Qwen models are evaluated in non-thinking mode, and Llama models are instruction-tuned variants. The boldfaced scores represent the best results. This evaluates 
+
+Shift ’s generalization across different models. 
+
+5 Experimental Analysis 
+
+5.1 Main Results 
+
+The performance of Shift in comparison with prior methods is shown in Table 1 and Table 2. According to the results in these tables, we have several observations: 
+
+▶ Comparison with Existing Baselines. We first present a comprehensive comparison between 
+
+Shift and existing baselines across six datasets and two Qwen backbones. As shown in Table 1, 
+
+Shift consistently outperforms existing baselines across both Qwen-3-0.6B and Qwen-3-8B, demon-strating its effectiveness in producing more accu-rate and context-grounded responses. Compared with the strongest baseline under the same back-bone, Shift achieves average improvements of 6.16% on Qwen-3-0.6B and 2.64% on Qwen-3-8B across all datasets and metrics. The gains are es-pecially evident in challenging knowledge-conflict settings. As illustrated in Figure 3, on ConFiQA-MR, Shift improves the SFT by 11.15% in EM and 8.83% in F1 on Qwen-3-0.6B, and by 6.33% in EM and 3.68% in F1 on Qwen-3-8B. 
+
+Shift achieves better overall results while keep-ing the backbone parameters frozen, suggesting that knowledge conflicts can be effectively mit-igated through lightweight gate-based activation modulation. These results highlight the advan-tage of Shift ’s gate-driven GRPO optimization, which adaptively regulates the reliance on contex-tual and parametric knowledge without full-model fine-tuning. 
+
+▶ Generalization across Models and Tasks. We then demonstrate the generalization of our Shift 
+
+on different LLMs. As shown in Table 2, Shift 
+
+consistently improves Vanilla-RAG across NQ, TriviaQA, and SQuAD, demonstrating robust trans-ferability to both Qwen and Llama families. Acloser look at Qwen models reveals a clear trend: smaller backbones benefit the most, with Qwen-3-0.6B and Qwen-3-1.7B seeing gains of up to 11.96% and 9.99%, respectively. Even on the much larger Qwen-3-8B, the method maintains positive improvements (+1.81% in ACC), suggesting that the learned modulation does not saturate as model capacity expands. The Llama models exhibit an even more pronounced pattern. On the smallest model, Llama-3.2-1B, Shift delivers a striking im-provement of up to 34.72%, likely reflecting the larger headroom for modulation in weaker base models. As model size increases, the gains re-main substantial but taper off in a predictable man-ner: Llama-3.2-3B improves by 6.72%, while the strongest Llama-3.1-8B still shows a non-trivial 2.84% gain, underscoring the method’s consis-tent effectiveness across scales. These results sug-gest that the learned gate modules capture useful knowledge-arbitration patterns, rather than relying on fixed intervention rules tied to a specific back-bone. Consequently, Shift establishes an efficient internal modulation paradigm for mitigating knowl-MMLU Size Method Hum. Soc. STEM Other Avg.                                                                   
+
+> Qwen Models
+> 0.6B Origin 36.47 47.90 35.90 42.65 40.22
+> Shift 35.37 46.12 35.81 42.23 39.34 1.7B Origin 48.69 63.67 53.47 59.96 55.54
+> Shift 47.23 63.05 52.84 59.19 54.60 8B Origin 64.00 83.10 72.47 77.21 73.01
+> Shift 62.93 83.00 72.47 76.70 72.52
+> Llama Models
+> 1B Origin 45.67 52.94 40.98 55.00 48.28
+> Shift 45.14 52.97 41.07 55.20 48.17 3B Origin 61.06 68.22 51.70 68.23 62.11
+> Shift 60.98 68.09 51.73 67.52 61.91 8B Origin 65.08 77.61 58.80 74.19 68.43
+> Shift 64.74 77.74 59.05 74.25 68.42
+> Table 3: Performance comparison on the MMLU bench-mark. Hum. and Soc. denote Humanities and Social Sciences, respectively.
+
+edge conflict in frozen LLMs, adaptively regulating the reliance on contextual and parametric knowl-edge without independent model-specific tuning. 
+
+5.2 Further Analysis 
+
+▶ Analysis of General Capability Preservation. 
+
+Next, we analyze the impact of Shift on the gen-eral language understanding capability of back-bone LLMs. We evaluate all six models on the MMLU benchmark (Hendrycks et al., 2021c,a), a comprehensive 57-subject evaluation spanning STEM, humanities, social sciences, and other do-mains. As shown in Table 3, Shift incurs only marginal performance degradation across all model scales and architectures, with an average MMLU score reduction of less than 0.5% across all evalu-ated backbones. For the Qwen models, Qwen3-8B retains 99.3% of its original MMLU score, with only a 0.49% drop, while the smaller 0.6B and 1.7B models show similarly minor drops of 0.88% and 0.94%, respectively. Meanwhile, for the Llama models, Llama-3.1-8B shows an almost unchanged MMLU score, with only a 0.01% drop, while Llama-3.2-1B and Llama-3.2-3B exhibit drops of only 0.11% and 0.20%. These results indicate that 
+
+Shift achieves efficient knowledge modulation while largely preserving general capability. 
+
+▶ Analysis of Gate Activation. We then in-vestigate whether the adaptive gate module cap-tures meaningful signals to distinguish different knowledge conflict scenarios. Specifically, fol-lowing the data construction procedure detailed 
+
+Variants Accuracy (%) 
+
+LoRA-GRPO (param-matched) 67.63 Gate-SFT 66.38 w/o Gate Regulation 67.66 w/o Faithful Reward 67.76 
+
+Shift 70.23   
+
+> Table 4: Ablation study of Shift on the NQ dataset using Qwen-3-8B.
+
+in Appendix D, we sample 1,200 instances from MRQA evaluation subsets (200 per subset), cat-egorized into two types: Type 1 (444 samples), where parametric knowledge is correct but the re-trieved context is incorrect, and Type 2 (756 sam-ples), where the retrieved context is correct but parametric knowledge is incorrect. For each in-stance, we collect the per-layer gate activations from Shift on Qwen-3-8B and represent them as an L-dimensional gate vector g = [ g1, g 2, . . . , g L],where gl denotes the gate activation at layer l. As illustrated in Figure 4, compared to the pre-trained model, the trained gate activations exhibit visible separation between the two conflict types. To quan-tify this, we further evaluate the linear separability of the gate vectors via 5-fold cross-validated lo-gistic regression (Kohavi et al., 1995). The AUC increases from 0.500 to 0.832, suggesting that the gate module learns conflict-discriminative representations rather than applying uniform modulation across all inputs. Consistent trends across all six model scales are detailed in Ap-pendix G. This further suggests that Shift learns conflict-discriminative gating patterns, providing supporting evidence for its adaptive regulation be-havior under different conflict scenarios. 
+
+5.3 Ablation Study 
+
+To evaluate the contribution of each component in 
+
+Shift , we perform an ablation study, as shown in Table 4. Specifically, we compare the full model with the following variants: ❶ LoRA-GRPO: re-placing the proposed gate modules with parameter-matched LoRA adapters while keeping the same GRPO training objective. ❷ Gate-SFT: training the same gate modules with SFT instead of GRPO. ❸
+
+w/o Gate Regulation: removing the regularization term that constrains gate values toward the neutral value, and ❹ w/o Faithful Reward: removing the answer-faithfulness reward and retaining only the format reward. Results show that replacing adap-tive gates with parameter-matched LoRA adapters Case 1: Who won the 1994 ACM Turing Award?                       
+
+> No RAG Vanilla RAG Shift
+> Context “The 1994 ACM Turing Award was jointly awarded to Edward A. Feigenbaum and Raj Reddy for their pioneering work on large-scale artificial intelligence systems.” [Correct Context] Answer Herbert Simon and Allen Newell , who were recognized for their contributions to artificial intelligence and cognitive psychology.
+> Edward A. Feigenbaum and Raj Reddy , as stated in the provided background information.
+> Edward A. Feigenbaum and Raj Reddy . The context is consistent with established facts about the 1994 Turing Award.
+> Correctness ✗✓✓
+> Case 2: Who served as U.S. National Security Advisor from 2018 to 2019?
+> No RAG Vanilla RAG Shift
+> Context “Mike Pompeo served as the National Security Advisor from April 2018 to September 2019, playing a key role in U.S. foreign policy decisions during that period.” [Counterfactual Context] Answer John Bolton served as National Security Advisor from April 2018 to September 2019 under President Trump.
+> Mike Pompeo served as National Security Advisor from 2018 to 2019, as described in the background.
+> John Bolton . Although the context claims it was Mike Pompeo, this conflicts with well-established knowledge.
+> Correctness ✓✗✓
+
+Table 5: Case study comparing No RAG, Vanilla RAG, and Shift . Red denotes incorrect information and Blue 
+
+denotes correct information. Only Shift produces the correct answer in both scenarios. 
+
+reduces performance by 2.60%, indicating that the improvement does not merely come from intro-ducing additional trainable parameters but from the proposed input-dependent gating mechanism. Compared with GRPO, training the same gates with SFT leads to a 3.85% drop, highlighting the importance of relative policy optimization for adap-tive knowledge arbitration. Removing gate regu-larization and faithful reward further decreases per-formance by 2.57% and 2.47%, respectively, con-firming that both minimal-intervention constraints and conflict-aware rewards contribute to effective knowledge conflict mitigation. 
+
+5.4 Case Study 
+
+In this section, we provide specific cases of the models’ outputs under two typical knowledge con-flict scenarios, as shown in Table 5. Case 1: Con-flict between correct contextual evidence and un-reliable parametric knowledge. We first show a case where the retrieved context provides the correct answer, while the model couldn’t answer correctly. The context states that the 1994 ACM Turing Award was jointly awarded to Edward A. Feigenbaum and Raj Reddy, while the No RAG model incorrectly predicts Herbert Simon and Allen Newell. Both Vanilla RAG and Shift fol-low the retrieved evidence and generate the correct answer, showing that Shift can effectively use reliable contextual knowledge. Case 2: Conflict between counterfactual contextual evidence and reliable parametric knowledge. We then show a case where the retrieved context is counterfactual, while the model could solve it. The context falsely claims that Mike Pompeo served as U.S. National Security Advisor from 2018 to 2019, while the correct answer is John Bolton. Vanilla RAG is mis-led by the counterfactual context, whereas Shift 
+
+correctly predicts John Bolton, suggesting its abil-ity to resist misleading retrieved evidence. These results suggest that Shift adaptively arbitrates be-tween contextual and parametric knowledge across conflict scenarios. 
+
+6 Conclusion 
+
+In this paper, we introduced Shift , a lightweight framework designed to mitigate knowledge con-flicts in retrieval-augmented generation through adaptive internal modulation. By leveraging learn-able gate modulation over FFN activations, Shift 
+
+provides more reliable knowledge arbitration be-tween retrieved context and parametric memory. Comprehensive experiments across multiple bench-marks and LLMs show that Shift outperforms competitive baselines and exhibits strong gener-alization, demonstrating its effectiveness and ro-bustness across different settings. These findings highlight the potential of Shift to mitigate knowl-edge conflict in retrieval-augmented generation. Limitations 
+
+Despite the extensive progress, we should note that our Shift does not study highly specialized do-mains or multimodal question answering in this work. In future work, we will try to extend Shift 
+
+beyond general-domain and QA benchmarks to these broader settings. In addition, due to the lim-itations of computational resources, we did not conduct experiments on larger-scale models. 
+
+Ethical Statement 
+
+We have ensured that this research is conducted in an ethical and responsible manner. A brief sum-mary of the ethical considerations is provided be-low. 
+
+Public Dataset. We ensure that all data sources were cited accurately and appropriately, crediting the original authors. 
+
+Transparency. The code and datasets will be ap-propriately released to ensure the transparency and reproducibility of our work. 
+
+References 
+
+Baolong Bi, Shaohan Huang, Yiwei Wang, Tianchi Yang, Zihan Zhang, Haizhen Huang, Lingrui Mei, Junfeng Fang, Zehao Li, Furu Wei, Weiwei Deng, Feng Sun, Qi Zhang, and Shenghua Liu. 2024. Context-dpo: Aligning language models for context-faithfulness. Preprint , arXiv:2412.15280. Baolong Bi, Shaohan Huang, Yiwei Wang, Tianchi Yang, Zihan Zhang, Haizhen Huang, Lingrui Mei, Junfeng Fang, Zehao Li, Furu Wei, et al. 2025a. Context-dpo: Aligning language models for context-faithfulness. In Findings of the Association for Com-putational Linguistics: ACL 2025 , pages 10280– 10300. Baolong Bi, Shenghua Liu, Yiwei Wang, Yilong Xu, Junfeng Fang, Lingrui Mei, and Xueqi Cheng. 2025b. Parameters vs. context: Fine-grained control of knowledge reliance in language models. Preprint ,arXiv:2503.15888. Chia-Yuan Chang, Zhimeng Jiang, Vineeth Rakesh, Menghai Pan, Chin-Chia Michael Yeh, Guanchu Wang, Mingzhi Hu, Zhichao Xu, Yan Zheng, Ma-hashweta Das, et al. 2025. Main-rag: Multi-agent filtering retrieval-augmented generation. In Proceed-ings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Pa-pers) , pages 2607–2622. Hung-Ting Chen, Michael Zhang, and Eunsol Choi. 2022. Rich knowledge sources bring complex knowl-edge conflicts: Recalibrating models to reflect con-flicting evidence. In Proceedings of the 2022 Con-ference on Empirical Methods in Natural Language Processing , pages 2292–2307. Mingyang Chen, Linzhuang Sun, Tianpeng Li, Haoze Sun, Chenzheng Zhu, Haofen Wang, Jeff Pan, Wen Zhang, Huajun Chen, Fan Yang, et al. 2026. Learn-ing to reason with search for llms via reinforcement learning. Advances in Neural Information Process-ing Systems , 38:85287–85307. Yuheng Chen, Pengfei Cao, Yubo Chen, Kang Liu, and Jun Zhao. 2024. Journey to the center of the knowl-edge neurons: Discoveries of language-independent knowledge neurons and degenerate knowledge neu-rons. In Proceedings of the AAAI Conference on Ar-tificial Intelligence , volume 38, pages 17817–17825. Eunseong Choi, June Park, Hyeri Lee, and Jongwuk Lee. 2025. Conflict-aware soft prompting for retrieval-augmented generation. In Proceedings of the 2025 Conference on Empirical Methods in Natural Lan-guage Processing , pages 26981–26995, Suzhou, China. Association for Computational Linguistics. Roi Cohen, Eden Biran, Ori Yoran, Amir Globerson, and Mor Geva. 2024. Evaluating the ripple effects of knowledge editing in language models. Transac-tions of the Association for Computational Linguis-tics , 12:283–298. Damai Dai, Li Dong, Yaru Hao, Zhifang Sui, Baobao Chang, and Furu Wei. 2022a. Knowledge neurons in pretrained transformers. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 8493– 8502, Dublin, Ireland. Association for Computational Linguistics. Damai Dai, Li Dong, Yaru Hao, Zhifang Sui, Baobao Chang, and Furu Wei. 2022b. Knowledge neurons in pretrained transformers. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 8493– 8502. Matthew Dunn, Levent Sagun, Mike Higgins, V Ugur Guney, Volkan Cirik, and Kyunghyun Cho. 2017. Searchqa: A new q&a dataset augmented with context from a search engine. arXiv preprint arXiv:1704.05179 .Adam Fisch, Alon Talmor, Robin Jia, Minjoon Seo, Eunsol Choi, and Danqi Chen. 2019. MRQA 2019 shared task: Evaluating generalization in reading comprehension. In Proceedings of the 2nd Workshop on Machine Reading for Question Answering , pages 1–13, Hong Kong, China. Association for Computa-tional Linguistics. Mor Geva, Jasmijn Bastings, Katja Filippova, and Amir Globerson. 2023a. Dissecting recall of factual asso-ciations in auto-regressive language models. In Pro-ceedings of the 2023 Conference on Empirical Meth-ods in Natural Language Processing , pages 12216– 12235. Mor Geva, Jasmijn Bastings, Katja Filippova, and Amir Globerson. 2023b. Dissecting recall of factual asso-ciations in auto-regressive language models. In Pro-ceedings of the 2023 Conference on Empirical Meth-ods in Natural Language Processing , pages 12216– 12235, Singapore. Association for Computational Linguistics. Mor Geva, Roei Schuster, Jonathan Berant, and Omer Levy. 2021. Transformer feed-forward layers are key-value memories. Preprint , arXiv:2012.14913. Jia-Chen Gu, Hao-Xiang Xu, Jun-Yu Ma, Pan Lu, Zhen-Hua Ling, Kai-Wei Chang, and Nanyun Peng. 2024. Model editing harms general abilities of large lan-guage models: Regularization to the rescue. In Pro-ceedings of the 2024 Conference on Empirical Meth-ods in Natural Language Processing , pages 16801– 16819. Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, et al. 2025. Deepseek-r1: In-centivizing reasoning capability in llms via reinforce-ment learning. arXiv preprint arXiv:2501.12948 .Kelvin Guu, Kenton Lee, Zora Tung, Panupong Pasu-pat, and Mingwei Chang. 2020. Retrieval augmented language model pre-training. In International confer-ence on machine learning , pages 3929–3938. PMLR. Peter Hase, Mohit Bansal, Been Kim, and Asma Ghan-deharioun. 2023. Does localization inform editing? surprising differences in causality-based localization vs. knowledge editing in language models. Advances in Neural Information Processing Systems , 36:17643– 17668. Dan Hendrycks, Collin Burns, Steven Basart, Andrew Critch, Jerry Li, Dawn Song, and Jacob Steinhardt. 2021a. Aligning ai with shared human values. Pro-ceedings of the International Conference on Learning Representations (ICLR) .Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt. 2021b. Measuring massive multitask language un-derstanding. Preprint , arXiv:2009.03300. Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Stein-hardt. 2021c. Measuring massive multitask language understanding. Proceedings of the International Con-ference on Learning Representations (ICLR) .Jason Hoelscher-Obermaier, Julia Persson, Esben Kran, Ioannis Konstas, and Fazl Barez. 2023. Detecting edit failures in large language models: An improved specificity benchmark. In Findings of the Association for Computational Linguistics: ACL 2023 , pages 11548–11559. Lei Huang, Xiaocheng Feng, Weitao Ma, Yuchun Fan, Xiachong Feng, Yangfan Ye, Weihong Zhong, Yux-uan Gu, Baoxin Wang, Dayong Wu, et al. 2025a. Improving contextual faithfulness of large language models via retrieval heads-induced optimization. In 
+
+Proceedings of the 63rd Annual Meeting of the As-sociation for Computational Linguistics (Volume 1: Long Papers) , pages 16896–16913. Pengcheng Huang, Zhenghao Liu, Yukun Yan, Haiyan Zhao, Xiaoyuan Yi, Hao Chen, Zhiyuan Liu, Maosong Sun, Tong Xiao, Ge Yu, and Chenyan Xiong. 2025b. Parammute: Suppressing knowledge-critical ffns for faithful retrieval-augmented genera-tion. Preprint , arXiv:2502.15543. Gautier Izacard and Edouard Grave. 2021. Leveraging passage retrieval with generative models for open do-main question answering. In Proceedings of the 16th conference of the european chapter of the association for computational linguistics: main volume , pages 874–880. Gautier Izacard, Patrick Lewis, Maria Lomeli, Lucas Hosseini, Fabio Petroni, Timo Schick, Jane Dwivedi-Yu, Armand Joulin, Sebastian Riedel, and Edouard Grave. 2023. Atlas: Few-shot learning with retrieval augmented language models. Journal of Machine Learning Research , 24(251):1–43. Jiajie Jin, Yutao Zhu, Zhicheng Dou, Guanting Dong, Xinyu Yang, Chenghao Zhang, Tong Zhao, Zhao Yang, and Ji-Rong Wen. 2025. Flashrag: A modular toolkit for efficient retrieval-augmented generation research. In Companion Proceedings of the ACM on Web Conference 2025, WWW 2025, Sydney, NSW, Australia, 28 April 2025 - 2 May 2025 , pages 737– 740. ACM. Zhuoran Jin, Pengfei Cao, Hongbang Yuan, Yubo Chen, Jiexin Xu, Huaijun Li, Xiaojian Jiang, Kang Liu, and Jun Zhao. 2024. Cutting off the head ends the con-flict: A mechanism for interpreting and mitigating knowledge conflicts in language models. In Find-ings of the Association for Computational Linguis-tics: ACL 2024 , pages 1193–1215. Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke Zettlemoyer. 2017. TriviaQA: A large scale distantly supervised challenge dataset for reading comprehen-sion. In Proceedings of the 55th Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 1601–1611, Vancouver, Canada. Association for Computational Linguistics. Ron Kohavi et al. 1995. A study of cross-validation and bootstrap for accuracy estimation and model selec-tion. In Ijcai , volume 14, pages 1137–1145. Mon-treal, Canada. Tom Kwiatkowski, Jennimaria Palomaki, Olivia Red-field, Michael Collins, Ankur Parikh, Chris Alberti, Danielle Epstein, Illia Polosukhin, Jacob Devlin, Ken-ton Lee, Kristina Toutanova, Llion Jones, Matthew Kelcey, Ming-Wei Chang, Andrew M. Dai, Jakob Uszkoreit, Quoc Le, and Slav Petrov. 2019. Natu-ral questions: A benchmark for question answering research. Transactions of the Association for Compu-tational Linguistics , 7:452–466. Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Hein-rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-täschel, et al. 2020. Retrieval-augmented generation for knowledge-intensive nlp tasks. Advances in neu-ral information processing systems , 33:9459–9474. Gaotang Li, Yuzhong Chen, and Hanghang Tong. 2025a. Taming knowledge conflicts in language models. 
+
+arXiv preprint arXiv:2503.10996 .Qi Li, Xiang Liu, Zhenheng Tang, Peijie Dong, Zeyu Li, Xinglin Pan, and Xiaowen Chu. 2024. Should we really edit language models? on the evaluation of edited language models. Advances in Neural Infor-mation Processing Systems , 37:30850–30885. Xiaoxi Li, Jiajie Jin, Yujia Zhou, Yuyao Zhang, Peitian Zhang, Yutao Zhu, and Zhicheng Dou. 2025b. From matching to generation: A survey on generative infor-mation retrieval. ACM Transactions on Information Systems , 43(3):1–62. Xinze Li, Sen Mei, Zhenghao Liu, Yukun Yan, Shuo Wang, Shi Yu, Zheni Zeng, Hao Chen, Ge Yu, Zhiyuan Liu, et al. 2025c. Rag-ddr: Optimizing retrieval-augmented generation using differentiable data rewards. In International Conference on Learn-ing Representations , volume 2025, pages 9606–9627. Chenyu Lin, Yilin Wen, Du Su, Hexiang Tan, Fei Sun, Muhan Chen, Chenfu Bao, and Zhonghou Lyu. 2026. Resisting contextual interference in rag via parametric-knowledge reinforcement. Preprint ,arXiv:2506.05154. Xi Victoria Lin, Xilun Chen, Mingda Chen, Weijia Shi, Maria Lomeli, Richard James, Pedro Rodriguez, Jacob Kahn, Gergely Szilvasy, Mike Lewis, Luke Zettlemoyer, and Wen-tau Yih. 2024. RA-DIT: retrieval-augmented dual instruction tuning. In The Twelfth International Conference on Learning Repre-sentations, ICLR 2024 .Huanshuo Liu, Hao Zhang, Zhijiang Guo, Jing Wang, Kuicai Dong, Xiangyang Li, Yi Quan Lee, Cong Zhang, and Yong Liu. 2024. Ctrla: Adaptive retrieval-augmented generation via inherent control. 
+
+Preprint , arXiv:2405.18727. Shayne Longpre, Kartik Perisetla, Anthony Chen, Nikhil Ramesh, Chris DuBois, and Sameer Singh. 2021. Entity-based knowledge conflicts in question answering. In Proceedings of the 2021 Conference on Empirical Methods in Natural Language Process-ing , pages 7052–7063, Online and Punta Cana, Do-minican Republic. Association for Computational Linguistics. Shayne Longpre, Kartik Perisetla, Anthony Chen, Nikhil Ramesh, Chris DuBois, and Sameer Singh. 2022. Entity-based knowledge conflicts in question answering. Preprint , arXiv:2109.05052. Yun Luo, Zhen Yang, Fandong Meng, Yafu Li, Jie Zhou, and Yue Zhang. 2023. An empirical study of catas-trophic forgetting in large language models during continual fine-tuning. ArXiv preprint .Alex Mallen, Akari Asai, Victor Zhong, Rajarshi Das, Daniel Khashabi, and Hannaneh Hajishirzi. 2023. When not to trust language models: Investigating effectiveness of parametric and non-parametric mem-ories. In Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 9802–9822, Toronto, Canada. Association for Computational Linguistics. Kevin Meng, David Bau, Alex Andonian, and Yonatan Belinkov. 2023. Locating and editing factual associa-tions in gpt. Preprint , arXiv:2202.05262. Marcus J Min, Yangruibo Ding, Luca Buratti, Saurabh Pujar, Gail Kaiser, Suman Jana, and Baishakhi Ray. 2023. Beyond accuracy: Evaluating self-consistency of code large language models with identitychain. 
+
+arXiv preprint arXiv:2310.14053 .Jingcheng Niu, Andrew Liu, Zining Zhu, and Ger-ald Penn. 2024. What does the knowledge neu-ron thesis have to do with knowledge? Preprint ,arXiv:2405.02421. Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Car-roll L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul Christiano, Jan Leike, and Ryan Lowe. 2022. Training language models to follow instructions with human feedback. Preprint , arXiv:2203.02155. Cheng Qian, Emre Can Acikgoz, Qi He, Hongru Wang, Xiusi Chen, Dilek Hakkani-Tür, Gokhan Tur, and Heng Ji. 2025. Toolrl: Reward is all tool learning needs. Preprint , arXiv:2504.13958. Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and Percy Liang. 2016. Squad: 100,000+ questions for machine comprehension of text. In Proceedings of the 2016 conference on empirical methods in natural language processing , pages 2383–2392. Ori Ram, Yoav Levine, Itay Dalmedigos, Dor Muhlgay, Amnon Shashua, Kevin Leyton-Brown, and Yoav Shoham. 2023. In-context retrieval-augmented lan-guage models. Preprint , arXiv:2302.00083. Adam Roberts, Colin Raffel, and Noam Shazeer. 2020. How much knowledge can you pack into the parame-ters of a language model? In Proceedings of the 2020 conference on empirical methods in natural language processing (EMNLP) , pages 5418–5426. Dan Shi, Renren Jin, Tianhao Shen, Weilong Dong, Xin-wei Wu, and Deyi Xiong. 2024a. Ircan: Mitigating knowledge conflicts in llm generation via identifying and reweighting context-aware neurons. Preprint ,arXiv:2406.18406. Weijia Shi, Xiaochuang Han, Mike Lewis, Yulia Tsvetkov, Luke Zettlemoyer, and Wen-tau Yih. 2024b. Trusting your evidence: Hallucinate less with context-aware decoding. In Proceedings of the 2024 Confer-ence of the North American Chapter of the Associ-ation for Computational Linguistics: Human Lan-guage Technologies (Volume 2: Short Papers) , pages 783–791. Zhongxiang Sun, Xiaoxue Zang, Kai Zheng, Jun Xu, Xiao Zhang, Weijie Yu, Yang Song, and Han Li. 2025. Redeep: Detecting hallucination in retrieval-augmented generation via mechanistic interpretabil-ity. In International Conference on Learning Repre-sentations , volume 2025, pages 50250–50279. Adam Trischler, Tong Wang, Xingdi Yuan, Justin Har-ris, Alessandro Sordoni, Philip Bachman, and Kaheer Suleman. 2017. NewsQA: A machine comprehen-sion dataset. In Proceedings of the 2nd Workshop on Representation Learning for NLP , pages 191–200, Vancouver, Canada. Association for Computational Linguistics. Han Wang, Archiki Prasad, Elias Stengel-Eskin, and Mohit Bansal. 2025a. Adacad: Adaptively decoding to balance conflicts between contextual and paramet-ric knowledge. Preprint , arXiv:2409.07394. Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. 2022. Self-consistency improves chain of thought reasoning in language models. arXiv preprint arXiv:2203.11171 .Yilin Wang, Heng Wang, Yuyang Bai, and Minnan Luo. 2025b. Continuously steering llms sensitivity to contextual knowledge with proxy models. Preprint ,arXiv:2508.19720. Jason Wei, Maarten Bosma, Vincent Y Zhao, Kelvin Guu, Adams Wei Yu, Brian Lester, Nan Du, An-drew M Dai, and Quoc V Le. 2021. Finetuned lan-guage models are zero-shot learners. arXiv preprint arXiv:2109.01652 .Jason Wei, Maarten Bosma, Vincent Y. Zhao, Kelvin Guu, Adams Wei Yu, Brian Lester, Nan Du, An-drew M. Dai, and Quoc V. Le. 2022. Finetuned language models are zero-shot learners. Preprint ,arXiv:2109.01652. Jian Xie, Kai Zhang, Jiangjie Chen, Renze Lou, and Yu Su. 2024. Adaptive chameleon or stubborn sloth: Revealing the behavior of large language models in knowledge conflicts. In International Conference on Learning Representations , volume 2024, pages 35623–35646. Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William Cohen, Ruslan Salakhutdinov, and Christo-pher D. Manning. 2018. HotpotQA: A dataset for diverse, explainable multi-hop question answering. In Proceedings of the 2018 Conference on Empiri-cal Methods in Natural Language Processing , pages 2369–2380, Brussels, Belgium. Association for Com-putational Linguistics. Qinan Yu, Jack Merullo, and Ellie Pavlick. 2023. Char-acterizing mechanisms for factual recall in language models. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing ,pages 9924–9959. Haozhen Zhang, Tao Feng, and Jiaxuan You. 2025a. Router-r1: Teaching llms multi-round routing and ag-gregation via reinforcement learning. In The Thirty-ninth Annual Conference on Neural Information Pro-cessing Systems .Qinggang Zhang, Zhishang Xiang, Yilin Xiao, Le Wang, Junhui Li, Xinrun Wang, and Jinsong Su. 2025b. Faithfulrag: Fact-level conflict modeling for context-faithful retrieval-augmented generation. Preprint ,arXiv:2506.08938. Xinping Zhao, Dongfang Li, Yan Zhong, Boren Hu, Yibin Chen, Baotian Hu, and Min Zhang. 2024. Seer: Self-aligned evidence extraction for retrieval-augmented generation. In Proceedings of the 2024 Conference on Empirical Methods in Natural Lan-guage Processing , pages 3027–3041. Wenxuan Zhou, Sheng Zhang, Hoifung Poon, and Muhao Chen. 2023. Context-faithful prompting for large language models. In Findings of the Associa-tion for Computational Linguistics: EMNLP 2023 ,pages 14544–14556. Yutao Zhu, Huaying Yuan, Shuting Wang, Jiongnan Liu, Wenhan Liu, Chenlong Deng, Haonan Chen, Zheng Liu, Zhicheng Dou, and Ji-Rong Wen. 2025. Large language models for information retrieval: A survey. ACM Transactions on Information Systems ,44(1):1–54. A More Details about the Datasets 
+
+In this section, we provide more details about the datasets used in this paper as follows, with dataset statistics presented in Table 6. 
+
+A.1 In-Domain Datasets 
+
+• HotPotQA (Yang et al., 2018) is a multi-hop question-answering dataset constructed from Wikipedia. It requires models to reason over multiple supporting documents and identify evi-dence chains to answer complex questions. • NQ (Kwiatkowski et al., 2019) is a large-scale open-domain question-answering dataset based on real queries issued to the Google search en-gine. The answers are annotated as short spans or long passages from Wikipedia pages. • NewsQA (Trischler et al., 2017) is a machine reading comprehension dataset built from CNN news articles. Its questions are written by crowdworkers and require models to understand news passages and extract answers from the given articles. • SearchQA (Dunn et al., 2017) is an open-domain question-answering dataset constructed from Jeopardy! questions and search engine snippets. It requires models to infer answers from noisy retrieved evidence rather than rely-ing on a single clean reference passage. • SQuAD (Rajpurkar et al., 2016) is a reading comprehension dataset built from Wikipedia ar-ticles. Each question is paired with a context paragraph, and the answer is typically annotated as a text span within the paragraph. • TriviaQA (Joshi et al., 2017) is a large-scale question-answering dataset containing trivia questions paired with independently collected evidence documents. It is designed to evaluate whether models can answer challenging ques-tions by reasoning over distant and potentially noisy evidence. 
+
+A.2 Out-of-Domain Datasets 
+
+• ConfiQA (Bi et al., 2024) is a benchmark designed to evaluate faithfulness in retrieval-augmented generation scenarios with knowl-edge conflicts. It contains questions paired with provided contexts, where the model is expected to generate answers that are faithful to the given context rather than relying on its parametric knowledge. 
+
+A.3 General Datasets 
+
+• MMLU (Hendrycks et al., 2021b) is a multi-task language understanding benchmark cover-ing 57 subjects, including mathematics, history, computer science, law, and other academic or professional domains. It is designed to evaluate models’ broad world knowledge and problem-solving ability through multiple-choice ques-tions. 
+
+B More Details about the Baselines 
+
+In this section, we report the baselines used for comparison in this paper. • Vanilla-RAG (Ram et al., 2023) is a standard retrieval-augmented generation baseline that di-rectly prepends retrieved documents to the input prompt and generates answers conditioned on the augmented context. • CtrlA (Liu et al., 2024) is a prompting-based method that adaptively controls the model’s re-liance on retrieved information during genera-tion. It aims to improve answer reliability by guiding the model to determine how much ex-ternal context should be used. • AdaCAD (Wang et al., 2025a) is a decoding-based method that adaptively balances contex-tual knowledge and parametric knowledge dur-ing generation. It adjusts the decoding process to determine whether the model should rely more on retrieved context or its internal knowl-edge. • CK-PLUG (Bi et al., 2025b) is a decoding-based method for handling conflicts between contextual and parametric knowledge. It in-troduces fine-grained control during decoding to better integrate retrieved evidence with the model’s internal knowledge. • SFT (Wei et al., 2022) is a supervised fine-tuning baseline that updates model parameters using labeled training examples. It trains the model to generate target answers directly from the given query-context pairs. • Knowledgeable-R1 (Lin et al., 2026) is a fine-tuning-based method designed to improve Dataset Category Task Type Test Samples 
+
+HotPotQA (Yang et al., 2018) In-domain Multi-hop QA 5,901 NQ (Kwiatkowski et al., 2019) In-domain Open-domain QA 12,836 NewsQA (Trischler et al., 2017) In-domain Reading Comprehension 4,212 SearchQA (Dunn et al., 2017) In-domain Open-domain QA 16,980 SQuAD (Rajpurkar et al., 2016) In-domain Reading Comprehension 10,507 TriviaQA (Joshi et al., 2017) In-domain Open-domain QA 7,785 ConFiQA (Bi et al., 2024) Out-of-domain Conflict QA 18,000 MMLU (Hendrycks et al., 2021b) General Multi-task QA 14,042 
+
+> Table 6: Detailed statistics of datasets used in evaluations. For ConFiQA, the reported number includes its Question Answering (QA), Multi-hop Reasoning (MR), and Multi-Conflicts (MC) subsets.
+
+robustness against contextual interference in retrieval-augmented generation. It trains the model to better resist misleading retrieved con-texts while preserving useful knowledge for answering questions. We utilize LoRA-based parameter-efficient fine-tuning to implement this baseline. 
+
+C More Details about Shift 
+
+In this section, we provide additional details about the reinforcement learning procedure of Shift , in-cluding the reward design and response parsing rule. 
+
+Reward design. Following recent work on rule-based rewards for RL-based LLM training (Guo et al., 2025; Zhang et al., 2025a), we employ a composite reward R = Rformat + Rfaithful with two components. To encourage adherence to the required struc-tured output, we first define a format reward :
+
+Rformat =
+
+
+
+1.0, valid format with answer ,
+
+0.5, valid format without answer ,
+
+0.0, otherwise .
+
+(8) Inspired by (Guo et al., 2025; Qian et al., 2025), we assign an intermediate score of 0.5 to well-structured but incomplete responses, which pro-vides partial credit and yields a denser learning signal than a purely binary alternative. We then define a faithfulness reward to en-courage the final answer to be consistent with the context-supported target answer. Let ˆaji denote the answer extracted from the answer field of the j-th sampled response for input xi, and let Ai denote the set of acceptable target answers. The faithful-ness reward is computed as 
+
+Rfaithful = 1
+
+
+
+max 
+
+> a∈A i
+
+EM  norm(ˆ aji ),
+
+norm( a) = 1 
+
+
+
+,
+
+(9) where norm( ·) denotes the normalization function and EM( ·, ·) denotes exact match after normaliza-tion. For datasets with a single reference answer, we set Ai = {ai}. If the response does not contain a valid answer field, we set Rfaithful = 0 .
+
+Response parsing and normalization. We parse each generated response according to the required structured output template. When a valid answer field is detected, its content is extracted as ˆaji and used for reward computation. Otherwise, the ex-tracted answer is treated as empty and the response receives no faithfulness reward. During reward computation, we apply the same normalization function norm( ·) to both the extracted answer and the reference answers. Specifically, we lowercase the text, remove punctuation and articles, and col-lapse consecutive whitespace. This normalization prevents the reward from penalizing superficial surface-form differences while preserving the cri-terion that the generated answer should match the context-supported target. 
+
+D Training Data Construction 
+
+In this section, we describe how we construct the training data used to optimize the gate modules in Shift . Our training data are sampled from the training split of MRQA, which contains question-answering instances from multiple source datasets. For each original instance, we denote the ques-tion as qi and the gold answer as rci . We construct knowledge-conflict training examples by compar-ing the model’s parametric belief with retrieved contextual evidence. 
+
+Self-Consistency Filter. For each question qi, we first estimate the model’s dominant parametric be-lief without providing any retrieved context. Fol-lowing the self-consistency strategy (Wang et al., 2022; Min et al., 2023), we prompt the model 5 times using only the question and collect its gen-erated answers. If a majority answer appears with frequency at least 3, we treat it as the model’s dom-inant parametric answer and denote it as ˆrpi . Ques-tions without a stable majority answer are filtered out to ensure that the constructed conflict exam-ples are based on a reliable estimate of the model’s parametric belief (Huang et al., 2025b). 
+
+Retrieval of Candidate Contexts. Following previous work (Li et al., 2025b; Chen et al., 2026; Zhang et al., 2025a; Zhu et al., 2025), we adopt the standard retrieval pipeline implemented in FlashRAG (Jin et al., 2025) to retrieve external passages for each question. The retrieved passages serve as candidate contexts for constructing both supportive and conflicting evidence. We denote the original supporting context associated with the gold answer as c+ 
+
+> i
+
+. To construct a counterfactual context, we select a passage from the retrieved can-didates that is semantically similar to the query but does not contain the dominant parametric answer 
+
+ˆrpi . The selected passage is denoted as c− 
+
+> i
+
+. This construction preserves topical relevance while in-troducing contextual evidence that conflicts with the model’s parametric belief. 
+
+Construction of Contrastive Conflict Data. 
+
+Based on the relationship between the dominant parametric answer ˆrpi and the gold answer rci , we construct two types of conflict examples. • Parametric Type. If the dominant parametric an-swer ˆrpi matches the gold answer rci , the model’s parametric knowledge is considered reliable. We pair the question qi with the counterfactual con-text c− 
+
+> i
+
+, which introduces misleading contextual evidence. The target answer is set to the paramet-ric answer ˆrpi . This type of example requires the model to preserve correct parametric knowledge and avoid being misled by conflicting retrieved context. • Contextual Type. If the dominant parametric answer ˆrpi does not match the gold answer rci , the model’s parametric belief is considered unreli-able. We pair the question qi with the supporting context c+ 
+
+> i
+
+. The target answer is set to the dataset gold answer rci . This type of example requires the model to override its incorrect parametric belief and ground its response in the provided context. 
+
+Training format. Each constructed example is converted into the training format used by Shift .For a constructed context ci and target answer ai,we build the input prompt as 
+
+xi = T (qi, c i), (10) where T (·) denotes the same prompt template used in the main experiments. For Parametric Type ex-amples, we set ci = c− 
+
+> i
+
+and ai = ˆ rpi . For Contex-tual Type examples, we set ci = c+ 
+
+> i
+
+and ai = rci .The final training set is the union of the two con-structed subsets: 
+
+D = Dp ∪ D c, (11) where each instance is represented as (xi, a i). This training data encourages the gate modules to learn both directions of knowledge arbitration: relying on parametric knowledge when it is correct and relying on contextual evidence when the parametric belief is incorrect. 
+
+E Hyperparameters 
+
+In this section, we provide the hyperparameter set-tings used in the training stage of Shift .
+
+## Hyperparameter Value 
+
+## Training iterations 150 Episodes per iteration 64 Per-device batch size 4Optimizer AdamW Learning rate 1 × 10 −4
+
+## Generations per sample G 4KL coefficient 0.001 Sampling temperature 0.6 Top-p 0.95 Top-k 20 Gate reg. coefficient 0.01 Trainable parameters Gates only 
+
+> Table 7: Hyperparameter settings used for training in
+> Shift .
+
+Algorithm 1: Shift Framework 
+
+Input : Frozen backbone LLM πθ;training dataset D = {(xi, a i)}Ni=1 ;maximum iterations Niter ; group size G; learning rate η. 
+
+> 1
+
+// Step 1: Gate-modulated Activation Steering ; 
+
+> 2
+
+Initialize lightweight gate parameters 
+
+ψ = {(wl, b l)}Ll=1 using Eq. 4;  
+
+> 3
+
+Insert gate modules into the frozen LLM to obtain the gated policy πψ using Eq. 2 and Eq. 3;  
+
+> 4
+
+Keep all backbone parameters πθ frozen throughout training;  
+
+> 5
+
+// Step 2: Reinforcement-based Optimization ; 
+
+> 6
+
+for t ← 1 to Niter do  
+
+> 7
+
+Sample a mini-batch B ⊂ D ; 
+
+> 8
+
+foreach (xi, a i) ∈ B do  
+
+> 9
+
+Generate a group of candidate responses Oi using Eq. 5;  
+
+> 10
+
+Compute reward rji ← R(oji , a i) for each response oji ; 
+
+> 11
+
+Estimate group-relative advantages from {rki }Gk=1 ; 
+
+> 12
+
+Compute the gate regularization term using Eq. 6;  
+
+> 13
+
+Compute the overall optimization objective using Eq. 7;  
+
+> 14
+
+Update only the gate parameters 
+
+ψ ← ψ − η · Adam( ∇ψL);
+
+Output : Optimized gate parameters ψ∗.
+
+F Algorithms 
+
+In this section, we present the step-by-step training algorithm of our Shift , which is summarized in Algorithm 1. 
+
+G Gate Visualization 
+
+In this section, we exhibit more t-SNE visualiza-tions of our gate across different models. 20 0 20       
+
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> AUC = 0.500
+> Pre-trained
+> Type 1
+> Type 2
+> 60 40 20 020 40 60
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> AUC = 0.867
+> Trained
+> Type 1
+> Type 2
+
+Figure 5: Visualization of the per-layer gate activations on Llama-3.2-1B using t-SNE. 30 20 10 0 10 20 30      
+
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> AUC = 0.500
+> Pre-trained
+> Type 1
+> Type 2
+> 60 40 20 020 40
+> 20
+> 0
+> 20
+> 40
+> AUC = 0.877
+> Trained
+> Type 1
+> Type 2
+
+Figure 6: Visualization of the per-layer gate activations on Llama-3.2-3B using t-SNE. 
+
+H Prompts 
+
+In this section, we provide the prompt templates used in our experiments, covering both training and evaluation. 30 20 10 0 10 20 30 
+
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> AUC = 0.500
+
+Pre-trained       
+
+> Type 1
+> Type 2
+> 60 40 20 020 40 60
+> 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> AUC = 0.814
+
+Trained 
+
+> Type 1
+> Type 2
+
+Figure 7: Visualization of the per-layer gate activations on Llama-3.1-8B using t-SNE. 30 20 10 0 10 20 30 
+
+30 
+
+20 
+
+10 
+
+0
+
+10 
+
+20 
+
+30 
+
+AUC = 0.500 
+
+Pre-trained 
+
+Type 1 
+
+Type 2 
+
+60 40 20 0 20 40 
+
+40 
+
+20 
+
+0
+
+20 
+
+40 
+
+AUC = 0.730 
+
+Trained 
+
+Type 1 
+
+Type 2 
+
+Figure 8: Visualization of the per-layer gate activations on Qwen-3-0.6B using t-SNE. 20 10 0 10 20 
+
+30 
+
+20 
+
+10 
+
+0
+
+10 
+
+20 
+
+30 
+
+AUC = 0.500 
+
+Pre-trained 
+
+Type 1 
+
+Type 2 
+
+60 40 20 0 20 40 60 
+
+30 
+
+20 
+
+10 
+
+0
+
+10 
+
+20 
+
+30 
+
+AUC = 0.832 
+
+Trained 
+
+Type 1 
+
+Type 2 
+
+Figure 9: Visualization of the per-layer gate activations on Qwen-3-8B using t-SNE. Training Prompt 
+
+System Prompt: You are a helpful assistant who answers questions based on the provided background information. The background information may be incorrect, so you should judge whether to believe yourself or to believe the background information. You should think about the reasoning process and then provide the answer based on the given context. 
+
+Prompt Template: Background: context Task Instruction: Answer the question with the given background information above. Provide your final answer in <answer> </answer> tags, for example <answer>Petri Alanko</answer>. Q: question A:  
+
+> Figure 10: Training prompt used for Qwen models in Non-Thinking Mode during GRPO training in Shift .
+
+Eval Prompt 
+
+System Prompt: You are a helpful assistant who answers questions based on the provided background information. The background information may be incorrect, so you should judge whether to believe yourself or to believe the background information. You should think about the reasoning process and then provide the answer based on the given context. 
+
+Prompt Template: Background: context Task Instruction: Answer the question with the given background information above. Provide your final answer in <answer> </answer> tags, for example <answer>Petri Alanko</answer>. Q: question A: 
+
+> Figure 11: Eval prompt on Qwen models in Non-Thinking Mode used for evaluation.
+
+Training Prompt 
+
+System Prompt: You are a helpful assistant who answers questions based on the provided background information. The background information may be incorrect, so you should judge whether to believe yourself or to believe the background information. You should think about the reasoning process and then provide the answer based on the given context. 
+
+Prompt Template: Background: context Task Instruction: Answer the question with the given background information above. Provide your final answer in <answer> </answer> tags, for example <answer>Petri Alanko</answer>. Q: question A:  
+
+> Figure 12: Training prompt used for Llama models during GRPO training in Shift .
+
+Eval Prompt 
+
+System Prompt: You are a helpful assistant who answers questions based on the provided background information. The background information may be incorrect, so you should judge whether to believe yourself or to believe the background information. You should think about the reasoning process and then provide the answer based on the given context. 
+
+Prompt Template: Background: context Task Instruction: Answer the question with the given background information above. Provide your final answer in <answer> </answer> tags, for example <answer>Petri Alanko</answer>. Q: question A:
