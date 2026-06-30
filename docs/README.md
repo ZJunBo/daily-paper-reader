@@ -6,40 +6,56 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-29
-- 运行时间：2026-06-29 20:57:38 UTC
+- 最新运行日期：2026-06-30
+- 运行时间：2026-06-30 22:20:09 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：1
-- 速读区：5
+- 本次总论文数：12
+- 精读区：5
+- 速读区：7
 
 ### 今日简报（AI）
-1. 今日聚焦AI安全微调与多智能体对齐，精读Low-Agreeableness人格条件化方法（9.0分），速读AgentLens、LIBERO-Safety及Yuvion VL三项安全基准与解释性工具。
-2. 最值得关注：通过低宜人性人设条件化微调可显著提升LLM安全边界；多轮编码智能体的可解释安全引导以及视觉-语言-动作模型的物理/语义安全评估成为新重点。
-3. 建议普通读者优先精读该9.0分论文，快速了解安全微调的新范式；同时浏览AgentLens和LIBERO-Safety速读，把握多智能体与具身安全前沿。
-- 详情：[/202606/29/README](/202606/29/README)
+今天共收录12篇论文，精读5篇、速读7篇，重点推荐两篇9.0高分论文。最值得关注的方向是“微调逆转的引力解释”与“良性多语言微调的安全异质性影响”。建议深入阅读这两篇精读论文，并关注大模型对齐中的安全性与机制分析。
+- 详情：[/202606/30/README](/202606/30/README)
 
 ### 精读区论文标签
-1. [Low-Agreeableness Persona Conditioning for Safe LLM Fine-Tuning](/202606/29/2606.27709v1-low-agreeableness-persona-conditioning-for-safe-llm-fine-tuning)  
+1. [A Gravitational Interpretation of Fine-Tuning Reversion](/202606/30/2606.28525v1-a-gravitational-interpretation-of-fine-tuning-reversion)  
    标签：评分：9.0/10、query:smd
-   evidence：通过人格条件化缓解暖意微调导致的安全退化
+   evidence：探讨微调导致的安全退化和对齐丢失
+2. [The Heterogeneous Safety Impacts of Benign Multilingual Fine-Tuning](/202606/30/2606.28843v1-the-heterogeneous-safety-impacts-of-benign-multilingual-fine-tuning)  
+   标签：评分：9.0/10、query:smd
+   evidence：研究良性多语言微调导致的安全退化
+3. [Defending Against Harmful Supervision Hidden in Benign Samples](/202606/30/2606.30263v1-defending-against-harmful-supervision-hidden-in-benign-samples)  
+   标签：评分：9.0/10、query:smd
+   evidence：防御有害微调攻击，检测隐藏的有害监督
+4. [BaRA: Bayesian Adaptive Rank Allocation for Parameter-Efficient Fine-Tuning](/202606/30/2606.29184v1-bara-bayesian-adaptive-rank-allocation-for-parameter-efficient-fine-tuning)  
+   标签：评分：8.0/10、query:luq
+   evidence：贝叶斯自适应秩分配微调方法提升了LLM的不确定性估计
+5. [The Joint Effect of Quantization and Sampling Temperature on LLM Safety Alignment: A Factorial Analysis](/202606/30/2606.29581v1-the-joint-effect-of-quantization-and-sampling-temperature-on-llm-safety-alignment-a-factorial-analysis)  
+   标签：评分：8.0/10、query:smd
+   evidence：研究量化与温度对安全对齐的影响
 
 ### 速读区论文标签
-1. [AgentLens: Interpretable Safety Steering via Mechanistic Subspaces for Multi-Turn Coding Agent](/202606/29/2606.22673v1-agentlens-interpretable-safety-steering-via-mechanistic-subspaces-for-multi-turn-coding-agent)  
+1. [Robust Harmful Features Under Jailbreak Attacks: Mechanistic Evidence from Attention Head Specialization in Large Language Models](/202606/30/2606.28153v1-robust-harmful-features-under-jailbreak-attacks-mechanistic-evidence-from-attention-head-specialization-in-large-language-models)  
+   标签：评分：7.0/10、query:smd
+   evidence：揭示越狱下注意力头分化的机制，为防御设计提供依据
+2. [Mechanistic Personality Analysis of LLMs Steering Personality via Latent Feature Interventions](/202606/30/2606.28770v1-mechanistic-personality-analysis-of-llms-steering-personality-via-latent-feature-interventions)  
    标签：评分：7.0/10、query:dg
-   evidence：使用激活引导进行编码代理的安全控制
-2. [LIBERO-Safety: A Comprehensive Benchmark for Physical and Semantic Safety in Vision-Language-Action Models](/202606/29/2606.23686v2-libero-safety-a-comprehensive-benchmark-for-physical-and-semantic-safety-in-vision-language-action-models)  
-   标签：评分：7.0/10、query:dg
-   evidence：合成了视觉-语言-动作模型的安全关键场景数据
-3. [Yuvion VL: A Multimodal Foundation Model for Adversarial Content and AI Safety](/202606/29/2606.25034v2-yuvion-vl-a-multimodal-foundation-model-for-adversarial-content-and-ai-safety)  
-   标签：评分：7.0/10、query:dg
-   evidence：合成安全数据生成流水线
-4. [USAD: Uncertainty-aware Statistical Adversarial Detection](/202606/29/2606.27832v1-usad-uncertainty-aware-statistical-adversarial-detection)  
+   evidence：利用残差流中的加性偏移进行激活引导
+3. [When Can Conformal Risk Control Certify LLM Outputs? Bounds, Impossibility, and Adaptation for Structured Generation](/202606/30/2606.29054v1-when-can-conformal-risk-control-certify-llm-outputs-bounds-impossibility-and-adaptation-for-structured-generation)  
    标签：评分：7.0/10、query:uq-safety
-   evidence：基于不确定性感知的对抗样本检测
-5. [SHIFT: Gate-Modulated Activation Steering for Knowledge Conflict Mitigation in Retrieval-Augmented Generation](/202606/29/2606.27786v1-shift-gate-modulated-activation-steering-for-knowledge-conflict-mitigation-in-retrieval-augmented-generation)  
-   标签：评分：6.0/10、query:dg
-   evidence：使用门控调制激活引导解决RAG中的知识冲突
+   evidence：使用共形风险控制对LLM输出进行不确定性量化
+4. [Reasoning Quality Emerges Early: Data Curation for Reasoning Models](/202606/30/2606.26797v1-reasoning-quality-emerges-early-data-curation-for-reasoning-models)  
+   标签：评分：6.0/10、query:smd
+   evidence：基于早期推理token的数据筛选方法，可迁移到安全数据选择以保持对齐
+5. [Robust Harmful Features Under Jailbreak Attacks: Mechanistic Evidence from Attention Head Specialization in Large Language Models](/202606/30/2606.28153v2-robust-harmful-features-under-jailbreak-attacks-mechanistic-evidence-from-attention-head-specialization-in-large-language-models)  
+   标签：评分：6.0/10、query:smd
+   evidence：越狱攻击机制研究，识别注意头类型，为设计对齐保持防御提供启示
+6. [KrishokChat: A Citation-Grounded Dataset and Benchmark for Bengali Agricultural Advisory](/202606/30/2606.29243v1-krishokchat-a-citation-grounded-dataset-and-benchmark-for-bengali-agricultural-advisory)  
+   标签：评分：6.0/10、query:smd
+   evidence：在微调数据中混合化学安全与对抗安全实例
+7. [Online Data Selection for Instruction Tuning via Gaussian Processes](/202606/30/2606.30077v1-online-data-selection-for-instruction-tuning-via-gaussian-processes)  
+   标签：评分：6.0/10、query:smd
+   evidence：针对指令微调的在线数据选择方法，可迁移至安全数据选择
 
 
 <div class="dpr-home-promo-card">
