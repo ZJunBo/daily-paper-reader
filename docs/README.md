@@ -6,32 +6,37 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-03
-- 运行时间：2026-07-03 21:49:19 UTC
+- 最新运行日期：2026-07-04
+- 运行时间：2026-07-04 20:47:35 UTC
 - 运行状态：成功
-- 本次总论文数：4
+- 本次总论文数：5
 - 精读区：3
-- 速读区：1
+- 速读区：2
 
 ### 今日简报（AI）
-今天关注了贝叶斯稀疏低秩适配与动态表示编辑，分别用于LLM的不确定性估计和推理轨迹控制。最值得精读的是9.0分的贝叶斯方法及8.0分的推理搜索编辑框架。建议优先阅读这两篇高分文章，了解如何提升模型的可信度与可控性。
-- 详情：[/202607/03/README](/202607/03/README)
+今日精读两篇高评分论文，聚焦AI安全对抗检测与模型微调保护。  
+最值得关注USAD（不确定性感知统计对抗检测）和Fora（能力保持微调）两大方向。  
+普通读者可优先了解模型鲁棒性提升与微调安全性平衡的实用方法。
+- 详情：[/202607/04/README](/202607/04/README)
 
 ### 精读区论文标签
-1. [Bayesian Sparse Low-Rank Adaptation for Large Language Model Uncertainty Estimation](/202607/03/2607.02182v1-bayesian-sparse-low-rank-adaptation-for-large-language-model-uncertainty-estimation)  
-   标签：评分：9.0/10、query:luq
-   evidence：提出DALorRA方法通过低秩自适应对大语言模型进行贝叶斯不确定估计
-2. [Search for Truth from Reasoning: A Dynamic Representation Editing Framework for Steering LLM Trajectories](/202607/03/2606.28589v1-search-for-truth-from-reasoning-a-dynamic-representation-editing-framework-for-steering-llm-trajectories)  
+1. [USAD: Uncertainty-aware Statistical Adversarial Detection](/202607/04/2606.27832v1-usad-uncertainty-aware-statistical-adversarial-detection)  
+   标签：评分：8.0/10、query:uq-safety
+   evidence：利用不确定性感知的统计对抗检测
+2. [Fora: From Weight-Space to Function-Space Protection in Capability-Preserving Fine-Tuning](/202607/04/2606.31092v2-fora-from-weight-space-to-function-space-protection-in-capability-preserving-fine-tuning)  
+   标签：评分：8.0/10、query:smd
+   evidence：函数空间保护以在微调中保持能力
+3. [On the Limits of Steering Vectors for Preference-Aligned Generation](/202607/04/2607.01802v1-on-the-limits-of-steering-vectors-for-preference-aligned-generation)  
    标签：评分：8.0/10、query:dg
-   evidence：使用动态表示编辑（激活引导）来引导LLM推理轨迹。
-3. [Bayesian Uncertainty Propagation for Agentic RAG Pipelines: A Proof-of-Concept Study on Multi-Hop Question Answering](/202607/03/2607.00972v1-bayesian-uncertainty-propagation-for-agentic-rag-pipelines-a-proof-of-concept-study-on-multi-hop-question-answering)  
-   标签：评分：8.0/10、query:luq
-   evidence：提出基于语义分歧和生成器自评估的贝叶斯不确定性传播方法，用于代理式RAG流水线。
+   evidence：研究引导向量在偏好对齐生成中的局限性，与合成安全数据的激活引导方法直接相关
 
 ### 速读区论文标签
-1. [Divergence-based Safety Measure for Large Language Models via Rational Inattention](/202607/03/2606.29081v1-divergence-based-safety-measure-for-large-language-models-via-rational-inattention)  
+1. [Robust Trajectory Distillation: Hybrid Reweighting Meets Teacher-Inspired Targets](/202607/04/2606.29837v1-robust-trajectory-distillation-hybrid-reweighting-meets-teacher-inspired-targets)  
    标签：评分：6.0/10、query:smd
-   evidence：基于散度的LLM安全度量，可检测攻击
+   evidence：基于轨迹的数据集蒸馏方法，包含样本选择与重加权，可应用于安全数据筛选
+2. [Distributionally Robust Listwise Preference Optimization](/202607/04/2607.01715v1-distributionally-robust-listwise-preference-optimization)  
+   标签：评分：6.0/10、query:smd
+   evidence：鲁棒的列联偏好优化处理排序不确定性；提升LLM对齐鲁棒性。
 
 
 <div class="dpr-home-promo-card">
