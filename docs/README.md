@@ -6,26 +6,40 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-05
-- 运行时间：2026-07-05 21:29:30 UTC
+- 最新运行日期：2026-07-06
+- 运行时间：2026-07-06 20:53:46 UTC
 - 运行状态：成功
-- 本次总论文数：2
+- 本次总论文数：6
 - 精读区：1
-- 速读区：1
+- 速读区：5
 
 ### 今日简报（AI）
-精读一篇代码大模型安全校准实证研究，速读一篇AI安全评估对抗语用学基准。最值得关注的是代码LLM在安全校准上的实证表现，揭示了模型对恶意指令的脆弱性。建议普通读者后续多关注代码生成模型的安全校准与对抗鲁棒性进展。
-- 详情：[/202607/05/README](/202607/05/README)
+今日共阅读6篇论文，精读1篇（《Harnessing Textual Refusal Directions for Multimodal Safety》评分9.0），速读5篇（含3篇7.0分论文）。  
+最值得关注方向：多模态安全中的文本拒绝方向（精读），以及LLM自信度报告与持续学习防御攻击（速读）。  
+建议普通读者优先浏览《Harnessing Textual Refusal Directions for Multimodal Safety》以理解前沿安全机制，后续可关注LLM可靠性相关速读材料。
+- 详情：[/202607/06/README](/202607/06/README)
 
 ### 精读区论文标签
-1. [An Empirical Study of Security Calibration in Large Language Models for Code](/202607/05/2606.31159v1-an-empirical-study-of-security-calibration-in-large-language-models-for-code)  
-   标签：评分：9.0/10、query:luq
-   evidence：大语言模型代码安全校准的实证研究
+1. [Harnessing Textual Refusal Directions for Multimodal Safety](/202607/06/2606.31876v1-harnessing-textual-refusal-directions-for-multimodal-safety)  
+   标签：评分：9.0/10、query:dg
+   evidence：利用文本拒绝方向进行激活引导以生成合成安全数据
 
 ### 速读区论文标签
-1. [Adversarial Pragmatics for AI Safety Evaluation: A Benchmark for Instruction Conflict, Embedded Commands, and Policy Ambiguity](/202607/05/2607.01153v1-adversarial-pragmatics-for-ai-safety-evaluation-a-benchmark-for-instruction-conflict-embedded-commands-and-policy-ambiguity)  
-   标签：评分：6.0/10、query:smd
-   evidence：开发用于评估攻击下安全性的基准
+1. [Reported Confidence in LLMs Tracks Commitment More Than Correctness](/202607/06/2606.29490v1-reported-confidence-in-llms-tracks-commitment-more-than-correctness)  
+   标签：评分：7.0/10、query:luq
+   evidence：LLM置信度作为不确定性度量
+2. [Theory of Continual Learning Against Data Poisoning Attacks](/202607/06/2606.29841v1-theory-of-continual-learning-against-data-poisoning-attacks)  
+   标签：评分：7.0/10、query:smd
+   evidence：持续学习中数据投毒防御的理论框架
+3. [Uncertainty Quantification via Invariant-Measure Conformal Prediction](/202607/06/2606.31607v1-uncertainty-quantification-via-invariant-measure-conformal-prediction)  
+   标签：评分：7.0/10、query:uq-safety
+   evidence：基于不变测度共形预测的新型不确定性量化方法
+4. [kNNGuard: Turning LLM Hidden Activations into a Training-Free Configurable Guardrail](/202607/06/2607.02072v1-knnguard-turning-llm-hidden-activations-into-a-training-free-configurable-guardrail)  
+   标签：评分：7.0/10、query:dg
+   evidence：利用LLM隐藏激活构建免训练护栏检测不安全提示
+5. [On Optimal Data Splitting for Split Conformal Prediction](/202607/06/2606.31600v1-on-optimal-data-splitting-for-split-conformal-prediction)  
+   标签：评分：6.0/10、query:uq-safety
+   evidence：提出了共形预测中最优数据分割的理论框架，是一种关键的不确定性量化方法
 
 
 <div class="dpr-home-promo-card">
