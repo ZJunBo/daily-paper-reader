@@ -6,40 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-07
-- 运行时间：2026-07-07 22:17:53 UTC
+- 最新运行日期：2026-07-08
+- 运行时间：2026-07-08 21:58:45 UTC
 - 运行状态：成功
-- 本次总论文数：6
-- 精读区：3
-- 速读区：3
+- 本次总论文数：5
+- 精读区：1
+- 速读区：4
 
 ### 今日简报（AI）
-今日聚焦LLM安全对齐与不确定性，精读两篇高分工作。  
-值得关注：强化学习实现建设性安全对齐，以及具有可证明保证的不确定性拒绝策略。  
-下一步建议：关注安全测试规模化方法，以及长文本生成中不确定性评估的实际应用。
-- 详情：[/202607/07/README](/202607/07/README)
+今日精读1篇、速读4篇，聚焦LLM安全对齐与不确定性量化两大方向。最值得关注的是精读论文《HARC: Coupling Harmfulness and Refusal Directions for Robust Safety Alignment》（8.0分），它揭示了通过耦合危害方向与拒绝方向来增强安全对齐鲁棒性的新思路。建议普通读者优先阅读该文，并结合速读中三篇不确定性量化论文，探索模型安全性与可信度的协同提升路径。
+- 详情：[/202607/08/README](/202607/08/README)
 
 ### 精读区论文标签
-1. [Oyster-II: Reinforcement Learning for Constructive Safety Alignment in Large Language Models](/202607/07/2607.02914v1-oyster-ii-reinforcement-learning-for-constructive-safety-alignment-in-large-language-models)  
+1. [HARC: Coupling Harmfulness and Refusal Directions for Robust Safety Alignment](/202607/08/2607.00572v2-harc-coupling-harmfulness-and-refusal-directions-for-robust-safety-alignment)  
    标签：评分：8.0/10、query:smd
-   evidence：使用强化学习改进建设性安全对齐，针对基于微调的对齐方案的局限性
-2. [Uncertainty-Aware Abstention in Large Language Models with Provable Alignment Guarantees](/202607/07/2607.04430v1-uncertainty-aware-abstention-in-large-language-models-with-provable-alignment-guarantees)  
-   标签：评分：8.0/10、query:uq-safety
-   evidence：LLM不确定性量化与弃权机制
-3. [Learning Only What Valid Adapters Can Express: Subspace-Constrained Adaptation Against Fine-Tuning Poisoning](/202607/07/2607.05300v1-learning-only-what-valid-adapters-can-express-subspace-constrained-adaptation-against-fine-tuning-poisoning)  
-   标签：评分：8.0/10、query:smd
-   evidence：子空间约束适应防御微调投毒攻击
+   evidence：分析危害与拒绝方向以实现鲁棒安全对齐，与微调中的对齐保持相关
 
 ### 速读区论文标签
-1. [Evaluating LLM Uncertainty in Long-Form Generation Using Deterministic Ground Truth](/202607/07/2607.03870v1-evaluating-llm-uncertainty-in-long-form-generation-using-deterministic-ground-truth)  
+1. [Evaluating LLM Uncertainty in Long-Form Generation Using Deterministic Ground Truth](/202607/08/2607.03870v1-evaluating-llm-uncertainty-in-long-form-generation-using-deterministic-ground-truth)  
    标签：评分：7.0/10、query:luq
-   evidence：长文本生成LLM不确定性评估基准
-2. [Safety Testing LLM Agents at Scale: From Risk Discovery to Evidence-Grounded Verification](/202607/07/2607.01793v2-safety-testing-llm-agents-at-scale-from-risk-discovery-to-evidence-grounded-verification)  
+   evidence：用于评估大语言模型长文本生成不确定性的基准
+2. [SpanUQ: Span-Level Uncertainty Quantification for Large Language Model Generation](/202607/08/2607.05721v1-spanuq-span-level-uncertainty-quantification-for-large-language-model-generation)  
+   标签：评分：7.0/10、query:luq
+   evidence：大语言模型跨度级不确定性量化
+3. [Estimating Uncertainty from Reasoning: A Large-Scale Study of Multi- and Crosslingual MCQA Performance in LLMs](/202607/08/2607.06327v1-estimating-uncertainty-from-reasoning-a-large-scale-study-of-multi--and-crosslingual-mcqa-performance-in-llms)  
+   标签：评分：7.0/10、query:luq
+   evidence：大规模评估大语言模型的不确定性估计方法
+4. [Oyster-II: Reinforcement Learning for Constructive Safety Alignment in Large Language Models](/202607/08/2607.02914v1-oyster-ii-reinforcement-learning-for-constructive-safety-alignment-in-large-language-models)  
    标签：评分：6.0/10、query:smd
-   evidence：LLM代理自动化安全测试框架
-3. [Unsupervised Features Mining via Activation Geometry](/202607/07/2607.04222v1-unsupervised-features-mining-via-activation-geometry)  
-   标签：评分：6.0/10、query:dg
-   evidence：基于指令的激活特征挖掘
+   evidence：使用强化学习进行建设性安全对齐以缓解安全退化
 
 
 <div class="dpr-home-promo-card">
