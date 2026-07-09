@@ -1,0 +1,732 @@
+Title: LLMs Silently Correct African American English: Auditing and Mitigating Dialect Bias via Activation Steering
+
+URL Source: https://arxiv.org/pdf/2607.06845v1
+
+Published Time: Thu, 09 Jul 2026 00:21:25 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# LLMs Silently Correct African American English: Auditing and Mitigating Dialect Bias via Activation Steering 
+
+Huan Wu 1,2,3 Ali Emami 4 Muhammad Furquan Hassan 1 Osaretin Igbinoba 5
+
+Osakpolor Idusuyi 6 Osamede Igbinoba 7 Faiza Khan Khattak 8
+
+Laleh Seyyed-Kalantari 1,2,3,9*
+
+> 1
+
+York University 2Vector Institute 3 Connected Minds 4Emory University 
+
+> 5
+
+Wilfrid Laurier University 6University of Toronto 7University of Guelph 
+
+> 8
+
+Monark Health 9CIFAR Solution Network Member 
+
+> ∗
+
+lsk@yorku.ca 
+
+Abstract 
+
+African American English (AAE), a rule-governed dialect spoken by over 30 million peo-ple, is routinely misinterpreted and "corrected" by large language models (LLMs). Across six instruction-tuned LLMs (14B to 70B), we show that state-of-the-art models systematically pre-fer Standard American English (SAE) contin-uations even when the preceding context is in AAE, effectively rewriting AAE into SAE. We present an end-to-end framework to audit and mitigate this bias. For auditing, we in-troduce conditional Dialect Group Invariance (cDGI), which isolates true model bias from translator-induced artifacts, and a feature-level localization analysis that identifies which AAE markers most strongly trigger bias; we find that syntactic constructions, especially nega-tive concord (e.g., "ain’t nobody"), are uni-versal triggers across all models. For miti-gation, we introduce, to our knowledge, the first application of activation steering to di-alect bias: a training-free, test-time method that extracts dialect directions via causal trac-ing and injects them into bias-relevant layers. Activation steering reduces bias 5 to 20 times more than prompting while preserving SAE fluency. To enable this work, we release R EAL -AAE, the largest real-AAE parallel corpus to date: 17,479 AAE/SAE/AAE back triplets from natural tweets (2 to 6 times larger than prior real-AAE resources), validated automatically (BERTScore F1 = 0.95) and by three native AAE speakers (83.0% semantic agreement). Our corpus and code are available at https: //anonymous.4open.science/r/dialect .
+
+1 Introduction 
+
+State-of-the-art large language models (LLMs) silently “correct” African American English (AAE). Given the AAE context “But I ain’t doing no dishes,” , five out of six LLMs we tested prefer the Standard American English (SAE) continuation 
+
+> *Corresponding author.
+
+Figure 1: Dialect preference bias on a real AAE tweet. In a forced-choice continuation task, five out of six state-of-the-art LLMs prefer the SAE continuation over a fluent AAE alternative under an AAE context, and unanimously prefer SAE under an SAE context. 
+
+“I’m going to stay in my room” over the valid AAE alternative “Imma stay in my room” (Fig. 1). We call this behavior dialect preference bias : the systematic tendency of LLMs to favor SAE over valid varieties such as AAE, even when the user is writing in AAE. Treating AAE as something to be corrected is not a neutral stylistic choice but a form of linguistic discrimination: AAE is a rule-governed variety with its own consistent grammar and phonology, spoken by over 30 million people (Lin et al., 2025). The downstream consequences are well-documented: LLMs disproportionately misclassify AAE text (Hassan et al., 2025), respond to AAE speakers with more stereotyping and con-descension (Fleisig et al., 2024), and degrade on tasks with non-standard dialect inputs (Ziems et al., 2023; Lin et al., 2025). As LLMs move into hir-ing, healthcare, and content moderation, this bias actively disadvantages millions of users. Existing work on AAE dialect bias has three key limitations (Table 1). First, most benchmarks gener-ate AAE synthetically from SAE via rule-based or LLM-driven translation (Ziems et al., 2022, 2023; Gupta et al., 2024, 2025), producing AAE that un-derestimates real-world dialect effects (Lin et al., 2025; Gupta et al., 2025). Second, real-AAE stud-arXiv:2607.06845v1 [cs.CL] 7 Jul 2026 Work Origin Construction Scale Disc. Gen. Feat. Debias.                                                         
+
+> VALUE (Ziems et al., 2022) Syn. SAE →AAE (rules, HV) 2,880* Task Acc ✗✓✗
+> Multi-VALUE (Ziems et al., 2023) Syn. SAE →dialects (rules, NV) 7,983* Task Acc ✗✓Aug. AAVENUE (Gupta et al., 2024) Syn. SAE →AAE (LLM, HV) 5,000 Task Acc ✗✗✗
+> EnDive (Gupta et al., 2025) Syn. SAE →dialects (LLM, NV) 40k+ Reas. Acc ✗✗✗
+> Fleisig et al. (2024) Real Prompt-elicited ∼3,000 ✗Yes ✓✗
+> Mire et al. (2025) Real Preference pairs 1,843 + 2,365 RM score ✗✗✗
+> Hassan et al. (2025) Real AAE-first + back-translation ∼5,000 DGI ✗✗✗
+> REAL -AAE (Ours) Real AAE-first + back-trans. + HV 17,479 DGI, cDGI PPL, LP, MC ✓Steering
+
+Table 1: Comparison with prior work on dialect bias evaluation and mitigation. R EAL -AAE is the only entry combining real AAE, human validation, both discriminative and generative auditing, feature-level analysis, and mitigation. HV: human validation; NV: native-speaker validation; Aug.: data augmentation; * marks evaluation subset rather than full benchmark size. 
+
+ies are narrow in scope: they evaluate either clas-sification consistency (Hassan et al., 2025), gen-erative responses (Fleisig et al., 2024), or reward-model scoring (Mire et al., 2025), but none com-bine discriminative and generative auditing, iden-tify which linguistic features trigger bias, or offer mitigation. Third, the few existing mitigation meth-ods require retraining (Ziems et al., 2023), archi-tectural changes (Srirag et al., 2025; Zhou et al., 2025), or auxiliary translation pipelines that erase the dialect altogether (Ðor ¯ de Klisura et al., 2025). We address these limitations as follows. Start-ing from a corpus of tweets by native AAE speak-ers (Blodgett, 2021), we construct R EAL -AAE, a corpus of 17,479 AAE/SAE/AAE back triplets via translation and back-translation, validated both au-tomatically and by three native AAE speakers. This AAE-first construction preserves dialect features that synthetic AAE misses. We then audit six instruction-tuned LLMs (14B to 70B) along two axes: discriminative consistency ,via our new conditional Dialect Group Invariance (cDGI) metric, which isolates model bias from translator artifacts; and generative preference , via perplexity, log-probability, and forced-choice con-tinuation. A feature-level localization analysis fur-ther pinpoints which AAE markers trigger bias. Finally, we introduce, to our knowledge, the first application of activation steering to dialect bias: a training-free method that uses causal tracing to identify bias-relevant layers and injects a learned dialect direction at inference. Our analysis yields three main findings: (i) all six models prefer SAE continuations even under AAE context, defaulting to “correcting” the dialect; (ii) syntactic construc-tions are universal bias triggers every tested models; and (iii) Steering reduces bias 5–20 × more than prompting, while preserving SAE fluency. 
+
+Contributions. 
+
+• We release REAL -AAE, the largest real-AAE parallel corpus to date: 17,479 AAE/SAE/AAE back triplets from natural tweets, 2 to 6 times larger than prior real-AAE resources, validated both automatically and by three native AAE speakers. • We introduce an audit framework combining cDGI, which controls for translator-induced drift, with generative-preference metrics, and a feature-level localization analysis that identifies the AAE markers most strongly triggering bias. • We propose the first activation-steering method for dialect debiasing: training-free, test-time, and applicable across model scales. Across six SOTA LLMs (14B to 70B), it mitigates dialect bias 5 to 20 times more effectively than prompting while preserving SAE fluency. 
+
+2 Related Work 
+
+Dialect Bias in NLP : Dialect bias has been docu-mented across natural language processing tasks, including language identification (Blodgett, 2021), hate-speech and toxicity detection (Sap et al., 2019; Davidson et al., 2019; Sap et al., 2022), automatic speech recognition (Koenecke et al., 2020), text generation (Deas et al., 2023), and downstream decision-making about employability, criminality, and personality (Hofmann et al., 2024). Most no-tably, Hofmann et al. (2024) show that dialect prej-udice persists in instruction-tuned LLMs even after overt racial biases are reduced, motivating dialect-specific audits of frontier models. 
+
+AAE Bias Benchmarks : Resources for evaluat-ing AAE bias divide along a methodological axis. 
+
+Synthetic benchmarks transform SAE into AAE via rule-based or LLM-driven translation (Ziems et al., 2022, 2023; Gupta et al., 2024, 2025), an Figure 2: R EAL -AAE construction pipeline. Starting from authentic AAE tweets, we filter the data, translate AAE into SAE, remove invalid outputs, and back-translate the SAE sentences into AAE to build the final triplet dataset. 
+
+approach shown to underestimate real-world di-alect effects (Lin et al., 2025; Gupta et al., 2025). 
+
+Real-AAE resources instead draw text directly from AAE speakers (Blodgett, 2021; Hassan et al., 2025; Fleisig et al., 2024; Mire et al., 2025), but each targets a single evaluation mode: classification consistency (Hassan et al., 2025), generative re-sponses (Fleisig et al., 2024), or reward-model scoring (Mire et al., 2025). The closest prior work, Hassan et al. (2025), introduces Dialect Group In-variance (DGI) on a real-AAE corpus for senti-ment classification. We extend this along multiple dimensions: R EAL -AAE, a corpus 2–6 × larger; additional discriminative and generative metrics; feature-level localization of bias triggers; and a test-time mitigation (Table 1). 
+
+Dialect Bias Mitigation : Prior mitigation ap-proaches fall into three categories. Training-time 
+
+methods augment training data with dialectal exam-ples (Ziems et al., 2023), but can degrade SAE ac-curacy. Architectural methods add dialect-specific modules, such as the LoRDD adapter (Srirag et al., 2025) or the encoder-based DialectGen (Zhou et al., 2025). Inference-time methods translate AAE in-puts to SAE before passing them to the LLM (Ðor ¯ de Klisura et al., 2025), which avoids retrain-ing but introduces auxiliary models and erases the dialect rather than mitigating bias against it. Our approach instead intervenes directly on the target model’s activations at inference, requiring no re-training, architectural changes, auxiliary modules, or dialect erasure. 
+
+Activation Steering : Our method builds on activa-tion steering, a mechanistic-interpretability tech-nique that controls model behavior by adding learned directions to hidden states at inference. The method has been applied to general behavioral con-trol (Turner et al., 2023; Zou et al., 2023; Rimsky et al., 2024), refusal behavior (Arditi et al., 2024), and persona traits (Chen et al., 2025). Liu et al. (2024) extend it to social bias mitigation, but not to dialect bias. To our knowledge, ours is the first ap-plication of activation steering to dialect debiasing. 
+
+3 Benchmark Construction 
+
+To audit AAE dialect bias without conflating it with translator artifacts, we construct R EAL -AAE, an AAE-first parallel corpus of (AAE, SAE, AAE back ) triplets grounded in naturally-occurring AAE tweets (Fig. 2). Unlike synthetic benchmarks that derive AAE from SAE, our pipeline starts from real AAE and translates outward, preserving dialec-tal features that synthetic generation may miss. 
+
+Source data and filtering: We build on the Twit-terAAE corpus (Blodgett et al., 2018), which iden-tifies tweets from African American accounts via demographic inference from geolocation and net-work analysis. To ensure sufficient content for sentiment analysis and continuation modeling, we retain tweets with at least 10 words and strip non-ASCII characters, user mentions, and URLs, yield-ing 17,495 tweets. 
+
+Translation and back-translation: We trans-late each AAE tweet into SAE using Gemini-3-flash, then back-translate the SAE into AAE using the same model (denoted AAE back ). The back-translation serves two purposes: (i) it pro-vides a content-preservation check, since AAE and AAE back should remain semantically aligned if translation did not introduce drift; and (ii) it en-ables our cDGI metric (§4.1), which conditions on translation-stable examples to isolate model bias from translator artifacts. We manually inspect sam-ple translations and define filtering criteria to re-move pairs with added explanations, semantic dis-tortions, or translation artifacts, yielding our final 
+
+17,479 triplets .
+
+Automatic validation: For content preserva-tion, we compute BERTScore F1 between AAE and AAE back using Twitter-RoBERTa, 1 chosen to match the social-media domain of our inputs. Both 
+
+> 1cardiffnlp/twitter-roberta-base-2022-154m .
+
+mean and median F1 are 0.95 (standard deviation 
+
+0.02 ), indicating strong semantic alignment. For sentiment preservation, we compare AAE/SAE la-bel agreement using the same Twitter-RoBERTa model; agreement is highest for positive and nega-tive cases, with most disagreements concentrated in neutral examples (full results in Appendix A). 
+
+Human validation: We further validate a 1,000-example subset with three native AAE speakers from the West Coast and Northeast/Mid-Atlantic, all of whom self-reported strong familiarity with written AAE. Annotators judged each example along four dimensions: sentiment preservation, se-mantic equivalence, original AAE naturalness, and AAE back naturalness. Three-way exact agreement was 93.0% (sentiment preservation), 83.0% (se-mantic equivalence; κ = 0 .468 ), 81.0% (orig-inal AAE naturalness; κ = 0 .488 ), and 77.5% 
+
+( AAE back naturalness; κ = 0 .204 ). The sentiment 
+
+κ was −0.024 , reflecting label imbalance rather than disagreement: 98% of judgments were yes ,inflating expected-chance agreement. 
+
+4 Methods 
+
+We develop methods to audit, localize, and mitigate dialect preference bias. §4.1 defines our evalua-tion metrics, combining a new conditional invari-ance measure (cDGI) with model-likelihood-based generative-preference metrics. §4.2 introduces a feature-level localization analysis that pinpoints which AAE markers most strongly trigger bias. §4.3 presents our mitigation method, dialect ac-tivation steering. 
+
+4.1 Bias Evaluation Metrics 
+
+We evaluate dialect bias along two complementary axes: discriminative consistency , via the existing DGI metric (Hassan et al., 2025) and our new cDGI metric; and generative preference , via perplexity, a log-probability bias score, and forced-choice con-tinuation computed from model likelihoods. 
+
+4.1.1 Conditional Dialect Group Invariance (cDGI) 
+
+DGI (Hassan et al., 2025) measures AAE–SAE classification agreement, but it cannot separate the model’s dialect bias from translator artifacts: an apparent inconsistency may reflect semantic drift in the LLM-produced SAE translation or in AAE back .We therefore introduce conditional DGI ( cDGI ),restricted to examples satisfying two conditions: (i) the predicted label is preserved under back-translation, controlling for translator semantic drift; and (ii) AAE back was judged natural by our native-AAE annotators, preventing AAE back drift toward SAE from inflating the conditioning set. Letting 
+
+yAAE , y SAE , y AAE back denote model predictions on the AAE, SAE, and back-translated AAE in-puts respectively, cDGI is defined as 
+
+cDGI = Pr  yAAE = ySAE yAAE = yAAE back  ,
+
+(1) computed over examples meeting condition (ii). 
+
+cDGI thus isolates the model’s dialect sensitivity from both translator noise and dialect erasure in the conditioning set. 
+
+4.1.2 Perplexity Analysis 
+
+To measure generative preference, we com-pute conditional perplexity ( PPL ) for all four context →continuation combinations: SAE →SAE, SAE →AAE, AAE →SAE, and AAE →AAE. Lower PPL indicates the model finds a con-tinuation more natural given the context. Adialect-invariant model should prefer dialect-matched continuations: lower PPL for SAE →SAE than SAE →AAE, and lower for AAE →AAE than AAE →SAE. Our continuation-based experiments (§4.1.2, §4.1.3, and §4.2.1) all require splitting each AAE– SAE pair into a context and a continuation; we describe the alignment-based segmentation proce-dure in Appendix B.1. 
+
+4.1.3 Multiple-Choice Evaluation 
+
+We assess explicit preference by presenting each model with a context (in either SAE or AAE) and two candidate continuations (one SAE, one AAE), asking which better continues the context. Option order is randomized to control for positional bias. A dialect-invariant model should prefer the contin-uation matching the context dialect. The prompt template is in Appendix B.2. 
+
+4.2 Feature-Level Bias Localization 4.2.1 Context-specific log-probability bias 
+
+For each of the N AAE–SAE pairs, let xSAE  
+
+> i
+
+, x AAE 
+
+> i
+
+and ySAE  
+
+> i
+
+, y AAE  
+
+> i
+
+denote the matched SAE/AAE contexts and continuations, and let P (y | x) de-note the model’s likelihood of continuation y given context x. We define context-specific SAE and AAE log-probability ( LP ) bias scores as 
+
+bSAE  
+
+> i
+
+= log P (ySAE  
+
+> i
+
+| xSAE  
+
+> i
+
+)
+
+− log P (yAAE  
+
+> i
+
+| xSAE  
+
+> i
+
+), (2) 
+
+bAAE  
+
+> i
+
+= log P (yAAE  
+
+> i
+
+| xAAE  
+
+> i
+
+)
+
+− log P (ySAE  
+
+> i
+
+| xAAE  
+
+> i
+
+). (3) Positive values indicate preference for dialect-matched continuations; negative values indicate preference for mismatched ones. The aggregate 
+
+LP bias is 
+
+LP = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+ bSAE  
+
+> i
+
+− bAAE 
+
+> i
+
+, (4) where larger positive values indicate overall prefer-ence for SAE across both contexts, and values near zero indicate dialect-matched behavior. 
+
+4.2.2 Localizing bias by feature category 
+
+To identify which linguistic markers most strongly trigger dialect preference, we partition AAE sen-tences by the presence of each feature category and compare mean LP (Eq. 4) across categories. Using an AAE grammatical lexicon adapted from Harris et al. (2022), we group features into four classes: Auxiliary (non-standard auxiliary forms, e.g., “we was”, “finna”), Aspectual (habitual and completive markers, e.g., habitual “be” as in “he be working”), Preverbal (pre-verbal lexical items, e.g., “she done finished”), and Syntactic (clause-level constructions, especially negative concord as in “ain’t nobody”). The full lexicon is in Ap-pendix B.3. 
+
+4.3 Debiasing with Activation Steering 
+
+Our mitigation method rests on a simple insight: if a model treats AAE and SAE inputs differently, then their internal representations must differ in some direction of activation space. Adding a vec-tor along that direction at inference time should shift the model’s behaviour, without retraining. We operationalize this idea in two phases (picto-rial overview in Appendix B.4, Fig. 9). Phase 1 
+
+(one-time, offline) extracts a per-layer dialect direc-tion from paired AAE–SAE inputs and uses causal tracing to identify which layers carry the dialect-preference computation. Phase 2 (test-time) injects the dialect direction into those layers, weighted by their causal importance, with no parameter updates. Reproducibility details are in Appendix B.4. 
+
+Phase 1a: Extracting the dialect direction. 
+
+Given N paired inputs {(xAAE  
+
+> i
+
+, x SAE  
+
+> i
+
+)}Ni=1 , let 
+
+hl(x) denote the layer-l hidden state at the last context token. We compute the per-example con-trast 
+
+∆i,l = hl(xAAE  
+
+> i
+
+) − hl(xSAE  
+
+> i
+
+), (5) average across examples, and normalize to obtain a unit-norm dialect direction at each layer l:
+
+¯∆l = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+∆i,l , ˆvl = ¯∆l
+
+∥ ¯∆l∥2
+
+. (6) By construction, ˆvl points from SAE-conditioned activations toward AAE-conditioned activations at layer l.
+
+Phase 1b: Identifying causally important lay-ers. Not every layer contributes equally to dialect preference. To isolate the layers where the bias is computed, we use a corruption-and-restore causal tracing analysis (Meng et al., 2022). For each ex-ample, we corrupt the input embeddings at AAE feature-token positions with Gaussian noise: 
+
+ecorr  
+
+> p
+
+= ep + ϵp, ϵp ∼ N (0 , σ 2I), (7) where σ = α·std( Efeat ), Efeat is the set of feature-token embeddings in the example, and α = 3 .0 is fixed across all models to produce a clear perturba-tion signal without overly destabilizing the repre-sentation. We then run the model on the corrupted input and, at a single site z = ( l, t ), restore the clean layer-l hidden state at token position t. Let-ting gcorr denote the fully corrupted run and grest 
+
+> z
+
+the run with restoration at site z, we measure the effect of restoration on the AAE-context preference score (Eq. 3): 
+
+Ri(z) = bAAE  
+
+> i
+
+(gcorr ) − bAAE  
+
+> i
+
+(grest  
+
+> z
+
+). (8) Because bAAE  
+
+> i
+
+> 0 corresponds to the model pre-ferring the AAE-matched continuation, Ri(z) < 0
+
+means restoration at site z shifts the model toward 
+
+dialect-matched behavior, while Ri(z) > 0 means restoration amplifies SAE preference. We average over examples and the relevant token positions T
+
+to obtain a per-layer score: 
+
+Rl = 1
+
+N · | T |
+
+> N
+
+X
+
+> i=1
+
+X
+
+> t∈T
+
+Ri
+
+ (l, t ), (9) and select the four layers with the most negative Rl
+
+values as the steering set K, i.e., the layers whose restoration most strongly shifts the model toward AAE-matched behavior. Phase 2: Inference-time steering. At inference, we attach forward hooks at each layer l ∈ K and modify the hidden state at every token position t as 
+
+h′ 
+
+> l,t
+
+= hl,t + β w l ˆvl, l ∈ K, β ≥ 0, (10) where β controls the overall steering strength and 
+
+wl is a normalized per-layer weight proportional to causal importance: 
+
+wl = −Rl
+
+P 
+
+> j∈K
+
+(−Rj ) , l ∈ K. (11) Since ˆvl points from SAE-conditioned activations toward AAE-conditioned activations, adding βw l ˆvl
+
+applies stronger steering at layers with larger bene-ficial restoration effects. Setting β = 0 recovers the unmodified model; larger β yields stronger steer-ing. The method modifies activations only on the forward pass and does not update any parameters. 
+
+5 Experimental Setup 
+
+Models. We evaluate six instruction-tuned LLMs spanning families and scales (14B to 70B): Gemma-3-27B (DeepMind, 2025), Mistral-Small-3.1-24B (Mistral AI, 2025), Phi-3-Medium-14B (Abdin et al., 2024a), Phi-4-14B (Abdin et al., 2024b), DeepSeek-R1-Distill-Qwen-32B (DeepSeek-AI, 2025), and Llama-3.1-70B (Dubey et al., 2024). 
+
+Dataset. All evaluation uses R EAL -AAE (§3). For sentiment classification, models predict posi-tive, negative, or neutral. For continuation-based experiments, we apply the SAE-guided alignment-based segmentation described in Appendix B.1 to construct context–continuation pairs. 
+
+Activation steering splits. For steering exper-iments, we use three non-overlapping splits of REAL -AAE: 1,200 AAE-feature sentences for causal-tracing layer selection (such examples pro-vide clearer corruption-and-restore targets), 7,000 
+
+AAE–SAE pairs for dialect-direction extraction, and a held-out 3,000 -pair evaluation set cov-ering all four context →continuation combina-tions (AAE →AAE, AAE →SAE, SAE →AAE, SAE →SAE). We sweep the steering strength β ∈{0.1, 0.2, 0.4, 0.6, 0.8, 1.0} on the evaluation set to study the trade-off between bias reduction and language modeling performance. 
+
+Baselines. We compare activation steering against two baselines: the unsteered base model, and a prompting baseline that explicitly instructs the model to treat AAE and SAE as semantically equivalent (full prompt in Appendix C.1).                                              
+
+> Model DGI Two-way DGI cDGI
+> Gemma-3 0.849 ±0.005 0 .844 ±0.005 0 .844 ±0.045
+> Phi-4 0.814 ±0.006 0 .788 ±0.006 0 .826 ±0.046
+> Mistral-Small-3.1-24B 0.795 ±0.006 0 .749 ±0.006 0 .818 ±0.043
+> Phi-3-Medium 0.780 ±0.006 0 .761 ±0.006 0 .787 ±0.046
+> DeepSeek-R1 0.491 ±0.008 0 .302 ±0.007 0 .598 ±0.050
+> Llama-3.1-70B 0.468 ±0.008 0 .278 ±0.007 0 .531 ±0.044
+
+Table 2: Discriminative consistency on sentiment classi-fication (mean ± 95% CI; higher is better, 1.0 = perfect dialect invariance). DGI : AAE–SAE prediction agree-ment. Two-way DGI : AAE–SAE– AAE back agreement. 
+
+cDGI : AAE–SAE agreement restricted to translation-stable examples. 
+
+Implementation. Experiments use PyTorch with vLLM (Kwon et al., 2023) for inference and Hug-ging Face Transformers (Wolf et al., 2020) for steer-ing (which requires direct access to residual activa-tions). All runs on NVIDIA H100 80GB GPUs. 
+
+6 Results 
+
+6.1 Discriminative Consistency Bias 
+
+We measure discriminative bias via sentiment clas-sification on R EAL -AAE. Table 2 reports DGI (AAE–SAE label agreement), two-way DGI (agree-ment across AAE, SAE, and AAE back ), and cDGI (AAE–SAE agreement restricted to translation-stable examples) for each model. A perfectly dialect-invariant model would score 
+
+DGI = 1 .0; no model reaches this . Gemma-3 comes closest ( DGI = 0 .849 ), followed by Phi-4 (0.814 ). At the other end, DeepSeek-R1 ( 0.491 )and Llama-3.1-70B ( 0.468 ) disagree with them-selves on more than half of AAE–SAE pairs. Comparing cDGI to DGI isolates the model’s dialect bias from translator artifacts. Even on translation-stable examples, cDGI remains be-low 1.0 for every model; for Llama-3.1-70B and DeepSeek-R1, more than a third of translation-stable AAE–SAE pairs still receive different sen-timent labels. Translation drift therefore accounts for only part of the observed gap: dialect alone changes model predictions, independent of transla-tion artifacts. 
+
+6.2 Generative Preference Bias 
+
+We next ask whether dialect preference appears at the level of language modeling itself, independent of any classification task. We measure this through model likelihoods over candidate AAE and SAE continuations, using two complementary metrics here: perplexity and forced-choice continuation. A log-probability bias score follows in §6.3. Metric Phi-4 Phi-3 Mistral-Small-3.1-24B DeepSeek-R1 Gemma-3 Llama-3.1-70B                                                                                                                                                
+
+> Base Prompt Ours Base Prompt Ours Base Prompt Ours Base Prompt Ours Base Prompt Ours Base Prompt Ours DGI DGI 0.74 0.76 0.85 0.73 0.74 0.77 0.79 0.83 0.86 0.55 0.57 0.63 0.80 0.80 0.86 0.51 0.55 0.63 cDGI 0.77 0.79 0.86 0.74 0.75 0.76 0.81 0.84 0.85 0.59 0.60 0.62 0.82 0.83 0.85 0.57 0.59 0.64
+> PPL AAE PPL 123.9 –111.4 85.8 –80.5 82.8 –75.9 142.8 –138.4 14298.3 –12845.8 67.7 –62.2 SAE PPL 26.7 –28.7 20.6 –25.0 23.3 –24.1 28.1 –27.9 1354.4 –1350.7 15.5 –15.5
+> MC AAE Match 39.3 41.5 58.8 32.6 38.6 55.3 29.5 33.9 48.2 43.8 48.7 64.4 42.9 44.4 60.8 41.3 44.5 64.8 SAE Match 89.1 90.1 88.3 79.7 82.8 77.3 88.6 89.5 88.6 75.5 71.3 71.1 82.9 83.7 83.2 88.6 70.8 86.0
+> LP LP 60.6 58.6 47.3 70.8 69.0 61.5 57.3 56.9 50.2 68.9 68.2 62.0 89.3 88.4 83.0 34.9 35.0 29.8
+
+Table 3: Bias mitigation across models: base model ( Base ), prompt baseline ( Prompt ), and our activation steering (Ours ) ; best Ours per metric in green. Higher is better for DGI, cDGI, MC; lower for PPL, LP. Prompting PPL omitted (not comparable under likelihood-based metrics). AAE/SAE Match: % selecting the matched continuation under AAE/SAE context. 95% CIs in Appendix C.6; full β sweep in Appendix C.4; and a qualitative preference-flip example in Appendix C.5. 
+
+Figure 3: Continuation perplexity for SAE ( x-axis) and AAE ( y-axis) continuations, by model and con-text. Points above y = x indicate SAE preference. All model–context combinations lie above the line, showing systematic SAE preference even under AAE context. 
+
+Perplexity Analysis. Fig. 3 reports continuation perplexity for all four context →continuation com-binations. Under SAE context, all six models as-sign lower perplexity to SAE continuations than to AAE: the expected pattern when continuation matches context. Under AAE context, however, every model still assigns lower perplexity to SAE continuations. Models adapt to SAE context but fail to adapt to AAE context, defaulting to SAE regardless of input dialect. 
+
+Multiple-Choice Evaluation. Fig. 4 confirms this asymmetry under explicit forced choice. Adialect-invariant model should prefer AAE con-tinuations under AAE context and SAE continu-ations under SAE context. Instead, most models continue to prefer SAE even when the context is AAE: Phi-4 selects SAE 59 .9% of the time un-der AAE context (vs. 40 .1% for AAE). Two mod-
+
+Figure 4: Multiple-choice continuation preferences un-der SAE and AAE contexts. Bars show the % selecting each continuation; dashed line = 50% chance. 
+
+els deviate. Gemma-3 reverses the pattern, pre-ferring AAE under AAE context ( 63 .4% ), while DeepSeek-R1 stays near 50% in both contexts, sug-gesting weak context-sensitivity rather than active dialect-matching. Table 4 illustrates the typical fail-ure mode: given an AAE context, Mistral-Small-3.1 assigns higher probability to the SAE continua-tion, effectively “correcting” the dialect. 
+
+6.3 Feature-Level Bias Localization 
+
+Having established that dialect preference bias is pervasive, we next ask which AAE features most strongly trigger it. Fig. 5 shows the average LP 
+
+bias for each of the four AAE feature classes across models, where higher positive LP indicates stronger SAE preference. All four feature classes yield positive LP across all six models: SAE preference is not tied to any single marker but spans a broad range of AAE AAE ctx. “Let’s see what my tl have to ...”         
+
+> SAE cont. “... offer - nonsense, nonsense, and more nonsense.” (Model Preferred)
+> AAE cont. “... offer bull ish bull ish n more bull ish.”
+> AAE ctx. “My Fone Kno Me So Well ...”
+> SAE cont. “... when I’m on hold for less than one minute, it will hang up.” (Model Preferred)
+> AAE cont. “... When Im On Hold For less Then 1 Minute it Would Hang Upp.”
+
+Table 4: Mistral-Small-3.1-24B prefers the SAE con-tinuation (cont.) under AAE context (ctx.), effectively “correcting” the dialect. 
+
+Figure 5: Feature-level bias localization. For each model, bars show the average LP bias (95% CIs) across four AAE feature classes; higher LP indicates stronger SAE preference. ⋆ marks the highest LP per model. 
+
+forms. Syntactic constructions, especially nega-tive concord (e.g., “ain’t nobody”, “can’t nobody”), yield the highest LP for every model tested, making them a universal trigger of dialect preference bias. Preverbal markers also produce relatively strong effects, while auxiliary and aspectual markers show the same direction but smaller magnitudes. 
+
+6.4 Bias Mitigation 
+
+We evaluate activation steering as a test-time bias mitigation method against the unsteered model (Base ) and a prompt-based baseline ( Prompt ) in-structing the model to treat AAE and SAE equiva-lently. Table 3 reports DGI, cDGI, PPL, MC, and LP across all six models, with steering strength β
+
+selected per model to balance bias reduction and language modeling capability; the full sweep and bias–utility frontier appear in Appendix C.4. 2
+
+Activation steering reduces dialect bias 5 to 20 times more effectively than prompting on LP ,while preserving SAE behavior across all metrics. We report results per metric below. 
+
+> 2Steering uses separate splits (§5); absolute values are not directly comparable to §§6.1–6.3.
+
+DGI and cDGI: Both metrics improve under steering for every model (e.g., Phi-4: DGI 0.74 →
+
+0.85 , cDGI 0.77 → 0.88 ), indicating more con-sistent predictions across AAE and SAE inputs. Prompting yields only marginal gains ( ≤ 0.03 
+
+across models). cDGI here is computed on the 368 annotator-judged-natural sentences not used for layer selection or dialect-direction extraction. 
+
+Perplexity (PPL): Under steering, AAE per-plexity decreases across all models (e.g., Phi-4: 
+
+123 .9 → 111 .4), indicating higher probability for AAE-matched continuations, while SAE perplexity remains close to baseline (within ∼1 to 5 points; e.g., Phi-4: 26 .7 → 28 .7), preserving SAE fluency. 
+
+Multiple-choice preference (MC): Steering boosts AAE Match under AAE context for all mod-els (e.g., Phi-4: 39 .3% → 58 .8% , +19 .5 points), while SAE Match under SAE context stays near baseline (e.g., Phi-4: 89 .1% → 88 .3% ). The prompt baseline produces much smaller shifts. 
+
+Log-probability bias (LP): LP decreases for ev-ery model under steering (e.g., Phi-4: 60 .6 →
+
+47 .3), whereas prompting yields negligible changes (≤ 2.1 across models, slightly worse for Llama-3.1-70B at −0.1). Activation steering achieves roughly 5 to 20 times the bias reduction of prompting on this metric. 
+
+Much weaker prompting performance on PPL and LP shows dialect bias is embedded in internal representations, not removable via surface instruc-tions. Three ablations, prompt wording, single-vs. multi-layer steering, and steering strength β,confirm robustness (Appendix C.2, C.3, C.4). 
+
+7 Conclusion 
+
+We showed that all six state-of-the-art LLMs we tested systematically favor Standard American En-glish over African American English (AAE), even when the user is writing in AAE. Our contributions are: R EAL -AAE, the largest real-AAE parallel cor-pus to date; cDGI and a feature-level analysis iden-tifying syntactic constructions as a universal trigger of dialect preference; and the first application of activation steering to dialect bias, which mitigates 5 to 20 times more effectively than prompting with-out retraining. The framework is dialect-agnostic and can extends to other marginalized varieties. As LLMs increasingly enter high-stakes settings like hiring and healthcare, handling dialect variation fairly is essential for equitable deployment. Limitations 
+
+Source data and register. REAL -AAE draws from the TwitterAAE corpus (Blodgett et al., 2018), which identifies AAE-speaker tweets via demographic inference. This provides naturally-occurring AAE at scale but captures the written social-media register, which may not fully gener-alize to spoken, formal, or other written registers. Extending the framework to additional registers is straightforward and a natural direction for future work. 
+
+LLM-generated SAE translations. Our SAE translations are produced by Gemini-3-flash and validated both automatically (BERTScore F1 = 0.95) and by three native AAE speakers. Our cDGI metric is specifically designed to isolate model bias from residual translation drift in the conditioning examples. 
+
+Annotator regional coverage. Our human vali-dation involves three native AAE speakers from the West Coast and Northeast/Mid-Atlantic. Because annotators validate corpus quality (translation faith-fulness and AAE naturalness) rather than the bias findings themselves, their regional coverage does not affect the LLM-behavior results we report; it does, however, shape the naturalness judgments used to construct the cDGI conditioning set. Ex-panding the annotator pool to include Southern AAE speakers is an important next step. 
+
+Ethical Considerations 
+
+This work aims to reduce the performance dispar-ities and dialect erasure that AAE speakers may experience when interacting with language tech-nologies. By quantifying bias and providing mit-igation tools, we hope to support more equitable NLP systems. The underlying tweets originate from the Twit-terAAE corpus (Blodgett et al., 2018), which is publicly distributed for non-commercial academic use. Our release shares tweet identifiers along with the SAE translations and AAE back-translations rather than raw tweet text, in line with Twitter’s terms of service. Three native AAE speakers validated the 1,000-sample subset. Their role was scoped to cor-pus validation: they were not involved in the de-sign of the LLM audit, the aim of the study, the choice of bias metrics, or the steering experiments. Items were presented in randomized order, and they did not see model outputs, BERTScore values, or any automatic-validation signal during annotation. They judged each item independently along four di-mensions: sentiment preservation, semantic equiva-lence, original AAE naturalness, and AAE back natu-ralness. There was no discussion among annotators during the task. These three annotators are recog-nized as co-investigators, both to acknowledge the substantial validation effort they contributed and to keep the study within our institution’s exemption from human-subjects review: research conducted by investigators on their own annotations does not constitute human-subjects research and does not require IRB approval. Activation steering is intended to mitigate bias in classification and generation, not to enable non-consensual dialect imitation. AAE is not mono-lithic, and our methods capture statistical patterns rather than the full sociolinguistic diversity of AAE speakers. We encourage practitioners to deploy these tools in consultation with affected communi-ties and to prioritize user consent and transparency. 
+
+References         
+
+> Marah Abdin and 1 others. 2024a. Phi-3 technical re-port: A highly capable language model locally on your phone. arXiv preprint arXiv:2404.14219 .Marah Abdin and 1 others. 2024b. Phi-4 technical re-port. arXiv preprint arXiv:2412.08905 .Andy Arditi, Oscar Obeso, Aaquib Syed, Daniel Paleka, Nina Panickssery, Wes Gurnee, and Neel Nanda. 2024. Refusal in language models is mediated by a single direction. Preprint , arXiv:2406.11717. Su Lin Blodgett. 2021. Sociolinguistically driven approaches for just natural language processing.
+> UMass Amherst Doctoral Dissertations , 2092. Su Lin Blodgett, Johnny Wei, and Brendan O’Connor. 2018. Twitter Universal Dependency parsing for African-American and mainstream American En-glish. In Proceedings of the 56th Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 1415–1425, Melbourne, Australia. Association for Computational Linguistics. Runjin Chen, Andy Arditi, Henry Sleight, Owain Evans, and Jack Lindsey. 2025. Persona vectors: Monitoring and controlling character traits in language models.
+> arXiv preprint arXiv:2507.21509 .Thomas Davidson, Debasmita Bhattacharya, and Ing-mar Weber. 2019. Racial bias in hate speech and abusive language detection datasets. In Proceedings of the Third Workshop on Abusive Language Online ,pages 25–35, Florence, Italy. Association for Com-putational Linguistics.
+
+Nicholas Deas, Jessica Grieser, Shana Kleiner, Desmond Patton, Elsbeth Turcan, and Kathleen McK-eown. 2023. Evaluation of African American lan-guage bias in natural language generation. In Pro-ceedings of the 2023 Conference on Empirical Meth-ods in Natural Language Processing , pages 6805– 6824, Singapore. Association for Computational Lin-guistics. Google DeepMind. 2025. Gemma 3 technical report. 
+
+arXiv preprint arXiv:2503.19786 .DeepSeek-AI. 2025. Deepseek-r1: Incentivizing rea-soning capability in llms via reinforcement learning. 
+
+arXiv preprint arXiv:2501.12948 .Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, and 1 others. 2024. The llama 3 herd of models. 
+
+arXiv preprint arXiv:2407.21783 .Eve Fleisig, Genevieve Smith, Madeline Bossi, Ishita Rustagi, Xavier Yin, and Dan Klein. 2024. Linguistic bias in ChatGPT: Language models reinforce dialect discrimination. In Proceedings of the 2024 Confer-ence on Empirical Methods in Natural Language Pro-cessing , pages 13541–13564, Miami, Florida, USA. Association for Computational Linguistics. Abhay Gupta, Jacob Cheung, Philip Meng, Shayan Sayyed, Kevin Zhu, Austen Liao, and Sean O’Brien. 2025. EnDive: A cross-dialect benchmark for fair-ness and performance in large language models. In 
+
+Findings of the Association for Computational Lin-guistics: EMNLP 2025 , pages 16830–16855, Suzhou, China. Association for Computational Linguistics. Abhay Gupta, Philip Meng, Ece Yurtseven, Sean O’Brien, and Kevin Zhu. 2024. Aavenue: Detecting llm biases on nlu tasks in aave via a novel benchmark. 
+
+arXiv preprint arXiv:2408.14845 .Camille Harris, Matan Halevy, Ayanna Howard, Amy Bruckman, and Diyi Yang. 2022. Exploring the role of grammar and word choice in bias toward african american english (aae) in hate speech classification. In Proceedings of the 2022 ACM Conference on Fair-ness, Accountability, and Transparency , pages 789– 798. Muhammad Furquan Hassan, Faiza Khan Khattak, and Laleh Seyyed-Kalantari. 2025. Dialectic preference bias in large language models. Proceedings of the AAAI Symposium Series , 5(1):365–369. Valentin Hofmann, Pratyusha Ria Kalluri, Dan Jurafsky, and Sharese King. 2024. Ai generates covertly racist decisions about people based on their dialect. Nature ,633(8028):147–154. Allison Koenecke, Andrew Nam, Emily Lake, Joe Nudell, Minnie Quartey, Zion Mengesha, Connor Toups, John R. Rickford, Dan Jurafsky, and Sharad Goel. 2020. Racial disparities in automated speech recognition. Proceedings of the National Academy of Sciences , 117(14):7684–7689. Woosuk Kwon, Zhuohan Li, Siyuan Zhang, Xuguang Zhuang, Ying Sheng, Lianmin Zheng, Hao Cody, Joseph E Gonzalez, Ion Stoica, and Qirong Zhang. 2023. Efficient memory management for large lan-guage model serving with pagedattention. In Pro-ceedings of the 29th Symposium on Operating Sys-tems Principles .Fangru Lin, Shaoguang Mao, Emanuele La Malfa, Valentin Hofmann, Adrian de Wynter, Xun Wang, Si-Qing Chen, Michael J. Wooldridge, Janet B. Pier-rehumbert, and Furu Wei. 2025. Assessing dialect fairness and robustness of large language models in reasoning tasks. In Proceedings of the 63rd Annual Meeting of the Association for Computational Lin-guistics (Volume 1: Long Papers) , pages 6317–6342, Vienna, Austria. Association for Computational Lin-guistics. Sheng Liu, Haotian Ye, Lei Xing, and James Zou. 2024. In-context vectors: Making in context learning more effective and controllable through latent space steer-ing. Proceedings of ICML .Kevin Meng, David Bau, Alex J Andonian, and Yonatan Belinkov. 2022. Locating and editing factual associ-ations in GPT. In Advances in Neural Information Processing Systems .Joel Mire, Zubin Trivadi Aysola, Daniel Chechelnit-sky, Nicholas Deas, Chrysoula Zerva, and Maarten Sap. 2025. Rejected dialects: Biases against African American language in reward models. In Findings of the Association for Computational Linguistics: NAACL 2025 , pages 7468–7487, Albuquerque, New Mexico. Association for Computational Linguistics. Mistral AI. 2025. Mistral small 3.1. https://mistral. ai/news/mistral-small-3-1 . Accessed: 2026-05-26. Nina Rimsky, Nick Gabrieli, Julian Schulz, Meg Tong, Evan Hubinger, and Alexander Turner. 2024. Steer-ing llama 2 via contrastive activation addition. In 
+
+Proceedings of the 62nd Annual Meeting of the As-sociation for Computational Linguistics (Volume 1: Long Papers) , pages 15504–15522, Bangkok, Thai-land. Association for Computational Linguistics. Maarten Sap, Dallas Card, Saadia Gabriel, Yejin Choi, and Noah A. Smith. 2019. The risk of racial bias in hate speech detection. In Proceedings of the 57th Annual Meeting of the Association for Computational Linguistics , pages 1668–1678, Florence, Italy. Asso-ciation for Computational Linguistics. Maarten Sap, Swabha Swayamdipta, Laura Vianna, Xuhui Zhou, Yejin Choi, and Noah A. Smith. 2022. Annotators with attitudes: How annotator beliefs and identities bias toxic language detection. In Pro-ceedings of the 2022 Conference of the North Amer-ican Chapter of the Association for Computational Linguistics: Human Language Technologies , pages 5884–5906, Seattle, United States. Association for Computational Linguistics. Dipankar Srirag, Aditya Joshi, and Jacob Eisenstein. 2025. Predicting the target word of game-playing conversations using a low-rank dialect adapter for decoder models. Preprint , arXiv:2409.00358. Alexander Matt Turner, Lisa Thiergart, Gavin Leech, David Udell, Juan J. Vazquez, Ulisse Mini, and Monte MacDiarmid. 2023. Activation addition: Steering language models without optimization. 
+
+arXiv preprint arXiv:2308.10248 .Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Clement Delangue, Anthony Moi, Pier-ric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz, Joe Davison, Sam Shleifer, Patrick von Platen, Clara Ma, Yacine Jernite, Julien Plu, Canwen Xu, Teven Le Scao, Sylvain Gugger, and 3 others. 2020. Trans-formers: State-of-the-art natural language processing. In Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing: System Demonstrations , pages 38–45. Association for Com-putational Linguistics. Yu Zhou, Sohyun An, Haikang Deng, Da Yin, Clark Peng, Cho-Jui Hsieh, Kai-Wei Chang, and Nanyun Peng. 2025. Dialectgen: Benchmarking and im-proving dialect robustness in multimodal generation. 
+
+Preprint , arXiv:2510.14949. Caleb Ziems, Jiaao Chen, Camille Harris, Jessica An-derson, and Diyi Yang. 2022. VALUE: Understand-ing dialect disparity in NLU. In Proceedings of the 60th Annual Meeting of the Association for Compu-tational Linguistics (Volume 1: Long Papers) , pages 3701–3720, Dublin, Ireland. Association for Compu-tational Linguistics. Caleb Ziems, William Held, Jingfeng Yang, Jwala Dhamala, Rahul Gupta, and Diyi Yang. 2023. Multi-VALUE: A framework for cross-dialectal English NLP. In Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 744–768, Toronto, Canada. Association for Computational Linguistics. Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren, Alexander Pan, Xuwang Yin, Mantas Mazeika, Ann-Kathrin Dombrowski, and 1 others. 2023. Representation engineering: A top-down approach to AI transparency. arXiv preprint arXiv:2310.01405 .Ðor ¯ de Klisura, Astrid R Bernaga Torres, Anna Karen Gárate-Escamilla, Rajesh Roshan Biswal, Ke Yang, Hilal Pataci, and Anthony Rios. 2025. A multi-agent framework for mitigating dialect biases in pri-vacy policy question-answering systems. Preprint ,arXiv:2506.02998. A Additional Quality Validation Results 
+
+This appendix provides additional results for the automatic validation described in Section 3. We include the sentiment consistency confusion ma-trix between AAE and SAE sentences, as well as the distribution of BERTScore F1 between origi-nal AAE sentences and their back-translated AAE versions.                 
+
+> AAE \SAE Negative Neutral Positive
+> Negative 7268 848 357 Neutral 833 3832 949 Positive 87 171 3134
+> Table 5: Sentiment consistency confusion matrix between AAE and SAE sentences, measured with cardiffnlp/twitter-roberta-base-sentiment-latest. Rows denote sentiment labels predicted for AAE, and columns denote sentiment labels predicted for SAE. Most mass lies on the diagonal, indicating that sentiment is usually preserved across dialectal variants.
+> Figure 6: Distribution of BERTScore F1 between origi-nal AAE sentences and their back-translated AAE ver-sions, computed with cardiffnlp/twitter-roberta-base-2022-154m. Scores are concentrated near 0.95 and above, suggesting strong semantic preservation in the back-translation step.
+
+B Additional Methodological Details 
+
+B.1 SAE-Guided Semantic Segmentation 
+
+Fig. 7 illustrates our alignment-based segmenta-tion procedure. The goal is to split each paired SAE-AAE sentence into matched context and con-tinuation segments. We first identify the split point in the SAE sen-tence. Given the SAE sentence “I was going to call you later, but I had to finish my homework first,” we consider several candidate boundaries near the middle of the sentence, such as j1, j2, and j3. For each candidate j, we compute the semantic shift between the left segment Lj and the right segment 
+
+Rj :
+
+dj = 1 − cos( ϕ(Lj ), ϕ (Rj )) .
+
+We then select the boundary with a large semantic shift while penalizing highly imbalanced splits: 
+
+j∗ = arg max 
+
+> j
+
+
+
+dj − γ jn − ρ
+
+
+
+(12) In Fig. 7, this selects the boundary after “later,” in the SAE sentence. In Eq. 12 , we set ρ = 0.5 to encourage roughly balanced context-continuation splits. We use γ =0.3 as a fixed balance penalty to trade off semantic shift against split length imbalance. This avoids boundaries that are too close to either end of the sentence while still favoring semantically meaning-ful splits. We then project this SAE boundary to the paired AAE sentence using word-level align-ment. Instead of mapping the boundary by the same relative position, we align SAE and AAE words using aneuraz/awesome-align-with-co. The aligned words around j∗ are used to choose the corresponding AAE boundary k∗. In the example, the SAE context “I was going to call you later,” is aligned with the AAE context “I was finna call you later,” while the SAE continuation “but I had to finish my homework first” is aligned with the AAE continuation “but I hadda finish my home-work first.” This procedure avoids assuming that SAE and AAE have the same length or word order. It in-stead projects the split through word-level corre-spondence, which gives cleaner paired context-continuation segments for the continuation pref-erence experiments. 
+
+B.2 Prompt Template 
+
+Fig. 8 shows the prompt template for multiple-choice evaluation. We use a minimal structure that avoids instructions about dialect, tone, or style, iso-lating the model’s intrinsic continuation preference. Option ordering (SAE vs. AAE as option A or B) is randomized to control for positional bias. 
+
+B.3 AAE Grammatical Feature Lexicon 
+
+Table 6 presents the AAE grammatical markers used in our feature-level analysis, adapted from Harris et al. (2022). Features are categorized into four classes: Auxiliary (non-standard auxiliary con-structions), Aspectual (habitual and completive markers), Preverbal (pre-verbal lexical items), and Figure 7: Alignment-based SAE-guided semantic segmentation. First, we select a context-continuation boundary j∗
+
+in the SAE sentence using semantic shift and a balance penalty. Second, we project this boundary to the paired AAE sentence using word-level alignment from aneuraz/awesome-align-with-co, obtaining the aligned AAE boundary 
+
+k∗. The final output is a set of paired SAE and AAE context-continuation segments. 
+
+Figure 8: Multiple-choice evaluation prompt template. 
+
+Syntactic (clause-level constructions such as nega-tive concord). 
+
+B.4 Reproducibility Details 
+
+All experiments are in PyTorch. We use vLLM (Kwon et al., 2023) for inference and Hugging Face Transformers (Wolf et al., 2020) for steer-ing, which requires direct access to residual ac-tivations. Perplexity is computed via autoregres-sive likelihood; multiple-choice evaluation extracts log-probabilities and selects the higher-probability continuation. Computations were performed on NVIDIA H100 80GB GPUs. All causal-tracing and steering experiments were implemented in PyTorch with Hugging Face 
+
+transformers . For each model, we used 1,200 AAE-feature sentences for layer selection, 7,000 AAE–SAE pairs for dialect-direction extraction, and a separate 3,000-pair set for evaluation. Causal tracing corrupted the AAE feature-token embed-                                            
+
+> Auxiliary Aspectual Preverbal Syntactic
+> we was I be aint cant nobody they was he be ain’t can’t nobody finna they be steady he don’t tryna she be stay she don’t imma I been he done don’t never i’mma he been she done he dont bitches was she been they done she dont niggas was they been yall done dont never yall was it be y’all done yall don’t y’all was niggas be you done y’all don’t you was bitches be u done aint nothing wanna yall be ain’t nothing gonna y’all be aint nobody ima you be ain’t nobody ion u be yall dont u was iont
+
+Table 6: AAE grammatical feature lexicon adapted from Harris et al. (2022). 
+
+dings with Gaussian noise ϵ ∼ N (0 , σ 2I), where 
+
+σ = 3.0 × std( Efeat ) for the selected feature embeddings in that example, and restored clean activations layer-by-layer at the same token po-sitions. For steering, we extracted one unit di-alect direction per selected layer from the last context-token hidden-state contrast, ranked layers by mean restoration effect, and used the top 4 lay-ers in the multi-layer setting with weights propor-tional to the absolute restoration effect. We evalu-Figure 9: Overview of dialect debiasing with activation steering. Phase 1: from paired AAE-SAE inputs, we compute layerwise hidden-state contrasts, derive a per-layer dialect direction, and select the top-4 causally important layers via corruption-and-restore analysis. Phase 2: at inference, we inject these directions into the selected layers to steer generation toward dialect-consistent behavior, without updating model weights. 
+
+ated β ∈ { 0, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0} and report the corresponding selected rows, traced-layer sum-maries, chosen layers, train/eval splits, and steering outputs for each model. 
+
+C Supplementary Steering Analyses 
+
+C.1 Prompting Baseline 
+
+For the prompting baseline in Table 3, we use the original multiple-choice continuation prompt and add the following instruction: 
+
+Treat African American English (AAE) and Standard American English (SAE) as semantically equivalent dialects, and base your judgment only on the underly-ing meaning rather than dialect-specific wording. 
+
+C.2 Prompt Wording Ablation 
+
+A possible concern is that the word best in our prompt may favor SAE by implying correctness or safety. We test this by replacing it with most likely continuation and most stylistically consistent continuation , and rerun the continuation preference evaluation for all models. Table 7 shows the main pattern remains un-changed. The stylistic prompt slightly reduces the asymmetry, but models still rarely switch to AAE under SAE context, while often switching to SAE under AAE context. In our results, AAE con-tinuation rates under SAE context remain around 20–30%, whereas SAE continuation rates under AAE context often remain around 50–70%. This suggests that the observed bias is not driven only                                                                               
+
+> SAE ctx AAE ctx Model Strategy SAE AAE SAE AAE Mistral-Small-3.1-24B Ours (Best) 71.01 28.99 56.58 43.42 Most Likely 71.20 28.80 53.20 46.80 Stylistic 73.40 26.60 50.80 49.20 Phi-4 Ours (Best) 79.11 20.89 59.92 40.08 Most Likely 79.70 20.30 66.70 33.30 Stylistic 79.40 20.60 62.70 37.30 Gemma-3 Ours (Best) 66.25 33.75 36.64 63.36 Most Likely 67.80 32.20 40.46 59.54 Stylistic 69.50 31.50 43.10 56.90 Phi3-Medium Ours (Best) 79.92 20.08 69.61 30.39 Most Likely 78.10 21.90 66.80 32.20 Stylistic 78.80 21.20 62.70 37.30 DeepSeek-R1 Ours (Best) 49.45 50.55 49.50 50.55 Most Likely 50.33 49.67 49.20 50.80 Stylistic 51.62 48.38 48.87 51.13 Llama-3.1-70B Ours (Best) 61.01 38.99 55.45 44.55 Most Likely 60.53 39.47 57.09 42.91 Stylistic 61.72 38.28 54.19 45.81
+
+Table 7: Prompt wording ablation for multiple-choice continuation preference. 
+
+by the word best , but reflects a more general pref-erence for SAE continuations. 
+
+C.3 Single-Layer vs. Multi-Layer Steering 
+
+Table 8 compares single-layer steering with multi-layer weighted steering. For the single-layer set-ting, we select the most causally important layer based on the recovery analysis in Section 4.4 and apply the steering direction only at that layer. By contrast, the multi-layer setting applies weighted steering across the top traced layers. For each strategy, we report the best setting for each model. The overall pattern is clear. Multi-layer steering gives lower LP than single-layer steering for all models in this comparison. It also produces larger bias reduction in every case. At the same time, multi-layer steering keeps AAE per-plexity lower across all models, while the SAE perplexity values remain close between the two set-tings. This means that distributing the intervention across several traced layers is not only more effec-tive at reducing bias, but also does not introduce a larger utility cost. These results suggest that the debiasing signal benefits from coordinated steer-ing across the top traced layers rather than being captured fully by only one layer. In this setting, combining the strongest traced layers is usually better than restricting the intervention to a single layer.                                                                   
+
+> Model Strategy Layer / Scope βLP Bias Red. AAE PPL SAE PPL Phi-4 Single layer 0 0.4 48.71 19.7 131.36 25.77 Multi top-k0.6 47.25 22.1 114.44 28.72
+> Phi-3 Single layer 4 0.6 65.73 7.1 90.53 24.89 Multi top-k0.6 61.53 13.1 80.53 25.03
+> Mistral-Small-3.1-24B Single layer 1 0.6 54.73 4.4 77.78 23.71 Multi top-k0.8 50.21 12.3 75.91 24.13
+> DeepSeek-R1 Single layer 0 1.0 67.00 2.8 137.38 27.72 Multi top-k1.0 62.00 10.0 138.38 27.92
+> Gemma-3 Single layer 8 1.0 88.71 0.6 13390.50 1352.73 Multi top-k0.8 83.01 7.0 12845.78 1350.67
+> Llama-3.1-70B Single layer 4 0.6 34.72 0.4 65.78 15.50 Multi top-k1.0 29.76 14.6 62.18 15.48
+
+Table 8: Ablation study comparing single-layer steering and multi-layer weighted steering. For each strategy, we report the best setting for each model. 
+
+C.4 Full Steering Results 
+
+Table 9 reports the full multi-layer steering sweep, and the trends across β. In the table, LP mea-sures log-probability bias, where lower values indi-cate less preference for SAE continuations. AAE Match and SAE Match are multiple-choice con-sistency scores under AAE and SAE contexts, re-spectively, where higher values are better. AAE PPL and SAE PPL are the perplexities of the AAE-matched and SAE-matched continuations, respec-tively, where lower values indicate better support for the matched continuation. DGI and cDGI mea-sure prediction consistency across dialectal vari-ants, with higher values indicating better invari-ance. 
+
+(a) Discriminative consistency (DGI, cDGI): 
+
+Both metrics increase monotonically with β for all models (e.g., Phi-4: DGI 0.74 → 0.88 , cDGI 
+
+0.77 → 0.90 ; Llama-3.1-70B: DGI 0.51 → 0.63 ,cDGI 0.57 → 0.66 ), showing that steering also improves AAE–SAE prediction agreement on the discriminative task, not just continuation prefer-ence. 
+
+(b) Perplexity (PPL): AAE PPL decreases with β
+
+at small to moderate values (e.g., Phi-4: 123 .85 →
+
+110 .16 at β = 0.4; Mistral-Small-3.1-24B: 
+
+82 .75 → 75 .9 at β = 0 .8), while SAE PPL re-mains close to baseline across the same range (within ∼ 1–2 points for Mistral-Small-3.1-24B, DeepSeek-R1, and Llama-3.1-70B, and within Gemma-3’s tokenizer-scaled noise floor). At high 
+
+β (≥ 0.8), AAE PPL rebounds and SAE PPL grows sharply for Phi-4 ( 26 .73 → 45 .17 ) and Phi-3 (20 .59 → 34 .53 ), reflecting the same over-steering effect visible in SAE Match. 
+
+(c) Log-probability bias (LP): LP decreases ap-proximately monotonically with β for all six mod-els, from 60 .64 → 45 .16 on Phi-4, 70 .79 → 62 .07 
+
+on Phi-3, and 34 .86 → 29 .76 on Llama-3.1-70B, corresponding to relative bias reductions of 10 –
+
+26% at β = 1 .0. The largest LP gains come in the β ∈ [0 .4, 0.8] range, beyond which returns flat-ten. 
+
+(d) Multiple-choice preference (MC). AAE Match under AAE context rises monotonically with 
+
+β for every model (e.g., Phi-4: 39 .28 → 70 .36 ;DeepSeek-R1: 43 .79 → 64 .43 ; Llama-3.1-70B: 
+
+41 .29 → 64 .75 ), confirming that steering shifts dialect-matched preferences in the intended direc-tion. SAE Match under SAE context is largely preserved for most models (within 1–5 points of baseline for Mistral-Small-3.1-24B, DeepSeek-R1, Gemma-3, and Llama-3.1-70B across all β), but degrades at high β for Phi-4 ( 89 .14 → 68 .09 at 
+
+β = 1 .0) and Phi-3 ( 79 .65 → 66 .29 ), indicat-ing that over-steering can erode SAE behaviour on these models. Overall, across all six models, moderate steering (β ∈ [0 .4, 0.8] ) achieves most of the available LP and MC improvements while keeping SAE PPL and SAE Match close to baseline; the bolded se-lections in Table 9 reflect this trade-off. Pushing to β = 1 .0 yields small additional bias-reduction gains but begins to hurt SAE-side fluency on the Phi family, supporting the choice of a medium β
+
+rather than the most aggressive setting. 
+
+C.5 Qualitative Example of a Cross-Model Preference Flip 
+
+We show one qualitative example in which the full source sentence is recognizably AAE and the eval-uated AAE context itself contains AAE markers. We report the segmented context–continuation pair used in evaluation, together with the preference Model β LP ↓ Bias Red. ↑ AAE PPL ↓ AAE PPL Ratio SAE PPL SAE PPL Ratio AAE Match SAE Match DGI cDGI 
+
+Phi-4 
+
+0.0 60.64 0.0 123.85 1.00 26.73 1.00 39.28 89.14 0.74 0.74 0.1 57.88 4.5 116.10 0.94 26.57 0.99 41.59 89.92 0.74 0.76 0.2 53.68 11.5 112.95 0.91 27.52 1.03 44.74 89.62 0.76 0.77 0.4 46.61 23.1 110.16 0.89 28.99 1.08 49.28 89.12 0.81 0.80 
+
+0.6 47.25 22.1 111.44 0.90 28.72 1.07 58.82 88.25 0.85 0.86 
+
+0.8 46.42 23.4 136.49 1.10 41.70 1.93 66.52 75.89 0.86 0.88 1.0 45.16 25.5 140.32 1.13 45.17 2.06 70.36 68.09 0.88 0.88 
+
+Phi-3 
+
+0.0 70.79 0.0 85.78 1.00 20.59 1.00 32.63 79.65 0.73 0.72 0.1 70.05 1.0 84.62 0.99 20.57 1.00 37.40 79.88 0.73 0.73 0.2 69.01 2.5 83.42 0.97 20.57 1.00 40.85 78.96 0.74 0.73 0.4 65.92 6.9 81.53 0.95 20.72 1.01 48.34 77.45 0.75 0.74 
+
+0.6 61.53 13.1 80.53 0.94 25.03 1.22 55.26 77.34 0.77 0.76 
+
+0.8 62.10 12.3 106.10 1.24 30.83 1.50 58.10 71.83 0.77 0.76 1.0 62.07 12.3 117.76 1.37 34.53 1.68 62.82 66.29 0.78 0.77 
+
+Mistral-small-3.1 
+
+0.0 57.26 0.0 82.75 1.00 23.28 1.00 29.52 88.59 0.79 0.79 0.1 56.85 0.7 81.92 0.99 23.28 1.00 31.32 89.30 0.80 0.79 0.2 56.45 1.4 81.08 0.98 23.26 1.00 35.91 88.11 0.82 0.81 0.4 53.60 6.4 77.48 0.94 23.25 1.00 41.85 88.08 0.84 0.83 0.6 51.73 9.7 76.78 0.93 23.18 1.00 46.27 87.67 0.85 0.84 
+
+0.8 50.21 12.3 75.91 0.92 24.13 1.04 48.18 88.63 0.86 0.85 
+
+1.0 50.01 12.7 75.99 0.92 24.88 1.07 49.73 85.87 0.86 0.85 
+
+DeepSeek-R1 
+
+0.0 68.89 0.0 142.76 1.00 28.12 1.00 43.79 75.50 0.55 0.56 0.1 67.73 1.7 141.01 0.99 28.10 1.00 47.92 76.06 0.56 0.57 0.2 66.83 3.0 139.41 0.98 28.08 1.00 51.27 76.39 0.58 0.58 0.4 64.19 6.8 137.40 0.96 28.02 1.00 56.58 74.74 0.59 0.59 0.6 63.91 7.2 136.57 0.96 27.98 1.00 60.46 73.61 0.60 0.62 0.8 62.51 9.3 136.49 0.96 27.96 0.99 62.72 73.21 0.62 0.61 
+
+1.0 62.00 10.0 138.38 0.97 27.92 0.99 64.43 71.07 0.63 0.62 Gemma-3 
+
+0.0 89.29 0.0 14298.28 1.00 1354.44 1.00 42.93 82.87 0.80 0.80 0.1 87.40 2.1 14100.09 0.99 1352.82 1.00 44.33 81.03 0.80 0.81 0.2 87.03 2.5 13945.25 0.98 1359.09 1.00 49.58 83.57 0.81 0.81 0.4 85.92 3.8 13618.01 0.95 1357.92 1.00 54.17 82.00 0.82 0.82 0.6 83.78 6.2 13387.14 0.94 1350.19 1.00 57.84 82.93 0.84 0.83 
+
+0.8 83.01 7.0 12845.78 0.90 1350.67 1.00 60.78 83.19 0.86 0.85 
+
+1.0 83.71 6.2 13390.50 0.94 1352.73 1.00 62.49 81.71 0.87 0.86 
+
+Llama-3.1-70B 
+
+0.0 34.86 0.0 67.66 1.00 15.47 1.00 41.29 86.62 0.51 0.54 0.1 33.83 3.0 65.36 0.97 15.48 1.00 42.62 88.32 0.53 0.55 0.2 33.79 3.1 64.68 0.96 15.48 1.00 45.41 87.97 0.54 0.56 0.4 31.26 10.3 63.33 0.94 15.49 1.00 54.18 88.04 0.57 0.60 0.6 30.72 11.9 63.09 0.93 15.50 1.00 60.30 87.51 0.59 0.61 0.8 30.51 12.5 62.11 0.92 15.47 1.00 62.45 87.89 0.62 0.63 
+
+1.0 29.76 14.6 62.18 0.92 15.48 1.00 64.75 85.99 0.63 0.64 
+
+Table 9: Full steering results across all tested β values. Bias reduction, matched preference deltas, and perplexity ratios are computed relative to the β = 0 baseline for each model. Bold marks the selected best β value for each model, chosen to balance lower bias against preservation of language modeling quality, as reflected in the perplexity metrics and SAE match. Our Mistral model is Mistral-Small-3.1-24B 
+
+shift induced by steering. This example is also representative at the cross-model level: before de-biasing, five of the six models prefer the SAE con-tinuation under the AAE context, whereas after debiasing, five of the six steered models prefer the AAE continuation. 
+
+C.6 Confidence Intervals for Bias Mitigation Results 
+
+To quantify uncertainty in the mitigation results reported in Table 3, we compute 95% paired boot-strap confidence intervals over the 3,000 evaluation pairs. For each bootstrap sample, we resample eval-uation pairs with replacement and recompute all metrics for Base, Prompt, and Ours on the same resampled set. This preserves the paired structure across methods and yields confidence intervals that reflect example-level variation rather than run-to-run variance. Table 11 reports the corresponding confidence intervals for all metrics in Table 3. Overall, the uncertainty estimates support the same qualitative conclusion as in the main text: activation steer-ing consistently improves dialect-matched behav-ior under AAE context while largely preserving SAE-side behavior. 
+
+C.7 Bias–Utility trade-off 
+
+In Figure 10, we show how the bias and utility change by sweeping over β. Each point corre-sponds to one β setting for one model. The x-axis shows the LP bias score, where lower values indi-cate less preference for SAE continuations, and the y-axis shows the SAE perplexity ratio relative to the unsteered baseline β = 0 , where values close to 1.0 indicate better preservation of SAE-side flu-Full AAE sentence That is why I wanna go back so badly. I wanna disprove any negatives I brought to me and my family’s name. 
+
+AAE context That is why I wanna go 
+
+AAE continuation back so badly. I wanna disprove any negatives I brought to me and my family’s name. 
+
+SAE continuation back so badly. I want to disprove any negatives I brought to myself and my family’s name. 
+
+Cross-model vote Before debiasing, 5/6 models prefer the SAE continuation under this AAE context; after debias-ing, 5/6 models prefer the AAE continuation. 
+
+Table 10: A qualitative example of steering-induced preference reversal. The full source sentence is recognizably AAE, and the evaluated AAE context itself contains AAE markers. 
+
+Metric Stat Phi-4 Phi-3 Mistral-3.1-24B DeepSeek-R1 Gemma-3 Llama-3.1-70B 
+
+DGI Base 0.74 ± 0.02 0.73 ± 0.02 0.79 ± 0.02 0.55 ± 0.01 0.80 ± 0.02 0.51 ± 0.01 
+
+Prompt 0.76 ± 0.02 0.74 ± 0.02 0.83 ± 0.02 0.57 ± 0.01 0.80 ± 0.02 0.55 ± 0.01 
+
+Ours 0.85 ± 0.02 0.77 ± 0.02 0.86 ± 0.02 0.62 ± 0.01 0.86 ± 0.02 0.62 ± 0.01 
+
+cDGI Base 0.77 ± 0.02 0.74 ± 0.02 0.81 ± 0.02 0.59 ± 0.01 0.82 ± 0.02 0.57 ± 0.01 
+
+Prompt 0.79 ± 0.02 0.75 ± 0.02 0.84 ± 0.02 0.60 ± 0.01 0.83 ± 0.02 0.59 ± 0.01 
+
+Ours 0.88 ± 0.02 0.78 ± 0.02 0.87 ± 0.02 0.63 ± 0.01 0.87 ± 0.02 0.65 ± 0.01 
+
+AAE PPL Base 123 .9 ± 8.7 85 .8 ± 6.0 82 .8 ± 5.8 142 .8 ± 10 .0 14298 .3 ± 987 .8 67 .7 ± 4.8
+
+Ours 111 .4 ± 7.8 80 .5 ± 5.7 75 .9 ± 5.3 136 .5 ± 9.6 12845 .8 ± 899 .2 62 .1 ± 4.4
+
+SAE PPL Base 26 .7 ± 1.9 20 .6 ± 1.5 23 .3 ± 1.7 28 .1 ± 2.0 1354 .4 ± 94 .8 15 .5 ± 1.1
+
+Ours 28 .7 ± 2.0 25 .0 ± 1.8 24 .1 ± 1.7 28 .0 ± 2.0 1350 .7 ± 94 .6 15 .5 ± 1.1
+
+MC AAE Match Base 39 .3 ± 2.8 32 .6 ± 2.3 29 .5 ± 2.1 43 .8 ± 3.1 42 .9 ± 3.0 41 .3 ± 2.9
+
+Prompt 41 .5 ± 2.9 38 .6 ± 2.7 33 .9 ± 2.4 43 .8 ± 3.1 44 .4 ± 3.1 44 .5 ± 3.1
+
+Ours 58 .8 ± 4.1 55 .3 ± 3.9 48 .2 ± 3.4 62 .7 ± 4.4 60 .8 ± 4.3 62 .5 ± 4.4
+
+MC SAE Match Base 89 .1 ± 6.3 79 .7 ± 5.6 88 .6 ± 6.2 75 .5 ± 5.3 82 .9 ± 5.8 88 .6 ± 6.2
+
+Prompt 90 .1 ± 6.3 82 .8 ± 5.8 89 .5 ± 6.3 71 .3 ± 5.0 83 .7 ± 5.9 70 .8 ± 5.0
+
+Ours 88 .3 ± 6.2 77 .3 ± 5.4 88 .6 ± 6.2 73 .2 ± 5.1 83 .2 ± 5.8 87 .9 ± 6.2
+
+LP Base 60 .6 ± 4.4 70 .8 ± 5.1 57 .3 ± 4.2 68 .9 ± 5.4 89 .3 ± 6.5 34 .9 ± 2.6
+
+Prompt 58 .6 ± 4.3 69 .0 ± 5.0 56 .9 ± 4.1 68 .2 ± 5.3 88 .4 ± 6.4 35 .0 ± 2.6
+
+Ours 47 .3 ± 3.5 61 .5 ± 4.5 50 .2 ± 3.7 62 .5 ± 4.6 83 .0 ± 6.1 30 .5 ± 2.2
+
+Table 11: Uncertainty analysis for the bias mitigation results in Table 3. We report 95% paired bootstrap confidence intervals over the 3,000 evaluation pairs. For likelihood-based metrics, intervals are computed by resampling evaluation pairs and recomputing the aggregate metric on each bootstrap sample. 
+
+ency. Figure 10: Bias–utility frontier across steering strengths β for all six models. Each point corresponds to one β
+
+setting. The x-axis shows LP bias score (lower is better), and the y-axis shows SAE perplexity ratio relative to 
+
+β = 0 (lower is better; the dashed line marks parity with the unsteered baseline).

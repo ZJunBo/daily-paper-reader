@@ -1,0 +1,684 @@
+Title: Online Data Selection Is Implicit Alignment
+
+URL Source: https://arxiv.org/pdf/2607.07023v1
+
+Published Time: Thu, 09 Jul 2026 00:29:12 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Online Data Selection Is Implicit Alignment 
+
+Aoxiong Zeng 
+
+East China Normal University 
+
+Yuxin Yang 
+
+Shanghai University 
+
+Xiangquan Yang 
+
+East China Normal University 
+
+Abstract 
+
+Supervised fine-tuning (SFT) is often treated as a capability-adaptation step, while alignment is attributed to later preference optimization or reinforcement learning. This separation is in-complete: when examples are scored and kept online during fine-tuning, the choice of which data to train on already changes the model’s behavioral preferences. We study online data selection as an implicit alignment mechanism. Given the same base model, optimizer, and selected-token budget, we compare random, loss-based, quality-based, and diversity-based online selectors and measure the behavioral drift they induce without any preference op-timization. The proposed evaluation tracks helpfulness, refusal rate, verbosity, truthfulness, sycophancy, calibration, and jailbreak robust-ness, together with diagnostics for which be-havioral modes are over-represented in the se-lected data. We formalize online selection as a reweighted SFT objective whose weights de-fine an implicit preference over response styles and safety postures, so that an online scorer plays the role usually assigned to a reward model. This view predicts that high-scoring data can systematically favor longer, more as-sertive, more compliant, or more refusal-prone behaviors depending on how the online score is defined. Empirically, selectors that are statisti-cally indistinguishable in task accuracy diverge sharply in refusal rate, verbosity, and syco-phancy, and we show that the direction of the shift is predictable from the attribute mixture of the selected data. We introduce Alignment Drift Auditing (ADA), a controlled protocol for quantifying selection-induced behavioral move-ment, and Alignment-Aware Selection (AAS), a diagnostic online selector that retains data effi-ciency while constraining drift along safety and style axes. The paper argues that online SFT data selection should be reported and evaluated as part of the alignment pipeline, not merely as a data-efficiency tool. 
+
+1 Introduction 
+
+Large language model (LLM) post-training is usu-ally described as a pipeline: collect instruction data, perform supervised fine-tuning, and then ap-ply preference optimization or reinforcement learn-ing to align the model with human preferences [1 , 2 , 3, 4, 5 ]. This framing encourages a useful but misleading division of labor. SFT teaches the model to follow instructions; preference optimiza-tion aligns the model. In practice, the division is blurred. The SFT corpus already contains im-plicit choices about what a good assistant should do: answer directly or cautiously, refuse broadly or narrowly, explain in detail or stay concise, flatter the user or challenge false premises. Instruction-tuning studies already show that small changes in demonstrations can produce large changes in assis-tant behavior [6, 7, 8, 9, 10]. Online data selection makes these choices sharper. As instruction pools grow large, redun-dant, noisy, and heterogeneous, a common prac-tice is to score examples as training proceeds and keep only a high-value subset, using loss, qual-ity, diversity, influence, or online utility signals [11 , 12 , 13 , 14 , 15 , 16 , 17 , 18 ]. Such online se-lectors are usually evaluated by the same question: how much current-task performance can be recov-ered with fewer tokens? We ask a different ques-tion: which behavioral preferences are silently in-duced by the online-selected subset? 
+
+The issue is not hypothetical. A loss-based on-line selector may over-sample examples that the current model finds surprising, including ambigu-ous safety cases, uncommon refusal formats, or long-form explanations. A quality-based selec-tor may prefer polished assistant messages, which can also be verbose, highly confident, and stylis-tically homogeneous. A diversity-based selector may preserve topical coverage while still changing the distribution of refusal language. Online utility-1arXiv:2607.07023v1 [cs.LG] 8 Jul 2026 SFT pool 
+
+> selection policy
+> same SFT
+> behaviorally different model
+> alignment drift audit helpfulness, refusal, style
+> Figure 1: Data selection changes the empirical SFT ob-jective. Even without preference optimization, different selected subsets can shift refusal behavior, verbosity, truthfulness, and robustness.
+
+or influence-based selectors may improve data ef-ficiency while repeatedly emphasizing examples whose scores indicate strong immediate learning signal [ 15 , 16 ]. None of these policies explicitly optimizes helpfulness, harmlessness, truthfulness, sycophancy, or jailbreak robustness, yet all can move those behaviors [19, 20, 21]. We call this phenomenon implicit alignment by data selection . The term does not imply that se-lection always improves alignment. It means that selection induces a directional behavioral change along axes normally associated with alignment. The same token budget can produce a more help-ful, more evasive, more sycophantic, more verbose, or more jailbreak-prone model depending only on which demonstrations are retained. Conceptually, this reframes an online selector as an implicit pref-erence model : its scoring rule occupies the position normally held by a reward model, steering the as-sistant’s persona before any explicit alignment step ever runs. This paper proposes a controlled way to study the phenomenon. Starting from the same base model, we run SFT on subsets chosen by repre-sentative online selection families: random, loss-based, quality-based, and diversity-based selection. We then evaluate the resulting models on a be-havioral suite covering helpfulness, safety refusal, truthfulness, sycophancy, jailbreak robustness, ver-bosity, calibration, and style drift. In parallel, we audit the selected data itself to ask whether high-scoring or high-quality examples systematically over-represent certain response modes. Our contributions are four-fold. • We formulate online SFT data selection as im-plicit alignment: an online selector reweights the supervised objective and thereby defines an im-plicit preference over assistant behaviors, with a first-order bound linking behavioral drift to the attribute enrichment of the selected data. • We introduce Alignment Drift Auditing (ADA), a protocol that compares online selection meth-ods under equal data budgets using behavioral metrics and data-mixture diagnostics. • Empirically, we show that selectors matched on task accuracy induce large, structured, and repro-ducible behavioral drift, and that the direction of the drift is predicted by which attributes the selector over-represents. • We propose Alignment-Aware Selection (AAS), a diagnostic online selector that keeps data-efficiency objectives while constraining drift on refusal, verbosity, truthfulness, and sycophancy axes. 
+
+2 Related Work 
+
+Online data selection for LLM fine-tuning. On-line data selection has become a practical route to cheaper and sometimes better instruction tun-ing. Prior work studies quality filtering, small high-quality datasets, data valuation, influence estima-tion, and online batch selection that scores exam-ples as training proceeds [ 13 , 12 , 11 , 14 , 15 , 16 ]. Earlier data valuation and coreset methods also show that subset choice can change the learned solution even under identical architectures and op-timizers [ 22 , 23 , 24 , 25 ], and recent studies find that these choices leave lasting downstream effects across sequential fine-tuning stages [ 26 ]. Our fo-cus is complementary: rather than asking whether an online selector improves training efficiency, we ask which alignment-relevant behaviors change as a side effect of selecting online. 
+
+Alignment and preference optimization. LLM alignment is commonly associated with reinforce-ment learning from human feedback, constitutional training, rejection sampling, or direct preference optimization [ 1 , 2 , 3 , 27 , 28 , 29 ]. These meth-ods use explicit preference comparisons or reward models. SFT is nevertheless a strong behavioral intervention: instruction demonstrations define the canonical form of assistant behavior before pref-erence optimization begins. Recent analyses of reward-model overoptimization, preference data, and alignment taxonomies further suggest that the data distribution and feedback channel are insepa-rable from the learned behavior [ 30 , 31 , 32 ]. Our work isolates this earlier step by removing prefer-ence training and measuring alignment drift caused solely by data selection. 
+
+Safety, truthfulness, and sycophancy evaluation. 
+
+Behavioral evaluation has expanded beyond task 2accuracy to include truthfulness, harmful request handling, jailbreak robustness, toxicity, bias, and sycophancy [33, 34, 35, 36, 37, 38]. Related work on hallucination, calibration, and social bias shows that fluent answers can still be unreliable or socially distorted [ 39 , 40 , 41 , 42 ]. These benchmarks show that models can be helpful in standard instruction-following settings while failing under adversarial or socially loaded prompts. Because exhaustive human labeling of every axis is costly, our audit also draws on automated, reference-free evaluators that score model outputs directly [ 43 , 38 ]. We use this literature to define alignment axes for SFT-only drift analysis. 
+
+Efficient adaptation and interference. 
+
+Parameter-efficient fine-tuning methods such as adapters, LoRA, and QLoRA make repeated SFT experiments affordable [ 44 , 45 , 46 ]. Agrowing line augments low-rank adaptation with mixture-of-experts or asymmetric structure to add multi-domain capacity without losing efficiency, from LoRAMoE and MixLoRA to mixtures of LoRA experts, asymmetric adapters, domain-specialized MoE-LoRA frame-works, and near-orthogonal rank-wise experts [47 , 48 , 49 , 50 , 51 , 52 ]. In parallel, continual-learning and representation-interference studies show that fine-tuning data can alter future behavior and plasticity even under a purely supervised objective [ 53 , 54 ]. Recent work traces this to representation health, plasticity loss, and feature decorrelation during continual adaptation [55 , 56 , 57 ], as well as representation collapse across sequential post-training [ 58 ] and orthogonal or decoupled subspaces that curb cross-task inter-ference [ 59 , 60 , 61 ]. We borrow this intervention view: an online selector is not only a filter for efficiency, but also a mechanism that changes the model state and behavioral surface. 
+
+3 Problem Setup and Selection Policies 
+
+Let M0 be a pretrained or instruction-tuned lan-guage model and let P = {(xi, y i)}Ni=1 be a candi-date SFT pool. An online selection policy π scores candidate examples as training proceeds, observ-ing the evolving model, optional metadata, and a budget B, and keeps a subset Sπ ⊂ P to train on. Fine-tuning M0 on the online-selected stream yields Mπ.The standard efficiency view evaluates π by val-idation loss or task performance under a fixed bud-get: 
+
+Utask (π) = Perf( Mπ; Vtask ). (1) This ignores the behavioral axes that are often cor-rected later by preference optimization. We instead define a behavior vector 
+
+b(M ) = [ h, r harm , r benign , v, t, s, j, c ], (2) where h is helpfulness, rharm is refusal rate on harmful requests, rbenign is over-refusal on benign requests, v is verbosity, t is truthfulness, s is syco-phancy, j is jailbreak robustness, and c is calibra-tion. The exact estimators are described in Sec-tion 4. 
+
+Definition 1 (Selection-induced alignment drift) .
+
+Given a reference selector π0, usually random se-lection under the same budget, the alignment drift of selector π is 
+
+∆A(π) = b(Mπ) − b(Mπ0 ). (3) 
+
+A selector induces implicit alignment when ∆A is nonzero on alignment-relevant axes, even though the training objective is only supervised next-token likelihood. 
+
+3.1 Selection as Reweighted SFT 
+
+Most deterministic or stochastic online selectors can be written as a weighted empirical objective: 
+
+Lπ(θ) = 
+
+> N
+
+X
+
+> i=1
+
+wπ(i) ℓθ(xi, y i),wπ(i) ≥ 0, X
+
+> i
+
+wπ(i) = 1 ,
+
+(4) where wπ(i) is zero for rejected examples and, for stochastic online selectors, equals the expected number of times example i survives scoring, nor-malized to a probability simplex. It is conve-nient to read Eq. (4) at the distribution level. Let 
+
+p(x, y ) = 1 /N be the empirical pool distribution; the selector induces a tilted training distribution 
+
+qπ(xi, y i) = wπ(i) = p(xi, y i) rπ(xi, y i)
+
+| {z }
+
+> density ratio
+
+, (5) so that online selection is exactly importance reweighting of the pool with ratio rπ = N w π.The population objective Eqπ [ℓθ] is therefore a maximum-likelihood fit to qπ, and in the realizable limit the SFT optimum is the information projec-tion 
+
+θ⋆π = arg min  
+
+> θ
+
+KL  qπ(y | x) pθ(y | x) , (6) 3where the conditional qπ(y | x) is the selector-tilted demonstration policy. Two selectors that disagree about which demonstrations to keep thus target 
+
+different conditional response distributions, even when they share the pool, the model family, and the optimizer. This is where behavior enters. Suppose each ex-ample carries a (latent) attribute vector ai ∈ Rm
+
+encoding refusal style, answer length, hedging, di-rectness, and agreement with the user premise. The selector shifts the expected attribute mixture from the pool mean μa(P) = 1
+
+> N
+
+P 
+
+> i
+
+ai to 
+
+μa(Sπ) = X
+
+> i
+
+wπ(i) ai
+
+= μa(P) + X
+
+> i
+
+ wπ(i) − 1
+
+> N
+
+ai. (7) The second term is the selection-induced attribute shift ; it is nonzero whenever the selector’s weights correlate with any behavioral attribute, and it is exactly what the enrichment ratios in Section 4 estimate. The model is therefore trained not on the original instruction distribution but on a behavioral reweighting of it, and Eq. (7) is the bridge between the data-mixture diagnostics and the behavioral metrics. 
+
+Proposition 1 (Implicit preference induced by se-lection) . Let gi = ∇θℓθ(xi, y i) and let Jθ =
+
+∂b/∂θ be the Jacobian mapping parameter up-dates to behavior-vector changes. For a single gradient step of size η on Eq. (4) , the first-order drift relative to a reference selector π0 is 
+
+∆A(π) = −η J θ
+
+ ¯gπ − ¯gπ0
+
+ + O(η2), (8) 
+
+with weighted gradient mean ¯gπ = P 
+
+> i
+
+wπ(i) gi.Consequently, two selectors with identical task-validation loss can still induce different alignment drift whenever their weighted gradient means differ in a direction that Jθ maps to behavior space, i.e. whenever Jθ(¯ gπ − ¯gπ0 )̸ = 0 .
+
+The proposition makes precise why task perfor-mance under-determines behavior: validation loss constrains θ⋆π on a task slice, but not the projection 
+
+Jθ ¯gπ along alignment axes. If gradients cluster by attribute, ¯gπ ≈ P 
+
+> k
+
+μ(k) 
+
+> a
+
+(Sπ) ¯ g(k) where ¯g(k) is the mean gradient of examples with attribute value k,and Eq. (8) couples drift directly to the enrichment shift of Eq. (7) . A selector can thus be task-efficient because it favors high-loss, high-quality, or high-utility examples, while its weighted gradients still point toward a particular refusal policy or response style. We make the cluster assumption and the resulting bound precise in Appendix A. 
+
+3.2 Selection Policies 
+
+We compare representative online selection fami-lies under the same selected-token budget. Each selector scores candidate examples during training and keeps a high-value subset under the budget. The goal is not to claim that one implementation is universally best, but to expose how common on-line selection principles move behavior. The first four policies below are baselines that span the loss, quality, diversity, and utility signals used by mod-ern online selectors [ 62 , 12 , 15 , 16 ]; the last is our diagnostic selector. 
+
+Random selection. Random selection is the ref-erence condition. It preserves the expected mix-ture of the candidate pool and separates selection-induced drift from ordinary SFT drift. 
+
+Loss-based selection. The loss selector chooses examples with high teacher-forced loss under the current model, optionally excluding the extreme tail to reduce label-noise sensitivity. It approx-imates online batch selection and hard-example mining [ 62 , 63 , 64 ]. We test whether high-loss SFT data increases helpfulness at the cost of verbosity, over-refusal, or brittleness. 
+
+Quality-based selection. The quality selector ranks examples using an external judge, reward model, or heuristic quality score, such as clarity, completeness, grammar, and policy compliance [ 12 , 15 ]. This captures common curation pipelines. We audit whether high-quality data is behaviorally neutral or whether it selects for polished but homo-geneous assistant personas. 
+
+Diversity-based selection. The diversity selector uses embedding coverage, clustering, or farthest-first traversal to cover semantic regions of the pool [ 65 , 66 , 67 ]. It tests whether semantic coverage is sufficient to preserve alignment-relevant coverage, such as benign refusals, concise answers, calibrated uncertainty, and disagreement with false user as-sumptions. The quality and diversity scorers sub-sume the utility-style online selectors that keep the most informative examples during SFT [ 15 , 16 ], which we therefore treat as instances of the same score family rather than as a separate baseline. 4Alignment-aware selection. Alignment-Aware Selection (AAS) is a diagnostic variant, not the central claim of the paper. Given a base online score sbase (x) from any loss- or quality-based util-ity scorer, AAS adds a penalty on the selected be-havioral mixture: 
+
+max 
+
+> S:|S|≤ B
+
+X
+
+> xi∈S
+
+sbase (xi) + λc (S)
+
+− ρ ∥ˆμa(S) − ˆμa(P)∥22 ,
+
+(9) where ˆμa(S) = 1
+
+> |S|
+
+P 
+
+> xi∈S
+
+ϕ(ai) is the empirical attribute mean of the selected set under a feature map ϕ. The penalty is precisely a (linear-kernel) maximum mean discrepancy between the selected set and the pool, ρ MMD 2
+
+> ϕ
+
+(S, P), so AAS interpo-lates between pure utility selection ( ρ = 0 ) and attribute-matched selection ( ρ → ∞ ), at which point μa(S) → μa(P) and, by Eq. (7) , the first-order attribute shift vanishes. Attributes can be obtained from lightweight classifiers, LLM judges, or rules for length and refusal markers. Although the cardinality-constrained problem is combinatorial, the objective is the difference of a modular term and a squared-norm term and admits a simple greedy rule. Writing δ(x | S) for the marginal gain of adding x to a partial set S,
+
+δ(x | S) = sbase (x) + λ ∆c(x | S)
+
+− 2ρ ˆμa(S) − ˆμa(P), ϕ (ax) ,
+
+(10) up to an O(1 /|S|) self-term. Each step adds the unselected example with the largest δ(x | S); the inner product makes the rule self-correcting, down-weighting attributes already over-represented in S
+
+and up-weighting under-represented ones. When 
+
+c is monotone submodular, the modular-plus-coverage part inherits the standard (1 − 1/e ) guar-antee, and the penalty only tightens the attribute match. AAS thus asks whether drift can be reduced without abandoning the efficiency of the underly-ing online selector, and Eq. (10) shows it adds only an inner product per candidate over the base scorer. 
+
+4 Alignment Drift Auditing 
+
+ADA is designed to isolate the causal role of se-lection. All runs share the same base model, op-timizer, learning rate, sequence length, selected-token budget, number of updates, and decoding settings. Only the selected subset changes. 
+
+4.1 Data and Models 
+
+Our candidate pool combines general instruction following, reasoning, coding, safety, factual QA, and advice-seeking prompts, drawn from open in-struction mixtures (UltraChat and OpenHermes-style conversations), math and code instruction data, and safety-oriented refusal data, for a pool of roughly 300 K instruction–response pairs. The base model is a Llama-3.1-8B instruction-tuned checkpoint. We fine-tune with LoRA (rank 16 ,
+
+α=32 ) under a single fixed recipe—identical learn-ing rate, schedule, sequence length, and number of optimizer updates across selectors—and confirm the main trends with a full-fine-tuning run to rule out an adapter artifact [45, 46]. Each selector is run over three seeds at budgets of 1% , 5% , 10% , and 25% of the pool measured in tokens. The budget sweep is central because implicit alignment is strongest in the low-budget regime, where selection pressure over the empirical SFT distribution is highest. 
+
+4.2 Behavioral Metrics 
+
+ADA evaluates selectors by behavioral movement rather than validation loss alone. We track eight axes, each with a concrete estimator: helpfulness 
+
+via pairwise LLM-judge win rate and instruction-following score; harmful refusal via refusal rate on harmful requests and HarmBench-style attack success [ 38 ]; benign over-refusal via refusal rate on harmless but sensitive prompts; verbosity via output length and compression ratio at fixed con-tent; truthfulness via TruthfulQA-style correct-ness and informativeness [ 33 ]; sycophancy via agreement with false premises and leading opin-ions [ 36 ]; jailbreak robustness via attack success under adversarial wrappers [ 34 ]; and calibration 
+
+via abstention and confidence markers. Safety is split into harmful refusal and benign over-refusal because a selector can improve one while damaging the other, and verbosity and style are read off out-put length, lexical features, and judge comparisons conditioned on equivalent content. 
+
+4.3 Data-Mixture Diagnostics 
+
+Behavioral drift must ultimately be traceable to the selected data. We therefore label each candidate example with lightweight attributes: • response length and structural style, such as list-heavy, step-by-step, or concise; 5• refusal and safety markers, including direct re-fusal, partial compliance, and redirection; • uncertainty markers, hedging, citations, and cali-bration language; • user-premise handling, including agreement, cor-rection, and neutral clarification; • domain and task type, such as coding, math, ad-vice, creative writing, and policy-sensitive con-tent. For each selector, we report enrichment ratios rela-tive to the full pool: 
+
+Enrich π(a = k) = Pr x∼Sπ [a(x) = k]Pr x∼P [a(x) = k] + ϵ . (11) This reveals whether, for example, high-utility ex-amples are disproportionately long, highly struc-tured, refusal-heavy, or socially agreeable. 
+
+4.4 Audit Score 
+
+For concise reporting, we define the drift magni-tude as a Mahalanobis-style norm of the signed drift vector: 
+
+DA(π) = ∥W (b(Mπ) − b(Mrand )) ∥2 ,W = diag( w1/σ 1, . . . , w 8/σ 8), (12) where σj is the across-seed standard deviation of axis j under random selection and wj ≥ 0 option-ally upweights safety-critical axes. Dividing by 
+
+σj makes DA scale-free and expresses each axis movement in units of its own random-seed noise, so a unit of drift is comparable across helpfulness, refusal, and verbosity. With wj ≡ 1, Eq. (12) is the Euclidean norm in z-scored behavior space; choos-ing W as the inverse Cholesky factor of the seed covariance instead would whiten correlated axes, which we report as a robustness variant. We always accompany the scalar with the signed vector ∆A(π) because direction matters: more re-fusal is desirable on harmful prompts but harmful on benign ones, so the two refusal axes can can-cel in a magnitude while describing very different models. To separate genuine drift from seed noise we test each axis with a paired bootstrap over seeds, reporting an axis as moved only when the bootstrap 
+
+95% interval of ∆A,j excludes zero, and we con-trol the false-discovery rate across the eight axes with the Benjamini–Hochberg procedure. 
+
+Algorithm 1: Alignment Drift Auditing 
+
+Input: Base model M0, candidate pool P,selectors Π, budget B, behavior suite E
+
+Output: Task scores, behavior drift, and selected-data enrichment for each selector 
+
+foreach π ∈ Π do 
+
+Select subset Sπ ← π(P, M 0, B );Fine-tune M0 on Sπ with fixed SFT recipe to obtain Mπ;Evaluate Mπ on task validation and behavior suite E;Label selected examples with behavioral attributes a(x);Compute ∆A(π), DA(π), and enrichment ratios; Compare selectors against random under paired seeds and equal token budgets; 
+
+5 Experiments 
+
+5.1 Research Questions 
+
+The study is organized around five questions, each tied to a measurable comparison: • RQ1 (existence). Do two equal-budget SFT runs differ in behavior because of selection alone? We expect every non-random selector to induce measurable drift on at least one axis. • RQ2 (bias of scores). Are high-scoring exam-ples behaviorally biased toward longer, more confident, or more refusal-heavy demonstrations that differ most from the base model? • RQ3 (role of diversity). Does semantic diver-sity prevent drift, or does it reduce domain skew while leaving style and refusal skew intact? • RQ4 (trade-offs). Does the helpfulness–safety trade-off usually attributed to preference opti-mization already appear during selected SFT? • RQ5 (control). Can alignment-aware con-straints reduce DA while preserving task per-formance? 
+
+5.2 Main Comparisons 
+
+The central experiment is a selector-by-budget grid. For each budget, we train models using ran-dom, loss-based, quality-based, diversity-based, and AAS selection, and report task validation per-formance together with the full behavior vector. 6We summarize the grid with a Pareto plot of help-fulness versus alignment drift, which makes visible which online selectors are efficient but behaviorally unstable. 
+
+5.3 Main Results Equal accuracy, different behavior. Table 1 re-ports ADA at a 10% selected-token budget. The dominant pattern is that task and helpfulness scores do not determine alignment drift. Quality selec-tion obtains the strongest task score, but it also moves verbosity, benign refusal, sycophancy, and jailbreak robustness; loss-based selection reaches comparable helpfulness while pushing behavior in a different direction. Diversity has lower task gain but smaller drift. AAS preserves most of the task gain while reducing the drift magnitude by more than half relative to loss- and quality-based selec-tion. Quality and loss-based selection land within 
+
+0.8 points of task accuracy, yet they differ by more than 8 points of harmful-refusal rate and over 3
+
+points of benign over-refusal—a gap that a task-only report would hide entirely. Fig. 2 gives the same result in two views. The Pareto view separates performance from behavioral movement: quality- and loss-based selection sit at high task score but also high drift, while AAS sits closer to the low-drift frontier. The heatmap shows why reporting only one safety score is insufficient. Loss selection reduces harmful refusal and jail-break robustness while increasing verbosity and sycophancy. Quality selection improves harmful refusal but also raises benign over-refusal and an-swer length. These signed movements would be hidden by a single aggregate metric. 
+
+Drift is explained by the selected data. Table 2 and Fig. 3 connect behavioral drift to the selected data. Quality selection strongly enriches long an-swers and refusal markers, explaining its simulta-neous increase in helpfulness, verbosity, harmful refusal, and benign over-refusal. Loss-based se-lection enriches premise-agreement examples, con-sistent with its higher sycophancy error. Diversity selection reduces these enrichments but does not remove them entirely. AAS is effective because it treats behavior attributes as first-class constraints instead of assuming semantic diversity is enough. The sign and magnitude of each row track the en-richment gap in Eq. (19) , giving an empirical han-dle on the otherwise abstract Jacobian Jθ.
+
+5.4 Budget and Ablation Trends Selection pressure peaks at low budgets. Table 3 and Fig. 4 show that alignment drift is strongest at low selected-token budgets, where each online scoring rule has the most leverage over the em-pirical SFT distribution. Increasing the budget re-duces drift because the selected subset better ap-proximates the full pool, but it does not eliminate selector differences. Quality-based selection re-mains the strongest task-efficiency baseline across budgets, while AAS consistently gives the lowest non-random drift, and the ordering of selectors is preserved as the budget grows. Table 4 isolates the terms in AAS on top of the quality-based utility scorer. Topic balancing re-duces domain skew but leaves verbosity and syco-phancy drift largely intact. Adding style constraints mostly reduces length and format drift. Adding re-fusal constraints improves harmful/benign refusal balance but can slightly lower helpfulness if used alone. The full AAS objective works best because it constrains behavior attributes jointly while retain-ing the underlying utility score. These results support two practical conclusions. First, a selector should not be certified by aggre-gate helpfulness alone: the same helpfulness gain can correspond to very different refusal and style changes. Second, alignment-aware constraints need not replace efficient selection. They can act as a guardrail around an efficient selector, preserving most of its task gain while preventing the selected subset from becoming a narrow behavioral curricu-lum. 
+
+5.5 Controls 
+
+Several controls are necessary. First, we match token budgets rather than sample counts so that verbosity in the selected data does not create hidden compute differences. Second, we run matched-topic controls: if loss-based selection picks more coding examples, we compare against a random subset with the same topic distribution to isolate style and safety effects. Third, we fix decoding and evaluation prompts across models. Fourth, we use paired seeds so that each selector is compared to random under the same training randomness. 
+
+5.6 Mechanistic Diagnostics 
+
+For a subset of runs we inspect why drift occurs, instantiating the quantities in Proposition 1. First, we measure how aligned the per-attribute gradients 7Selector Task score ↑
+
+Helpful win ↑
+
+Harmful refusal ↑
+
+Benign refusal ↓
+
+Avg. tokens ↓
+
+Truthful QA ↑
+
+Syc. error ↓
+
+DA
+
+↓
+
+Random 67.9 ±0.4 50.0 81.2 9.6 184 42.1 24.7 0.00 Loss 70.8 ±0.5 54.8 76.9 11.3 202 40.2 28.5 0.42 Quality 71.6 ±0.3 56.2 85.1 14.4 207 42.8 26.8 0.36 Diversity 69.4 ±0.4 52.1 82.3 10.4 189 42.6 25.4 0.19 AAS 71.4 ±0.3 56.1 81.9 10.5 190 42.9 25.2 0.13 
+
+Table 1: ADA results at a 10% selected-token budget over three seeds. Scores are reported relative to a fixed base model and SFT recipe. A selector can improve task/helpfulness scores while still increasing behavioral drift. 0.0 0.1 0.2 0.3 0.4 0.5                                         
+
+> Alignment drift magnitude
+> 67
+> 68
+> 69
+> 70
+> 71
+> 72
+> Task / helpfulness score
+> Random
+> Loss
+> Quality
+> Diversity
+> AAS
+> Utility does not determine behavioral drift Help. Harm
+> ref.
+> Benign
+> ref.
+> Verb. Truth. Syc. Jail. Calib.
+> Random
+> Loss
+> Quality
+> Diversity
+> AAS
+> 00000000
+> +1.8 -4.3 +1.7 +9.6 -1.9 +3.8 -3.1 -1.4
+> +2.4 +3.9 +4.8 +12.3 +0.7 +2.1 +1.5 +0.4
+> +1.1 +1.1 +0.8 +2.5 +0.5 +0.7 +0.6 +0.1
+> +2.5 +0.7 +0.9 +3.1 +0.4 +0.6 +0.8 +0.3
+> Different selectors move different alignment axes
+> −10
+> −5
+> 0
+> 5
+> 10
+> Signed change vs. random
+
+Figure 2: Result visualizations. Left: task/helpfulness improvements and alignment drift are not monotonically related. Right: signed drift shows that selectors move different behavior axes rather than producing a single scalar “alignment” effect. 
+
+Selector Long answers Refusal markers Hedging Premise agreement Loss 1.42 1.25 1.18 1.31 Quality 1.68 1.47 1.09 1.22 Diversity 1.07 1.03 1.05 1.06 AAS 1.12 1.05 1.03 1.04 
+
+Table 2: Selected-data enrichment ratios relative to the full pool. Ratios above 1 indicate that the selector over-represents the attribute. 
+
+are with the net update direction. For attribute group k with mean gradient ¯g(k) and net step ¯gπ,the gradient alignment is 
+
+α(k)
+
+π = ⟨¯g(k), ¯gπ⟩∥¯g(k)∥ ∥ ¯gπ∥ , (13) so that attributes with large enrichment and large positive α(k)
+
+π are the ones the optimizer actually amplifies; this identifies which over-represented behaviors are also mechanistically dominant rather than merely frequent. Second, we quantify representation drift on a fixed probe corpus using linear centered kernel alignment between the penultimate features H0 of 
+
+M0 and Hπ of Mπ,
+
+CKA( H0, H π) = ∥H⊤
+
+π H0∥2
+
+F
+
+∥H⊤
+
+0 H0∥F ∥H⊤
+
+π Hπ∥F
+
+, (14) Long     
+
+> answers
+> Refusal
+> markers
+> Hedging Premise
+> agreement
+> 1.0
+> 1.2
+> 1.4
+> 1.6
+> 1.8
+> Enrichment ratio
+> Selected subsets over-represent behavioral attributes
+> Loss Quality Diversity AAS
+
+Figure 3: Enrichment plot. High-utility and high-quality subsets are not only different by topic; they also over-represent response styles and social behaviors. 
+
+where lower CKA on safety-sensitive probes but high CKA on task probes indicates that a selector reorganizes the refusal subspace while leaving task features intact. Third, at the output level we track the refusal-logit margin 
+
+mrefuse (x) = log pM (refusal | x)
+
+− log pM (answer | x), (15) estimated with small sets of canonical refusal and answer prefixes. Its selector-induced change de-composes, to first order, into a prompt-independent 8Selector 1% budget 5% budget 10% budget 25% budget Task ↑ DA ↓ Task ↑ DA ↓ Task ↑ DA ↓ Task ↑ DA ↓                                        
+
+> Random 61.8 0.00 65.4 0.00 67.9 0.00 70.6 0.00 Loss 65.9 0.57 68.9 0.48 70.8 0.42 72.0 0.29 Quality 66.4 0.52 69.8 0.44 71.6 0.36 72.7 0.25 Diversity 63.7 0.28 67.5 0.23 69.4 0.19 71.3 0.15 AAS 66.5 0.22 69.7 0.17 71.4 0.13 72.6 0.10
+
+Table 3: Budget sweep. Higher budgets reduce drift, but selector-induced behavior differences persist at every budget. 1% 5% 10% 25% 
+
+> Selected-token budget (%)
+> 0.0
+> 0.1
+> 0.2
+> 0.3
+> 0.4
+> 0.5
+> 0.6
+> Alignment drift magnitude
+> Drift is largest at low budgets
+> Random
+> Loss
+> Quality
+> Diversity
+> AAS
+
+Figure 4: Budget sweep. Online selection pressure is highest at small budgets, where drift is also largest; the selector ordering persists as the budget grows.                             
+
+> Variant Task ↑Help. ↑Verb. drift ↓DA↓
+> Quality base 71.6 56.2 12.3 0.36 + topic balance 71.5 56.0 10.8 0.29 + style balance 71.4 55.7 4.4 0.21 + refusal balance 71.3 55.5 6.2 0.18 Full AAS 71.4 56.1 3.1 0.13
+
+Table 4: AAS ablation at 10% budget. Drift decreases most when topic, style, and safety attributes are con-strained together. 
+
+bias and a prompt-dependent term, 
+
+∆mrefuse (x) ≈ ⟨ u, ∆θπ⟩
+
+| {z }
+
+> global shift
+
++ ⟨V (x), ∆θπ⟩
+
+| {z }
+
+> conditional shift
+
+, (16) where u = ∇θEx[mrefuse ] and V (x) is the centered per-prompt gradient. A selector that only changes the global term shifts refusal everywhere; one that changes V (x) on harmful versus benign prompts has learned a more conditional safety boundary. Evaluating Eq. (16) on matched harmful and be-nign prompts is exactly the off-diagonal movement visualized in Appendix D. 
+
+6 Discussion 
+
+Our results have a direct practical implication: pa-pers and systems that report selected SFT perfor-mance should also report behavioral drift. A se-lector that recovers instruction-following accuracy with 10% of the data is not equivalent to full-data SFT when it changes refusal boundaries, answer length, or sycophancy. In high-stakes deployments, these changes are not secondary metrics; they are part of the product behavior. The framing also changes how we interpret “quality”. A high-quality response is not only clean and useful; it carries a style and policy stance. Se-lecting for quality can therefore select for a persona. This is beneficial when the persona matches the in-tended assistant, but risky when the scoring rubric hides values such as verbosity, deference, or exces-sive caution. Finally, implicit alignment does not mean that explicit alignment is unnecessary. Preference op-timization remains important for resolving con-flicts and learning from comparative feedback. The claim is narrower but consequential: because the online scorer already acts as an implicit preference model, by the time preference optimization starts the selected data has often moved the model to-ward or away from the desired behavioral region, so the two stages should be co-designed rather than treated as independent. 
+
+7 Conclusion 
+
+Data selection is not a neutral efficiency layer. By changing which demonstrations define the SFT ob-jective, an online selector implicitly chooses among assistant behaviors normally associated with align-ment: helpfulness, refusal, verbosity, truthfulness, sycophancy, and robustness. We formalized this ef-fect as selection-induced alignment drift, proposed Alignment Drift Auditing to measure it, and intro-duced Alignment-Aware Selection as a diagnostic 9control. The central recommendation is simple: when reporting online SFT data selection, evalu-ate not only how much performance is retained, but also which values and styles the selected data quietly teaches. 
+
+Limitations 
+
+The proposed protocol depends on imperfect be-havioral evaluations. LLM judges can be biased, jailbreak suites are incomplete, and sycophancy prompts only cover a subset of social behaviors. We therefore emphasize paired comparisons and signed drift rather than absolute alignment scores. Attribute labeling of SFT data is also noisy, espe-cially for subtle behaviors such as calibration or false-premise correction. Finally, different base models may respond differently to the same se-lected data, and drift may compound when selec-tion is applied across multiple post-training stages [26 ], so cross-model and multi-stage replication is needed before making broad claims about any selector. 
+
+Ethics Statement 
+
+This work studies safety-relevant behavior such as harmful compliance and jailbreak robustness. Ex-periments should use established red-team bench-marks under controlled evaluation settings and should avoid releasing new harmful prompt tem-plates beyond what is already public. The goal is to reduce hidden alignment regressions caused by data selection. 
+
+Acknowledgments 
+
+We thank the anonymous reviewers for their feed-back. 
+
+References 
+
+[1] Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. Advances in Neural Informa-tion Processing Systems , 2022. [2] Yuntao Bai, Saurav Kadavath, Sandipan Kundu, Amanda Askell, Jackson Kernion, Andy Jones, Anna Chen, Anna Goldie, Azalia Mirhoseini, Cameron McKinnon, et al. Training a helpful and harmless assistant with reinforcement learning from human feedback. arXiv preprint arXiv:2204.05862 , 2022. [3] Rafael Rafailov, Archit Sharma, Eric Mitchell, Ste-fano Ermon, Christopher D. Manning, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. In Advances in Neural Information Processing Systems , 2023. [4] Daniel M. Ziegler, Nisan Stiennon, Jeffrey Wu, Tom B. Brown, Alec Radford, Dario Amodei, Paul Christiano, and Geoffrey Irving. Fine-tuning lan-guage models from human preferences. arXiv preprint arXiv:1909.08593 , 2019. [5] Nisan Stiennon, Long Ouyang, Jeffrey Wu, Daniel M. Ziegler, Ryan Lowe, Chelsea Voss, Alec Radford, Dario Amodei, and Paul F. Christiano. Learning to summarize with human feedback. In Advances in Neural Information Processing Systems , 2020. [6] Jason Wei, Maarten Bosma, Vincent Y. Zhao, Kelvin Guu, Adams Wei Yu, Brian Lester, Nan Du, An-drew M. Dai, and Quoc V. Le. Finetuned language models are zero-shot learners. In International Con-ference on Learning Representations , 2022. [7] Victor Sanh, Albert Webson, Colin Raffel, Stephen H. Bach, Lintang Sutawika, Zaid Alyafeai, Antoine Chaffin, Arnaud Stiegler, Teven Le Scao, Arun Raja, et al. Multitask prompted training enables zero-shot task generalization. In International Conference on Learning Representations , 2022. [8] Yizhong Wang, Yeganeh Kordi, Swaroop Mishra, Alisa Liu, Noah A. Smith, Daniel Khashabi, and Hannaneh Hajishirzi. Self-instruct: Aligning lan-guage models with self-generated instructions. arXiv preprint arXiv:2212.10560 , 2022. [9] Can Xu, Qingfeng Sun, Kai Zheng, Xiubo Geng, Pu Zhao, Jiazhan Feng, Chongyang Tao, and Daxin Jiang. WizardLM: Empowering large language mod-els to follow complex instructions. arXiv preprint arXiv:2304.12244 , 2023. [10] Srinivasan Iyer, Xi Victoria Lin, Ramakanth Pa-sunuru, Todor Mihaylov, Dima Simig, Ping Yu, Kurt Shuster, Tianlu Wang, Qing Liu, Punit Singh Koura, et al. OPT-IML: Scaling language model instruc-tion meta learning through the lens of generalization. 
+
+arXiv preprint arXiv:2212.12017 , 2022. [11] Alon Albalak, Yanai Elazar, Sang Michael Xie, Shayne Longpre, Nathan Lambert, Xinyi Wang, Niklas Muennighoff, Bairu Hou, Liangming Pan, Haeju Jeong, et al. A survey on data selection for language models. arXiv preprint arXiv:2402.16827 ,2024. [12] Lichang Chen, Shiyang Li, Jun Yan, Hai Wang, Kalpa Gunaratna, Vikas Yadav, Zheng Tang, Vijay Srinivasan, Tianyi Zhou, Heng Huang, and Hongxia Jin. AlpaGasus: Training a better alpaca with fewer data. In International Conference on Learning Rep-resentations , 2024. [13] Chunting Zhou, Pengfei Liu, Puxin Xu, Srinivasan Iyer, Jiao Sun, Yuning Mao, Xuezhe Ma, Avia Efrat, 
+
+10 Ping Yu, Lili Yu, et al. LIMA: Less is more for align-ment. In Advances in Neural Information Processing Systems , 2023. [14] Mengzhou Xia, Sadhika Malladi, Suchin Gururan-gan, Sanjeev Arora, and Danqi Chen. LESS: Select-ing influential data for targeted instruction tuning. In International Conference on Machine Learning ,2024. [15] Jiachen T. Wang, Tong Wu, Dawn Song, Prateek Mittal, and Ruoxi Jia. GREATS: Online selection of high-quality data for LLM training in every itera-tion. In Advances in Neural Information Processing Systems , 2024. [16] Heming Zou, Yixiu Mao, Yun Qu, Qi Wang, and Xiangyang Ji. Utility-diversity aware online batch se-lection for llm supervised fine-tuning. arXiv preprint arXiv:2510.16882 , 2025. [17] Suriya Gunasekar, Yi Zhang, Jyoti Aneja, Caio César Teodoro Mendes, Allie Del Giorno, Sivakanth Gopi, Mojan Javaheripi, Piero Kauffmann, Gustavo de Rosa, Olli Saarikivi, et al. Textbooks are all you need. arXiv preprint arXiv:2306.11644 , 2023. [18] Sang Michael Xie, Shibani Santurkar, Tengyu Ma, and Percy Liang. Data selection for language mod-els via importance resampling. Advances in Neural Information Processing Systems , 2023. [19] Amanda Askell, Yuntao Bai, Anna Chen, Dawn Drain, Deep Ganguli, Tom Henighan, Andy Jones, Nicholas Joseph, Ben Mann, Nova DasSarma, et al. A general language assistant as a laboratory for align-ment. arXiv preprint arXiv:2112.00861 , 2021. [20] Deep Ganguli, Amanda Askell, Nicholas Schiefer, Thomas I. Liao, Kamil ˙e Lukoši ¯ut ˙e, Anna Chen, Anna Goldie, Azalia Mirhoseini, Catherine Olsson, Danny Hernandez, et al. The capacity for moral self-correction in large language models. arXiv preprint arXiv:2302.07459 , 2023. [21] Dario Amodei, Chris Olah, Jacob Steinhardt, Paul Christiano, John Schulman, and Dan Mané. Concrete problems in ai safety. arXiv preprint arXiv:1606.06565 , 2016. [22] Pang Wei Koh and Percy Liang. Understanding black-box predictions via influence functions. In In-ternational Conference on Machine Learning , 2017. [23] Garima Pruthi, Frederick Liu, Satyen Kale, and Mukund Sundararajan. Estimating training data in-fluence by tracing gradient descent. In Advances in Neural Information Processing Systems , 2020. [24] Mansheej Paul, Surya Ganguli, and Gintare Karolina Dziugaite. Deep learning on a data diet: Finding important examples early in training. In Advances in Neural Information Processing Systems , 2021. [25] Ben Sorscher, Robert Geirhos, Shashank Shekhar, Surya Ganguli, and Ari S. Morcos. Beyond neural scaling laws: Beating power law scaling via data pruning. In Advances in Neural Information Process-ing Systems , 2022. [26] Yuxin Yang, Aoxiong Zeng, and Xiangquan Yang. The long-term effects of data selection in LLM fine-tuning. arXiv preprint arXiv:2605.30537 , 2026. [27] Paul F. Christiano, Jan Leike, Tom Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep re-inforcement learning from human preferences. In 
+
+Advances in Neural Information Processing Systems ,2017. [28] Harrison Lee, Sang Michael Phatale, Hassan Man-soor, Thomas Mesnard, Johan Ferret, Kellie Lu, Colton Bishop, Ethan Hall, Victor Carbune, and Ab-hinav Rastogi. Rlaif: Scaling reinforcement learn-ing from human feedback with ai feedback. arXiv preprint arXiv:2309.00267 , 2023. [29] Kawin Ethayarajh, Winnie Xu, Dan Jurafsky, and Douwe Kiela. Kto: Model alignment as prospect theoretic optimization. In International Conference on Machine Learning , 2024. [30] Leo Gao, John Schulman, and Jacob Hilton. Scal-ing laws for reward model overoptimization. Pro-ceedings of the 40th International Conference on Machine Learning , 2023. [31] Stephen Casper, Xander Davies, Claudia Shi, Thomas Krendl Gilbert, Jérémy Scheurer, Javier Rando, Rachel Freedman, Tomasz Korbak, David Lindner, Pedro Freire, et al. Open problems and fun-damental limitations of reinforcement learning from human feedback. Transactions on Machine Learning Research , 2023. [32] Jiaming Ji, Tianyi Qiu, Boyuan Chen, Borong Zhang, Hantao Lou, Kaile Wang, Yawen Duan, Zhonghao He, Jiayi Zhou, Zhaowei Zhang, et al. Ai alignment: A comprehensive survey. arXiv preprint arXiv:2310.19852 , 2023. [33] Stephanie Lin, Jacob Hilton, and Owain Evans. TruthfulQA: Measuring how models mimic human falsehoods. In Proceedings of the 60th Annual Meet-ing of the Association for Computational Linguistics ,2022. [34] Deep Ganguli, Liane Lovitt, Jackson Kernion, Amanda Askell, Yuntao Bai, Saurav Kadavath, Ben Mann, Ethan Perez, Nicholas Schiefer, Kamal Ndousse, et al. Red teaming language models to re-duce harms: Methods, scaling behaviors, and lessons learned. arXiv preprint arXiv:2209.07858 , 2022. [35] Samuel Gehman, Suchin Gururangan, Maarten Sap, Yejin Choi, and Noah A. Smith. Realtoxicityprompts: Evaluating neural toxic degeneration in language models. In Findings of the Association for Com-putational Linguistics: EMNLP , 2020. 
+
+11 [36] Ethan Perez, Sam Ringer, Kamil ˙e Lukoši ¯ut ˙e, Ka-rina Nguyen, Edwin Chen, Scott Heiner, Craig Pettit, Catherine Olsson, Sandipan Kundu, Saurav Kada-vath, et al. Discovering language model behaviors with model-written evaluations. In Findings of the As-sociation for Computational Linguistics: ACL , 2023. [37] Alexander Wei, Nika Haghtalab, and Jacob Stein-hardt. Jailbroken: How does LLM safety training fail? In Advances in Neural Information Processing Systems , 2023. [38] Mantas Mazeika, Long Phan, Xuwang Yin, Andy Zou, Zifan Wang, Norman Mu, Elham Sakhaee, Nathaniel Li, Steven Basart, Bo Li, et al. Harmbench: A standardized evaluation framework for automated red teaming and robust refusal. In International Con-ference on Machine Learning , 2024. [39] Joshua Maynez, Shashi Narayan, Bernd Bohnet, and Ryan McDonald. On faithfulness and factuality in abstractive summarization. In Proceedings of the 58th Annual Meeting of the Association for Compu-tational Linguistics , 2020. [40] Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. On calibration of modern neural net-works. In International Conference on Machine Learning , 2017. [41] Emily M. Bender, Timnit Gebru, Angelina McMillan-Major, and Shmargaret Shmitchell. On the dangers of stochastic parrots: Can language mod-els be too big? In Proceedings of the 2021 ACM Conference on Fairness, Accountability, and Trans-parency , 2021. [42] Emily Sheng, Kai-Wei Chang, Premkumar Natara-jan, and Nanyun Peng. The woman worked as a babysitter: On biases in language generation. In 
+
+Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing , 2019. [43] Ru Peng, Heming Zou, Haobo Wang, Yawen Zeng, Zenan Huang, and Junbo Zhao. Energy-based automated model evaluation. arXiv preprint arXiv:2401.12689 , 2024. [44] Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzeb-ski, Bruna Morrone, Quentin De Laroussilhe, An-drea Gesmundo, Mona Attariyan, and Sylvain Gelly. Parameter-efficient transfer learning for NLP. In In-ternational Conference on Machine Learning , 2019. [45] Edward J. Hu, Yelong Shen, Phillip Wallis, Yizhi Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations , 2022. [46] Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. QLoRA: Efficient finetuning of quantized LLMs. In Advances in Neural Informa-tion Processing Systems , 2023. [47] Shihan Dou, Enyu Zhou, Yan Liu, Songyang Gao, Jun Zhao, Wei Shen, Yuhao Zhou, Zhiheng Xi, Xiao Wang, Xiaoran Fan, et al. LoRAMoE: Al-leviate world knowledge forgetting in large lan-guage models via MoE-style plugin. arXiv preprint arXiv:2312.09979 , 2023. [48] Dengchun Li, Yingzi Ma, Naizheng Wang, Zheng-mao Ye, Zhiyuan Cheng, Yinghao Tang, Yan Zhang, Lei Duan, Jie Zuo, Cal Yang, et al. MixLoRA: Enhancing large language models fine-tuning with LoRA-based mixture of experts. arXiv preprint arXiv:2404.15159 , 2024. [49] Xun Wu, Shaohan Huang, and Furu Wei. Mixture of LoRA experts. In International Conference on Learning Representations , 2024. [50] Chunlin Tian, Zhan Shi, Zhijiang Guo, Li Li, and Cheng-Zhong Xu. HydraLoRA: An asymmetric LoRA architecture for efficient fine-tuning. Ad-vances in Neural Information Processing Systems ,2024. [51] Yuxin Yang, Aoxiong Zeng, and Xiangquan Yang. Towards specialized generalists: A multi-task MoE-LoRA framework for domain-specific LLM adapta-tion. arXiv preprint arXiv:2601.07935 , 2026. [52] Heming Zou, Yunliang Zang, Wutong Xu, Yao Zhu, and Xiangyang Ji. FlyLoRA: Boosting task decou-pling and parameter efficiency via implicit rank-wise mixture-of-experts. Advances in Neural Information Processing Systems , 38:10386–10419, 2026. [53] James Kirkpatrick, Razvan Pascanu, Neil Rabi-nowitz, Joel Veness, Guillaume Desjardins, Andrei A. Rusu, Kieran Milan, John Quan, Tiago Ramalho, Ag-nieszka Grabska-Barwinska, et al. Overcoming catas-trophic forgetting in neural networks. Proceedings of the National Academy of Sciences , 2017. [54] Zhizhong Li and Derek Hoiem. Learning without forgetting. IEEE Transactions on Pattern Analysis and Machine Intelligence , 2017. [55] Ananya Kumar, Aditi Raghunathan, Robbie Jones, Tengyu Ma, and Percy Liang. Fine-tuning can dis-tort pretrained features and underperform out-of-distribution. In International Conference on Learn-ing Representations , 2022. [56] Shibhansh Dohare, J. Fernando Hernandez-Garcia, Qingfeng Lan, Parash Rahman, A. Rupam Mahmood, and Richard S. Sutton. Loss of plasticity in deep continual learning. Nature , 632:768–774, 2024. [57] Heming Zou, Yunliang Zang, Wutong Xu, and Xi-angyang Ji. Fly-CL: A fly-inspired framework for enhancing efficient decorrelation and reduced train-ing time in pre-trained model-based continual repre-sentation learning. arXiv preprint arXiv:2510.16877 ,2025. 
+
+12 [58] Yichen Liu, Mingyu Chen, Hao Wang, Xiaoran Xu, Chenxi Lin, Rui Zhang, Yutong Zhou, Yuxin Yang, Jiarui Wu, and Wei Sun. Representation collapse in sequential post-training of large language models. 
+
+arXiv preprint arXiv:2605.30524 , 2026. [59] Xiao Wang, Tianze Chen, Qiming Ge, Han Xia, Rong Bao, Rui Zheng, Qi Zhang, Tao Gui, and Xu-anjing Huang. Orthogonal subspace learning for lan-guage model continual learning. In Findings of the Association for Computational Linguistics: EMNLP ,2023. [60] Shenghe Zheng, Hongzhi Wang, Chenyu Huang, Xiaohui Wang, Tao Chen, Jiayuan Fan, Shuyue Hu, and Peng Ye. Decouple and orthogonalize: A data-free framework for LoRA merging. arXiv preprint arXiv:2505.15875 , 2025. [61] Ziyu Yang, Guibin Chen, Yuxin Yang, Aoxiong Zeng, and Xiangquan Yang. Disentangling task con-flicts in multi-task LoRA via orthogonal gradient projection. arXiv preprint arXiv:2601.09684 , 2026. [62] Ilya Loshchilov and Frank Hutter. Online batch selection for faster training of neural networks. arXiv preprint arXiv:1511.06343 , 2015. [63] Angela H. Jiang, Daniel L. Wong, Giulio Zhou, David G. Andersen, Jeffrey Dean, Gregory R. Ganger, Gauri Joshi, Michael Kaminsky, Michael Kozuch, Zachary C. Lipton, et al. Accelerating deep learning by focusing on the biggest losers. arXiv preprint arXiv:1910.00762 , 2019. [64] Soren Mindermann, Jan M. Brauner, Muhammed Razzak, Mrinank Sharma, Andreas Kirsch, Winnie Xu, Benedikt Höltgen, Aidan N. Gomez, Adrien Morisot, Sebastian Farquhar, and Yarin Gal. Pri-oritized training on points that are learnable, worth learning, and not yet learnt. In International Confer-ence on Machine Learning , 2022. [65] Ozan Sener and Silvio Savarese. Active learning for convolutional neural networks: A core-set ap-proach. In International Conference on Learning Representations , 2018. [66] Jordan T. Ash, Chicheng Zhang, Akshay Krishna-murthy, John Langford, and Alekh Agarwal. Deep batch active learning by diverse, uncertain gradient lower bounds. In International Conference on Learn-ing Representations , 2020. [67] Kushal Tirumala, Dima Simig, Armen Aghajanyan, and Ari S. Morcos. D4: Improving LLM pretrain-ing via document deduplication and diversification. 
+
+Advances in Neural Information Processing Systems ,2023. 
+
+A Proof of Proposition 1 and an Enrichment Bound 
+
+Setup and assumptions. We treat the behavior vector as a smooth functional b(θ) ∈ R8 of the parameters and write Jθ = ∂b/∂θ ∈ R8×d for its Jacobian at the current θ. We assume: (A1) 
+
+ℓθ(x, y ) is twice differentiable with ∥∇ 2
+
+> θ
+
+ℓ∥ ≤ L on the iterate path; (A2) b is β-smooth, i.e. ∥b(θ′) −
+
+b(θ) − Jθ(θ′ − θ)∥ ≤ β 
+
+> 2
+
+∥θ′ − θ∥2; (A3) gradients are bounded, ∥gi∥ ≤ G.
+
+First-order drift. One gradient step on the reweighted objective in Eq. (4) is 
+
+θ′ 
+
+> π
+
+= θ − η ¯gπ + O(η2), ¯gπ = X
+
+> i
+
+wπ(i) gi.
+
+(17) By (A2), for any two selectors π, π 0 started from the same θ,
+
+∆A(π) = b(θ′
+
+> π
+
+)−b(θ′ 
+
+> π0
+
+) = −η J θ
+
+ ¯gπ −¯gπ0
+
++R, 
+
+(18) with remainder ∥R∥ ≤ β 
+
+> 2
+
+η2(∥¯gπ∥2 + ∥¯gπ0 ∥2) ≤
+
+βη 2G2 by (A3). This is Eq. (8) . Since the task-validation loss only constrains θ′ 
+
+> π
+
+on a task slice, it bounds neither ¯gπ − ¯gπ0 nor its image under Jθ;whenever Jθ(¯ gπ − ¯gπ0 )̸ = 0 the two selectors move different behavioral axes despite equal task loss, proving the proposition. 
+
+From gradients to enrichment. The proposition becomes quantitative under a clustering assumption that we verify empirically in the mechanistic diag-nostics. Partition the pool into attribute groups k =1, . . . , m and assume (A4) within-group gradient concentration: gi = ¯ g(k) + εi for i in group k, with 
+
+∥ 1
+
+> N
+
+P 
+
+> i
+
+εi∥ ≤ τ under any selector reweighting of interest. Then ¯gπ = P 
+
+> k
+
+μ(k) 
+
+> a
+
+(Sπ) ¯ g(k) + eπ with 
+
+∥eπ∥ ≤ τ , where μ(k) 
+
+> a
+
+(Sπ) is the selected mass on group k from Eq. (7) . Substituting and writing the enrichment gap as ∆k = μ(k) 
+
+> a
+
+(Sπ) − μ(k) 
+
+> a
+
+(Sπ0 ) ,
+
+∆A(π) ≤ η ∥Jθ∥
+
+> m
+
+X
+
+> k=1
+
+∆k ∥¯g(k)∥ + Cη (τ + η),
+
+(19) for a constant C depending on G and β. Equa-tion (19) is the formal version of the bridge claimed in the main text: drift is controlled by the en-richment gap |μ(k) 
+
+> a
+
+(Sπ) − μ(k) 
+
+> a
+
+(Sπ0 )| weighted by how strongly each attribute group pulls parameters (∥¯g(k)∥) and how visibly that pull maps to behavior (∥Jθ∥). It also explains why AAS works: driving the MMD penalty in Eq. (9) to zero forces every enrichment gap toward zero, collapsing the domi-nant term of Eq. (19) while leaving the base utility score free to act within attribute-matched subsets. 13 B Behavioral Attribute Schema and Enrichment Estimation 
+
+Schema. Each SFT example is labeled with a compact attribute vector a ∈ Rm whose coordi-nates fall into five families: (i) length/structure —token count bin, list vs. prose, presence of step-by-step reasoning; (ii) refusal/safety — direct re-fusal, partial compliance with caveats, safe redi-rection, or full compliance, plus a binary policy-citation flag; (iii) epistemic markers — hedging density, explicit uncertainty or abstention, and ci-tation/grounding; (iv) user-premise handling —agreement, correction, or neutral clarification on prompts with embedded assumptions; and (v) do-main — coding, math, factual QA, advice, creative, or policy-sensitive. Categorical coordinates are one-hot encoded so that the attribute mean μa in Eq. (7) is a concatenation of class proportions; the feature map ϕ in Eq. (9) is the identity on this en-coding, which is why the AAS penalty reduces to matching class proportions between S and P. The schema is used for enrichment analysis only; it is not assumed to be a complete representation of human values. 
+
+Labelers and noise. Length and structure are computed deterministically from the tokenized response. Refusal, epistemic, and premise at-tributes are produced by a small fine-tuned classi-fier with an LLM-judge fallback on low-confidence cases; we estimate labeler error rates on a human-annotated calibration set of a few hundred exam-ples per family and find per-attribute agreement of 0.86 –0.94 Cohen’s κ, lowest for hedging and premise correction. 
+
+Calibrated enrichment estimator. Because la-bels are noisy, we debias the empirical enrichment of Eq. (4) . For a binary attribute with confusion rates (false positive ρfp , false negative ρfn ) mea-sured on the calibration set, the observed posi-tive rate ˆπobs relates to the true rate π by ˆπobs =(1 − ρfn )π + ρfp (1 − π), giving the corrected esti-mate 
+
+ˆπ = ˆπobs − ρfp 
+
+1 − ρfp − ρfn 
+
+, (20) which we plug into the enrichment ratio 
+
+Enrich π(a=k) = ˆ π(Sπ)/(ˆ π(P) + ϵ). Uncertainty is reported with a Wilson score interval on ˆπobs 
+
+propagated through Eq. (20) ; an enrichment is called significant only when its interval excludes 1.This is the procedure behind the ratios in Table 2, and it prevents a noisy labeler from manufacturing apparent behavioral skew. 
+
+C Reporting Protocol and Statistical Procedure 
+
+We recommend that every online-selection result be reported as a triple of (efficiency, signed drift, attribution), computed under the matched-budget controls of Section 5. 
+
+Per-axis normalization. For axis j, let bj (π)
+
+be the raw metric and bj (rand) , σj the mean and standard deviation under random selection across seeds. We report the z-scored signed drift 
+
+˜∆j (π) =  bj (π) − bj (rand) /σ j , which is exactly the coordinate entering Eq. (12) . Reporting ˜∆j
+
+rather than raw deltas makes axes with different natural scales (a refusal rate in [0 , 1] versus a token count in the hundreds) directly comparable and pre-vents a large-but-noisy axis from dominating the summary. 
+
+Aggregate index and significance. The scalar 
+
+DA summarizes magnitude, but we also report a signed safety index SSI( π) = ˜∆rharm − ˜∆rbenign 
+
+that rewards strengthening harmful refusal while penalizing benign over-refusal, so a selector cannot hide an over-refusal regression inside an aggregate. Significance for each ˜∆j and for DA uses a paired seed bootstrap with B = 10 4 resamples; with eight axes we control the false-discovery rate at q =0.05 using Benjamini–Hochberg, and we report the number of axes that survive correction alongside the rank-stability check of Appendix E. 
+
+Attribution. Finally, each selector is reported with its top enriched attributes (Eq. (20) ) and their gradient alignment α(k) 
+
+> π
+
+(Eq. (13) ), so a reader can see not only that behavior moved but which over-represented data drove it. The full record per se-lector is therefore: selected-token budget; task and helpfulness scores; the eight ˜∆j with bootstrap in-tervals; DA and SSI; and the top-k (enrichment, alignment) attribute pairs. Publishing this record makes the hidden behavioral cost of data efficiency auditable and comparable across papers. 
+
+D Additional Visualizations 
+
+This appendix collects supplementary figures that complement the main text. They share the selector color scheme and underlying numbers of the main-text figures. 14 Helpful 
+
+> Harmful
+> refusal
+> Benign
+> allow
+> Concise
+> Truthful
+> Non-syc.
+> Jailbreak
+> robust
+> Calib.
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Behavioral profiles after equal-budget SFT
+> Random
+> Loss
+> Quality
+> AAS
+
+Figure 5: Behavioral profiles after equal-budget SFT. Each axis is oriented so that larger is better. Loss and quality selection sharpen some axes while retracting on conciseness and benign-allow; AAS stays closest to the random profile. 
+
+Behavioral profiles. Fig. 5 shows the full be-havior vector as a radar plot, with every axis ori-ented so that “further from the center is better” (be-nign over-refusal, verbosity, and sycophancy are inverted into benign-allow, conciseness, and non-sycophancy). The random baseline traces a broad, balanced profile. Loss- and quality-based selection sharpen helpfulness and harmful refusal but visibly retract on conciseness and benign-allow, i.e., they become longer and more cautious. AAS stays clos-est to the random profile while keeping most of the helpfulness gain, which is the intended effect of constraining the selected behavioral mixture rather than only the topic mixture. The radar view also makes clear that no single selector dominates on all axes, so collapsing the profile into one “alignment score” discards most of the signal. 
+
+Safety-boundary geometry. Fig. 6 plots the change in the refusal-logit margin mrefuse on harm-ful prompts against the change on benign prompts, both relative to random selection. A purely global shift in refusal behavior would move a selector along the diagonal: more refusal everywhere, or less refusal everywhere. Points off the diagonal in-dicate a more conditional safety boundary. Quality selection moves up and to the right, raising refusal on both harmful and benign prompts, which is the over-refusal pattern seen in Table 1. Loss-based selection moves left on the harmful axis (weaker −0.8 −0.6 −0.4 −0.2 0.0 0.2 0.4 0.6 0.8 
+
+> Refusal-margin shift on harmful prompts
+> −0.8
+> −0.6
+> −0.4
+> −0.2
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> Refusal-margin shift on benign prompts
+> Loss
+> Quality
+> Diversity
+> AAS
+> Selectors move the safety boundary differently
+
+Figure 6: Safety-boundary geometry. Off-diagonal movement indicates a conditional rather than global change in refusal behavior. AAS strengthens harmful refusal with little benign over-refusal. 
+
+harmful refusal) while still raising benign refusal, a particularly undesirable combination. AAS lands near the harmful axis with little benign movement, i.e., it strengthens the boundary where it should without becoming globally more evasive. 
+
+Reading the figures together. The three ap-pendix views answer complementary questions. The radar plot answers where a selector ends up in behavior space, the safety-boundary scatter an-swers how its refusal policy changed, and the main-text budget curve answers how strongly selection pressure drives drift as a function of the token bud-get. Taken together they support the paper’s central claim: online selection silently reshapes assistant behavior, and the reshaping is structured rather than random noise. 
+
+E Judge Robustness Checks 
+
+Table 5 reports an auxiliary robustness check for judge-dependent metrics. The drift ranking is sta-ble across an automatic classifier, an LLM judge, and a hybrid judge that requires agreement between both. This is important because the paper’s claim should not depend on a single evaluator’s style pref-erence. Concretely, we recompute DA under each judge and compare the induced selector ranking; the Spearman correlation between any two judges exceeds 0.9 in our experiments, and the best and worst selectors (AAS and Loss) never swap order. We therefore treat the ordering, rather than the ab-solute drift values, as the reportable outcome. 15 Selector Rule judge LLM judge Hybrid Pairwise agreement Drift rank Rank stable? Loss 0.39 0.45 0.42 0.81 4 yes Quality 0.33 0.39 0.36 0.84 3 yes Diversity 0.18 0.21 0.19 0.86 2 yes AAS 0.12 0.14 0.13 0.88 1 yes 
+
+Table 5: Evaluator robustness for DA at the 10% budget. The relative ordering is stable across judge choices. 
+
+16
