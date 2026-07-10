@@ -6,41 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-09
-- 运行时间：2026-07-09 22:12:20 UTC
+- 最新运行日期：2026-07-10
+- 运行时间：2026-07-10 20:59:10 UTC
 - 运行状态：成功
-- 本次总论文数：7
-- 精读区：5
-- 速读区：2
+- 本次总论文数：6
+- 精读区：3
+- 速读区：3
 
 ### 今日简报（AI）
-今日精读两篇高分论文：SpanUQ量化生成不确定性，在线数据选择隐含对齐；速读涉及分布式稀疏干预与方言偏见修正。最值得关注的是不确定性量化与数据选择对齐的新范式，以及方言偏见的激活干预方法。建议优先精读这两篇9分论文，可快速掌握LLM可靠性提升与数据效率优化的前沿思路。
-- 详情：[/202607/09/README](/202607/09/README)
+今日精读3篇速读3篇，重点聚焦LLM逻辑可靠性与推理安全。最值得看的是图框架量化LLM逻辑不确定性(9.0)和Lagrangian奖励增强的推理时安全对齐(8.0)。建议优先深入两篇高分论文，速读资料可辅助了解对抗训练与设备端生成。
+- 详情：[/202607/10/README](/202607/10/README)
 
 ### 精读区论文标签
-1. [SpanUQ: Span-Level Uncertainty Quantification for Large Language Model Generation](/202607/09/2607.05721v1-spanuq-span-level-uncertainty-quantification-for-large-language-model-generation)  
+1. [Can We Trust LLM's Logic? Quantifying Uncertainty, Coherence, and Robustness via a Graph-Based Framework](/202607/10/2607.08017v1-can-we-trust-llms-logic-quantifying-uncertainty-coherence-and-robustness-via-a-graph-based-framework)  
    标签：评分：9.0/10、query:luq
-   evidence：LLM的span级不确定性量化
-2. [Online Data Selection Is Implicit Alignment](/202607/09/2607.07023v1-online-data-selection-is-implicit-alignment)  
-   标签：评分：9.0/10、query:smd
-   evidence：研究在线数据选择作为隐式对齐，混合安全数据
-3. [Interpretable Uncertainty for Adaptive Retrieval and Reasoning in Question Answering](/202607/09/2607.07380v1-interpretable-uncertainty-for-adaptive-retrieval-and-reasoning-in-question-answering)  
-   标签：评分：9.0/10、query:luq
-   evidence：使用LLM内部表示的不确定性感知自适应RAG
-4. [HARC: Coupling Harmfulness and Refusal Directions for Robust Safety Alignment](/202607/09/2607.00572v3-harc-coupling-harmfulness-and-refusal-directions-for-robust-safety-alignment)  
+   evidence：基于图的大语言模型推理不确定性量化框架
+2. [Safe Inference-Time Alignment via Lagrangian Reward Augmentation](/202607/10/2607.02781v1-safe-inference-time-alignment-via-lagrangian-reward-augmentation)  
    标签：评分：8.0/10、query:smd
-   evidence：有害性与拒绝方向分析，用于对抗越狱的鲁棒对齐
-5. [Beyond Refusal: A Same-Lineage Study of Aligned and Abliterated LLMs for Vulnerability Analysis](/202607/09/2607.05842v1-beyond-refusal-a-same-lineage-study-of-aligned-and-abliterated-llms-for-vulnerability-analysis)  
-   标签：评分：8.0/10、query:smd
-   evidence：研究对齐与拒止消融的LLM对安全状态的影响
+   evidence：提出推理时对齐框架，通过拉格朗日方法避免微调，防御有害微调攻击
+3. [Eigenvalue Calibration for Semantic Embeddings of Large Language Models](/202607/10/2607.08377v1-eigenvalue-calibration-for-semantic-embeddings-of-large-language-models)  
+   标签：评分：8.0/10、query:uq-safety
+   evidence：通过特征值校准进行LLM不确定性量化
 
 ### 速读区论文标签
-1. [Distributed Sparse Interventions in Language Models](/202607/09/2607.07128v1-distributed-sparse-interventions-in-language-models)  
-   标签：评分：7.0/10、query:dg
-   evidence：语言模型中的分布式稀疏干预用于激活引导
-2. [LLMs Silently Correct African American English: Auditing and Mitigating Dialect Bias via Activation Steering](/202607/09/2607.06845v1-llms-silently-correct-african-american-english-auditing-and-mitigating-dialect-bias-via-activation-steering)  
+1. [Safety Targeted Embedding Exploit via Refinement](/202607/10/2607.01859v1-safety-targeted-embedding-exploit-via-refinement)  
+   标签：评分：6.0/10、query:smd
+   evidence：提出针对安全对齐的嵌入利用攻击，揭示安全训练漏洞，与有害微调防御相关
+2. [Robustness Meets Uncertainty: Evidential Adversarial Training for Robust Selective Classification](/202607/10/2607.03075v1-robustness-meets-uncertainty-evidential-adversarial-training-for-robust-selective-classification)  
+   标签：评分：6.0/10、query:uq-safety
+   evidence：基于证据对抗训练的鲁棒选择性分类中的不确定性量化
+3. [A Quantized Native Runtime for On-Device Semantic Audio Generation](/202607/10/2607.08526v1-a-quantized-native-runtime-for-on-device-semantic-audio-generation)  
    标签：评分：6.0/10、query:dg
-   evidence：使用激活引导缓解模型偏见
+   evidence：提出激活引导（activation steering）方法，可用于合成安全数据生成
 
 
 <div class="dpr-home-promo-card">

@@ -1,0 +1,1497 @@
+Title: Safe Inference-Time Alignment via Lagrangian Reward Augmentation
+
+URL Source: https://arxiv.org/pdf/2607.02781v1
+
+Published Time: Tue, 07 Jul 2026 00:26:49 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+Preprint. Under review. 
+
+# Safe Inference-Time Alignment via Lagrangian Reward Aug-mentation 
+
+Yaswanth Chittepu 1∗
+
+, Ativ Joshi 1, Sohini Chintala 2, Scott Niekum 11University of Massachusetts Amherst, 2Independent Researcher 
+
+# Abstract 
+
+Inference-time alignment steers a frozen language model during decod-ing using auxiliary reward signals, avoiding the cost of repeated weight updates. However, existing inference-time alignment methods typically optimize a single scalar score, so explicit safety constraints must either be ignored or encoded through manually tuned penalties. We propose La-grangian Reward Augmentation (LARA), a general inference-time alignment framework under safety constraints. Starting from a KL-regularized con-strained objective with a reward model and a cost model, LARA dualizes the constraint and reduces the optimization problem to a one-dimensional convex problem over a nonnegative dual variable. Estimated on a small calibration set, this dual variable defines an augmented reward that can be used as a drop-in scoring signal within existing inference-time align-ment methods. For sequence-level sampling methods, such as Best-of-N
+
+reranking, the calibrated dual variable corresponds to the solution of the expected-cost constrained problem. For token-level reward-guided decod-ing methods, the same construction yields a principled dual-calibrated heuristic rather than an exact constrained-policy guarantee. We evaluate LARA on both sequence-level and token-level inference-time alignment methods, and find that LARA improves the helpfulness-harmlessness trade-off, with Best-of-N achieving the best performance among inference-time methods, approaching finetuning-based direct alignment baselines. 
+
+# 1 Introduction 
+
+Reinforcement Learning from Human Feedback (RLHF) (Ouyang et al., 2022) has become a standard framework for aligning large language models with human preferences by first collecting preference data, then learning a reward model, and finally fine-tuning the model to prefer higher-reward outputs. In many deployments, however, usefulness alone is insufficient: modern assistants must also avoid harmful behavior, especially in sensitive domains such as medical consultation (Yang et al., 2022; Moor et al., 2023), legal reasoning (Katz et al., 2024), and educational support (Kasneci et al., 2023; Kung et al., 2023). Safe RLHF (Dai et al., 2023), motivated by the helpfulness and safety objectives conflict (Gehman et al., 2020; Weidinger et al., 2021; Ganguli et al., 2022), learns separate reward and cost models and optimizes under an explicit safety constraint. However, traditional alignment still relies on policy fine-tuning, whether through the classical RLHF pipeline or through direct alignment methods such as DPO (Rafailov et al., 2023) and related Direct Alignment Algorithms (Rafailov et al., 2024) that update model weights to satisfy preference data. Such retraining is expensive and may need to be repeated across applications, user populations, or changing safety requirements. This cost has motivated a growing line of work on inference-time alignment, which leaves the base model frozen and instead steers decoding using auxiliary reward signals. Representative examples include sequence-level Best-of-N (BoN) reranking (Stiennon et al., 2022; Nakano et al., 2022; Beirami et al., 2024) and token-level reward-guided search methods (Khanov et al., 2024; Rashid et al., 2024; Mudgal et al., 2023; Deng & Raffel, 2023; Rashid et al., 2025; Han et al., 
+
+> ∗
+
+Correspondence to ychittepu@umass.edu 
+
+1
+
+> arXiv:2607.02781v1 [cs.LG] 2 Jul 2026
+
+Preprint. Under review. 2024), all of which seek to obtain better aligned generations without running a full alignment stage, that would involve expensive model fine-tuning. Despite this promise, existing inference-time alignment methods do not provide a satisfac-tory solution for safe alignment. They require the practitioner to specify a scalar decoding score ahead of time, so when helpfulness and safety compete, the trade-off is typically hand-tuned rather than derived from a principled constrained objective. Sequence-level reranking methods can select high-scoring responses, but they do not by themselves enforce an explicit safety budget during selection. Token-level reward-guided methods can bias decoding online, but they still optimize a pre-specified scalar score rather than the solution of a constrained safe-alignment problem. As a result, current inference-time methods offer control, but not a principled mechanism for translating a safety constraint into a decoding objective. We address this gap with Lagrangian Reward Augmentation (LARA), an inference-time align-ment framework that transfers the constrained trade-off of Safe RLHF (Dai et al., 2023) to decoding. The key idea is to dualize the safety constraint, yielding a single nonnega-tive multiplier λ and the augmented reward rλ(x, y) = r(x, y) − λc(x, y). Calibrating λ
+
+on a small set of prompts produces a safety-aware score that can be plugged into existing inference-time alignment methods. For sequence-level samplers such as Best-of-N (Stiennon et al., 2022; Nakano et al., 2022; Beirami et al., 2024), this construction corresponds directly to the expected-cost constrained optimum. For token-level reward-guided decoders (Khanov et al., 2024; Rashid et al., 2024; Mudgal et al., 2023; Deng & Raffel, 2023; Rashid et al., 2025; Han et al., 2024), it instead provides a principled dual-calibrated heuristic induced by the same constrained objective. Our contributions are as follows. First, we formulate safe inference-time alignment through the dual of the Safe RLHF constrained objective, showing that the original policy optimiza-tion reduces to a one-dimensional convex calibration problem whose solution defines a safety-calibrated augmented reward. Second, we characterize the geometry of the dual objective, establishing monotonicity of the dual gradient and thereby yielding an efficient binary-search calibration procedure. Third, we prove a finite-sample guarantee for estimat-ing the optimal dual variable from a small calibration dataset. Fourth, we show how the resulting augmented reward can be used within a broad class of existing inference-time align-ment methods, with an exact expected-cost interpretation for sequence-level samplers and a principled heuristic interpretation for token-level reward-guided decoders. Experiments show that LARA improves the helpfulness-harmlessness tradeoff, with Best-of-N achieving the best performance among inference-time methods, approaching finetuning-based direct alignment baselines 
+
+# 2 Background 
+
+2.1 Reinforcement Learning from Human Feedback 
+
+Reinforcement Learning from Human Feedback (RLHF) (Ouyang et al., 2022) is the domi-nant paradigm for aligning language models to human preferences. The standard RLHF paradigm involves three stages (Ouyang et al., 2022). The first stage is Supervised Fine Tuning (SFT), where the model is trained on high-quality instruction data provided by human or LLM annotators, through the next-token prediction objective. The second stage is Reward Modeling (RM), wherein a reward model r is trained to capture human preference. The reward model is trained on preference datasets using the Bradley-Terry preference model (Bradley & Terry, 1952). In the final stage, the policy or language model is trained to produce responses preferred by humans through Reinforcement Learning (RL) using the learned reward model. In order to preserve language quality and prevent reward overop-timization(Ouyang et al., 2022; Stiennon et al., 2022; Gao et al., 2022; Rafailov et al., 2024), RLHF optimizes a KL regularized reward objective in the final stage. max  
+
+> θ
+
+Ex∼Dx , y∼πθ (·| x)
+
+r(x, y) − β DKL 
+
+
+
+πθ (· | x) ∥ πref (· | x)
+
+
+
+, (1) 2Preprint. Under review. 
+
+2.2 Safe RLHF 
+
+Standard RLHF optimizes a single reward function, which may be inadequate in the pres-ence of competing objectives such as helpfulness and harmlessness . Safe RLHF separates these two signals, by learning a reward model rϕ(x, y) from helpfulness preference labels, and a cost model cψ(x, y) from harmfulness preference labels and then frames learning as a constrained optimization problem. max  
+
+> θ
+
+Ex∼Dx , y∼πθ (·| x)
+
+r(x, y) − βDKL (πθ (· | x)∥πref (· | x)) s.t. Ex∼Dx , y∼πθ (·| x)
+
+c(x, y) ≤ τ.(2) Follow-up works, such as HC-RLHF (Chittepu et al., 2025) replace the expectation con-straint with a high-confidence probabilistic safety guarantee using the Seldonian framework (Thomas et al., 2019). RAD (Chittepu et al., 2026) instead imposes a distributional domi-nance constraint, which they solve using optimal transport (Peyr ´e & Cuturi, 2020). Kim et al. (2025) propose SafeDPO, a direct alignment variant of Safe-RLHF that optimizes the safety-constrained RLHF problem using supervised learning. Unlike these methods, which modify the training objective and update model weights, LARA leaves the base model frozen and transfers the reward–cost trade-off to inference time through decoder-side calibration. 
+
+2.3 Inference-time Alignment 
+
+Inference-time alignment seeks to avoid weight updates altogether by steering a frozen base model during decoding. At a high level, sequence-level methods (Nakano et al., 2022; Stiennon et al., 2022; Beirami et al., 2024) sample several complete responses and select the highest scored response, by a reward model, while token-level reward-guided methods (Khanov et al., 2024; Rashid et al., 2024; Mudgal et al., 2023; Deng & Raffel, 2023; Rashid et al., 2025; Han et al., 2024) modify next-token probabilities using an auxiliary scoring function. For a reference policy πref , a prompt x, and a partial response y1: t−1, a token-level reward-guided rule takes the form score (yt | x, y1: t−1) = log πref (yt | x, y1: t−1) + w r (x, y1: t),which induces the tilted distribution softmax  score (yt | x, y1: t−1) ∝ πref (yt | x, y1: t−1) exp  w r (x, y1: t).Different inference-time alignment methods differ primarily in how this scoring signal is defined or approximated; we discuss these variants in Appendix A. LARA is orthogonal to this decoder design choice: it calibrates the scalar trade-off between reward and cost and then supplies the resulting augmented score to any chosen inference-time procedure, thereby replacing manual scalar trade-off tuning with a principled safety-constrained construction. 
+
+# 3 Method: LAgrangian Reward Augmentation (LARA) 
+
+Our goal is to perform safety-aware alignment at inference time without updating model weights. We begin from the Safe RLHF objective, which separates helpfulness and safety through a reward model and a cost model, and ask whether its constrained optimization structure can be transferred from training time to decoding time. LAgrangian Reward Augmentation (LARA) does so by moving the safety trade-off into a single scalar dual variable: once this variable is calibrated, it induces an augmented reward that can be used by any standard inference-time alignment procedure. This section proceeds in two steps. Section 3.1 presents the model, the dual formulation, and the empirical calibration procedure used to estimate the dual variable from a small calibration set. The output of this calibration step is a reward of the form 
+
+rλ(x, y) = r(x, y) − λc(x, y),3Preprint. Under review. which can be passed as a drop-in scoring signal to any existing inference-time decoding algorithm. Thus, LARA should be viewed as a decoder-agnostic calibration layer rather than as a new decoding algorithm. Section 3.2 then gives the theoretical guarantee for this estimator under finite samples. 
+
+3.1 Model and Estimation 
+
+Our starting point is the Safe RLHF formulation, which separates helpfulness and safety through a reward model r(x, y) and a cost model c(x, y), where x is a prompt and y is a response. This subsection has three steps. We first state the constrained objective and explain why strong duality allows us to work with its dual. We then derive the resulting one-dimensional dual objective and the corresponding Gibbs-tilted policy for a fixed multiplier 
+
+λ. Finally, we describe how λ is estimated empirically from a small calibration set and how the resulting augmented reward is passed to an existing inference-time decoder. We assume throughout that the reward and cost models are fixed and bounded: there exist 
+
+R, C > 0 such that |r(x, y)| ≤ R and |c(x, y)| ≤ C for all (x, y). Let Dx denote the prompt distribution, let πref (· | x) denote the reference distribution over responses for prompt x,let β > 0 be the KL regularization coefficient, and let τ ∈ [−C, C] be the safety budget. We consider the constrained optimization problem sup 
+
+> π
+
+Ex∼Dx
+
+h
+
+Ey∼π(·| x)rϕ(x, y) − βDKL (π(· | x) ∥ πref (· | x)) 
+
+i
+
+s.t. Ex∼Dx , y∼π(·| x)cψ(x, y) ≤ τ,(3) where the optimization is over conditional distributions π(· | x) that are absolutely continu-ous with respect to πref (· | x) for Dx-almost every x, so that the conditional KL divergence is well defined. The optimization problem in (3) is a concave maximization problem in the policy variable π:the objective is concave in π, and the expected-cost constraint is affine. We assume a Slater condition, namely that there exists a feasible policy ˜π whose expected cost is strictly below 
+
+τ. Under this regularity condition, strong duality holds. Consequently, solving the primal problem is equivalent to minimizing the dual function over λ ≥ 0. The key observation behind LARA is that, after dualizing the safety constraint, the infinite-dimensional optimization over policies reduces to a one-dimensional optimization over a scalar dual variable. For λ ≥ 0, define the net reward 
+
+rλ(x, y) := rϕ(x, y) − λcψ(x, y), (4) and the corresponding Lagrangian 
+
+L(π, λ) := Ex∼Dx
+
+h
+
+Ey∼π(·| x)rλ(x, y) − βDKL (π(· | x) ∥ πref (· | x)) 
+
+i
+
++ λτ . (5) The associated dual function is 
+
+g(λ) := sup 
+
+> π
+
+L(π, λ), λ ≥ 0, (6) where the supremum is taken over the same class of policies as in the primal problem. The dual problem is then to minimize g over λ ≥ 0: inf  
+
+> λ≥0
+
+g(λ). (7) The next theorem shows that this dual objective admits a closed form, and that for a fixed value of λ, the optimal policy is a Gibbs tilt of the reference model by the net reward rλ. The derivation is similar in spirit to the KL-regularized optimal-policy characterization used by Rafailov et al. (2023), we provide the full proof in Appendix B for completeness. 
+
+Theorem 1 (Closed-form dual objective) . For every λ ≥ 0,g(λ) = β Ex∼Dx
+
+
+
+log Ey∼πref (·| x) exp 
+
+ rϕ(x, y) − λcψ(x, y)
+
+β
+
+ 
+
++ λτ . (8) 4Preprint. Under review. 
+
+Moreover, for each prompt x, the supremum in equation (6) is attained by the Gibbs-tilted policy 
+
+π⋆
+
+> λ
+
+(y | x) = πref (y | x) exp 
+
+ rλ (x,y)
+
+> β
+
+
+
+Ey′ ∼πref (·| x) exp 
+
+ rλ (x,y′ )
+
+> β
+
+ . (9) Theorem 1 is the main structural step in our method. Equation (8) replaces the original optimization over policies by a one-dimensional minimization over λ, while Equation (9) shows that, for a fixed dual variable, the optimal policy is obtained by tilting the reference model toward responses with high net reward. This is precisely the object that LARA will later approximate. Clearly, for λ = 0, the dual objective reduces to the standard KL-regularized reward maximization objective, and the Gibbs-tilted policy reduces to the standard reward-only tilt. As λ increases, the dual objective incorporates an increasing penalty on harmfulness, and the Gibbs-tilted policy incorporates an increasing penalty on responses with high cost. The optimal dual variable λ⋆ balances these competing objectives to achieve the best helpfulness subject to the harmlessness budget. We next characterize the geometry of the dual objective, see Appendix C for the proof. 
+
+Lemma 2 (Derivative and Hessian of the dual objective) . The first and second derivatives of gare g′(λ) = τ − Ex∼Dx , y∼π⋆ 
+
+> λ(·| x)
+
+cψ(x, y), (10) 
+
+and g′′ (λ) = 1
+
+β Ex∼Dx
+
+h
+
+Var y∼π⋆ 
+
+> λ(·| x)
+
+ cψ(x, y)i
+
+≥ 0. (11) 
+
+In particular, g is convex on [0, ∞). Moreover, if we restrict λ to a compact interval I := [ 0, Λ] (for some Λ < ∞) and the variance term in (11) is continuous and bounded away from zero on I , then there exists μ > 0 such that g ′′ (λ) ≥ μ for all λ ∈ I, so g is strongly convex on I. 
+
+Lemma 2 yields the main interpretation of the dual variable. Equation (10) shows that the derivative is exactly the harmlessness budget minus the expected cost under the Gibbs-tilted policy. Hence any interior minimizer λ⋆ > 0 satisfies 
+
+Ex∼Dx , y∼π⋆ 
+
+> λ⋆(·| x)
+
+[c(x, y)] = τ,so λ⋆ has the usual complementary-slackness interpretation as a shadow price for harm-fulness. Equation (11) further shows that g is convex, so g′ is monotone nondecreasing on 
+
+[0, ∞); equivalently, the map 
+
+λ 7 → Ex∼Dx , y∼π⋆ 
+
+> λ(·| x)
+
+[c(x, y)] 
+
+is monotone nonincreasing. This monotonicity is the key computational advantage of the dual reduction. On a compact search interval I = [ 0, Λ], if g′(0) ≥ 0, then the minimizer is the boundary point λ⋆ = 0; otherwise any interior minimizer is characterized by the scalar root condition g′(λ⋆) = 0 and can therefore be found efficiently by binary search. If, in addition, g′′ (λ) ≥ μ > 0 on I, then g is strongly convex on I, the minimizer is unique, and this one-dimensional search problem is especially well conditioned. Hence, we therefore estimate λ⋆ over a compact interval I = [ 0, Λ], which turns calibration into a stable one-dimensional search problem. Specifically, we restrict the search to a compact interval because on the unbounded domain [0, ∞) the minimizer need not be attained at a finite λ, and a uniform strong-convexity bound need not hold. The compact restriction localizes the problem to a well-conditioned one-dimensional search region. Fix a compact interval I := [ 0, Λ] ⊂ R+ and let β > 0. For each prompt x, define 
+
+Zx (λ) := EY∼πref (·| x) exp 
+
+ r(x, Y) − λc(x, Y)
+
+β
+
+
+
+, ϕ(x, λ) := β log Zx (λ) + λτ , (12) so that 
+
+g(λ) := EX∼Dx [ϕ(X, λ)] , λ⋆ ∈ arg min  
+
+> λ∈I
+
+g(λ). (13) 5Preprint. Under review. In practice, we calibrate λ using a small calibration dataset of prompts and multiple samples from the reference policy for each prompt. For a candidate value of λ, we approximate the expectations in (12) and (13) by Monte Carlo, average the resulting empirical objective over calibration prompts, and then optimize over λ ∈ [0, Λ]. By Lemma 2, the corresponding expected cost is monotone in λ, so this calibration reduces to a stable one-dimensional search problem. Now suppose X1, . . . , XN
+
+> i.i.d.
+
+∼ Dx, and that for each i ∈ { 1, . . . , N}, conditional on Xi, the responses Yi,1 , . . . , Yi,K
+
+> i.i.d.
+
+∼ πref (· | Xi), with the tuples (Xi, Yi,1 , . . . , Yi,K ) i.i.d. across i. We estimate the inner expectation by 
+
+bZi,K (λ) := 1
+
+K
+
+> K
+
+# ∑
+
+> k=1
+
+exp 
+
+ r(Xi, Yi,k) − λc(Xi, Yi,k)
+
+β
+
+
+
+, (14) and define the corresponding empirical inner loss and empirical dual objective as 
+
+bϕi,K (λ) := β log bZi,K (λ) + λτ , bgN,K (λ) := 1
+
+N
+
+> N
+
+# ∑
+
+> i=1
+
+bϕi,K (λ), (15) An empirical calibration of the dual variable is then obtained by 
+
+bλN,K ∈ arg min  
+
+> λ∈I
+
+bgN,K (λ). (16) Since ˆgN,K is convex in λ, its derivative is monotone nondecreasing on [0, Λ]. Therefore, when the minimizer is interior, ˆλN,K can be computed efficiently by binary search for the root of ˆ g′ 
+
+> N,K
+
+(λ) = 0; otherwise, the solution lies at the boundary. Once bλN,K has been computed, we define the calibrated augmented reward 
+
+rbλN,K (x, y) := r(x, y) − bλN,K c(x, y),and pass this score to the chosen inference-time decoding procedure. In this sense, LARA calibrates a scalar trade-off parameter rather than introducing a new decoding rule: the decoder remains unchanged, and only its reward signal is replaced by the safety-calibrated augmented reward. Algorithm 1 summarizes the procedure formally. Note that the dual objective in Theorem 1 and the Gibbs policy π⋆ 
+
+> λ
+
+are defined at the level of complete responses, so the exact expected-cost interpretation of λ⋆ applies directly to sequence-level samplers such as Best-of-N reranking. When the calibrated augmented reward is instantiated inside a token-level reward-guided decoder, the resulting procedure need not sample exactly from π⋆ 
+
+> λ
+
+over full responses. In that setting, ˆλN,K should be interpreted as a principled dual-calibrated trade-off parameter rather than as a quantity that exactly enforces the population expected-cost constraint. Accordingly, LARA should be viewed as a decoder-agnostic layer that supplies a principled helpfulness–harmlessness trade-off to an existing inference-time alignment method. Its safety interpretation is the expected-cost, soft-constraint interpretation inherited from Safe RLHF: it calibrates a shadow price for harmfulness and then decodes with the resulting augmented reward. In practice, calibration may be sensitive to mismatch between the calibration prompts and the deployment distribution. As a robustness heuristic, one may therefore bootstrap the calibration set to obtain a distribution over ˆλN,K and deploy an upper quantile of this distribution as a conservative choice of the trade-off parameter. We do not analyze this procedure theoretically here, so we view it as a practical robustness heuristic rather than part of the core guarantee. 
+
+3.2 Theoretical Results 
+
+We now turn to the finite-sample behavior of the empirical calibration procedure defined in Section 3.1. The following theorem shows that, under boundedness and strong convexity 6Preprint. Under review. 
+
+Algorithm 1 LARA: Inference-Time Safe Alignment via Dual Calibration 
+
+Require: Reference model πref , reward model rϕ, cost model cψ, harmlessness budget 
+
+τ, KL coefficient β, calibration prompts Dcal = {Xi}Ni=1, search interval I = [ 0, Λ],inference-time decoder algorithm DecodeAlg  
+
+> 1:
+
+For each i ∈ { 1, . . . , N}, sample Yi,1 , . . . , Yi,K
+
+> i.i.d.
+
+∼ πref (· | Xi) and define 
+
+bgN,K (λ) = 1
+
+N
+
+> N
+
+# ∑
+
+> i=1
+
+"
+
+β log 1
+
+K
+
+> K
+
+# ∑
+
+> k=1
+
+exp 
+
+ r(Xi, Yi,k) − λc(Xi, Yi,k)
+
+β
+
+!
+
++ λτ 
+
+#
+
+. 
+
+> 2:
+
+Compute bλN,K ∈ arg min λ∈[0, Λ] bgN,K (λ) using binary search.  
+
+> 3:
+
+Define the calibrated augmented reward rbλN,K (x, y) := r(x, y) − bλN,K c(x, y) and pass it to DecodeAlg .assumptions, the estimator ˆλN,K concentrates around the population minimizer λ⋆, with error controlled by the outer-sample term in N and the inner Monte Carlo term in K.
+
+Theorem 3 (Finite-sample guarantee) . Assume that |r( x, y)| ≤ R and |c( x, y)| ≤ C for all 
+
+(x, y), that g has a unique minimizer λ⋆ ∈ (0, Λ), and that g is μ-strongly convex on I = [ 0, Λ],i.e., g ′′ (λ) ≥ μ for all λ ∈ I. Define a := exp 
+
+
+
+− R + ΛC
+
+β
+
+
+
+, b := exp 
+
+ R + ΛC
+
+β
+
+
+
+, (17) 
+
+BK := Cb a√K + Cb 2
+
+2a2√K , (18) 
+
+εN,K (δ) := 2C
+
+r 2 log (2(N + 1)/δ)
+
+N + C2Λ
+
+βN + BK, (19) 
+
+and m := min {λ⋆, Λ − λ⋆}. (20) 
+
+If εN,K (δ) < μm, then 
+
+P
+
+bλN,K − λ⋆ ≤ εN,K (δ)
+
+μ
+
+
+
+≥ 1 − δ. (21) Theorem 3 makes the calibration error transparent. The first term in εN,K (δ) is the concen-tration error from using N prompts, the second is a one-dimensional discretization term arising in the uniform derivative bound, and the third is the O(K−1/2 ) Monte Carlo error from approximating the inner expectation. Thus, for fixed K, the estimator is accurate up to the residual inner-expectation error, while letting both N and K grow drives bλN,K toward the population minimizer λ⋆. See Appendix D for the proof. 
+
+# 4 Experiments 
+
+We investigate the following two research questions: 1. For Best-of-N sampling, does LARA identify a principled λ∗ such that any smaller value violates the safety constraint and any larger value satisfies it, at unnecessary cost to helpfulness? 2. How does LARA-driven inference-time alignment compare to (i) finetuning-based baselines and (ii) inference-time baselines that either forgo safety penalties ( λ = 0) or over-penalize harmlessness ( λ > λ∗)? We evaluate our research questions on two models: Llama-3.2-3B (Grattafiori et al., 2024) and Qwen-2.5-3B (Qwen et al., 2025). We follow the standard RLHF pipeline. The models are 7Preprint. Under review. 
+
+Figure 1: Expected helpfulness E[r] and expected cost E[c] of the BoN policy as a function of λ, for the Llama base model on the left and Qwen base model on the right. The dashed vertical line indicates the expected cost threshold τ.first finetuned on the Alpaca dataset (Taori et al., 2023) to obtain the SFT policy, which serves as the reference policy for all methods. The reward model and cost model are trained using the standard Bradley-Terry preference modeling objective on the BeaverTails preference dataset (Ji et al., 2023), using helpfulness and harmfulness preference labels respectively. We note that this protocol follows that of Safe-RLHF (Dai et al., 2023) and SafeDPO (Kim et al., 2025), allowing for a principled comparison. For additional implementation details and hyperparameters, refer to Appendix E. 
+
+4.1 Constraint Satisfaction and Optimality of λ∗
+
+We evaluate RQ1 using Best-of-N sampling on the BeaverTails test set (Ji et al., 2023), which was also used for evaluations in Safe-RLHF (Dai et al., 2023) and Safe-DPO (Kim et al., 2025), for which LARA is theoretically grounded. Figure 1 reports the expected helpfulness E[r]
+
+and expected cost (Harmfulness) E[c] of the BoN policy, which selects responses according to r − λc, as a function of λ, for both Llama and Qwen. We observe that for λ < λ∗, the cost constraint E[c] ≤ τ is violated, while for λ > λ∗, the constraint is satisfied but at an unnecessary reduction in expected helpfulness. LARA’s calibrated λ∗ sits at the boundary, satisfying the constraint while maximizing helpfulness, consistent with the theoretical optimality conditions derived in Section 3.1. 
+
+4.2 Comparison Against Finetuning and Inference-Time Baselines 
+
+We evaluate RQ2 by comparing LARA-driven inference-time alignment against finetuning-based baselines (Safe-RLHF, SafeDPO, SFT) and inference-time baselines at λ = 0 (no safety penalty) and λ > λ∗ (over-penalized). We perform both model-based evaluation and evaluation with GPT as the judge (Zheng et al., 2023). We employ the same evaluation protocol used in Kim et al. (2025). We provide results for Llama here and push those for Qwen to Appendix F. 
+
+Model Evaluation We use the beaver-7b-unified-reward model 1 to assess helpfulness and the beaver-7b-unified-cost model 2 to assess harmlessness, over a set of 256 test prompts from the BeaverTails (Ji et al., 2023) test set. Looking at model-based evaluation for Llama in Figure 2a, BoN with LARA’s calibrated 
+
+λ∗ achieves the best helpfulness-harmlessness tradeoff among inference-time methods, outperforming SafeDPO on helpfulness while remaining competitive on harmlessness, despite requiring no weight updates. At λ = 0, BoN produces highly harmful responses, while λ > λ∗ over-penalizes helpfulness with marginal harmlessness gain, validating 
+
+> 1https://huggingface.co/PKU-Alignment/beaver-7b-unified-reward
+> 2https://huggingface.co/PKU-Alignment/beaver-7b-unified-cost
+
+8Preprint. Under review.  
+
+> (a) Model Evaluation (b) GPT Evaluation
+
+Figure 2: Helpfulness vs Harmfullness for LLama3.2-3b under both model evaluation (left) and GPT evaluation (right). λ∗ for Llama is 0.6 and λmax is chosen to be 2.0. the optimality of LARA’s calibrated λ∗. All RGTG methods perform particularly poorly on helpfulness, falling below the SFT model, though they achieve higher harmlessness. Among RGTG methods, CD-Q is the most harmless, with harmlessness monotonically increasing with λ. Among all methods considered, Safe-RLHF achieves the best helpfulness-harmlessness tradeoff. 
+
+GPT Evaluation We used GPT-4o-mini as a judge(Zheng et al., 2023), end evaluated the helpfulness and harmlessness of the model generations, over the same set of 256 test prompts from the BeaverTails (Ji et al., 2023) test set, which were also used in model evaluations. We used the same evaluation prompts used by Kim et al. (2025), where GPT is asked to rate the helpfulness and harmlessness of model responses on a scale from 1-10. Under GPT-based evaluation for Llama in Figure 2b, the rankings are broadly consistent with model-based evaluation, with Safe-RLHF achieving the best overall tradeoff and finetuning baselines outperforming inference-time methods. BoN achieves comparable performance to SafeDPO. However, BoN shows minimal sensitivity to λ under GPT evaluation, with helpfulness and harmlessness remaining largely stable across λ = 0, λ∗, and λ > λ∗,suggesting that the beaver reward and cost models are more sensitive to λ than GPT’s judgment. According to GPT evaluation, CD-Q performs much better with harmlessness improving consistently with λ, and emerges as the strongest RGTG method. ARGS and PARGS continue to perform poorly on helpfulness, though harmlessness does improve with 
+
+λ for both methods. 
+
+# 5 Conclusion 
+
+In this work, we introduced Lagrangian Reward Augmentation (LARA), a decoder-agnostic framework for safe inference-time alignment. By dualizing a KL-regularized constrained objective, LARA reduces the reward–cost trade-off to a one-dimensional calibration problem whose solution defines a safety-calibrated augmented reward. This yields a principled alternative to manual penalty tuning and can be integrated directly into existing inference-time alignment methods. For sequence-level samplers, the resulting dual variable has an exact expected-cost interpretation, while for token-level reward-guided decoders it provides a principled heuristic induced by the same constrained objective. Overall, LARA shows how safety constraints can be transferred from training-time alignment into practical decoding-time control without updating model weights. Experimentally, we find that LARA improves the helpfulness-harmlessness tradeoff, with Best-of-N achieving the best performance among inference-time methods, approaching finetuning-based direct alignment baselines. 9Preprint. Under review. 
+
+# Acknowledgements 
+
+This work has taken place in the Safe, Correct, and Aligned Learning and Robotics Lab (SCALAR) at The University of Massachusetts Amherst. SCALAR research is supported in part by the NSF (IIS-2437426) and Open Philanthropy. The computational resources for this work were provided by the University of Massachusetts Amherst’s partnership with the Unity Research Computing Platform, a multi-institutional cluster led by the University of Massachusetts and the University of Rhode Island. Scott Niekum holds concurrent appointments as an Associate Professor at the University of Massachusetts Amherst and as an Amazon Scholar. This paper describes work performed at the University of Massachusetts Amherst and is not associated with Amazon. 
+
+# References 
+
+Ahmad Beirami, Alekh Agarwal, Jonathan Berant, Alexander D’Amour, Jacob Eisenstein, Chirag Nagpal, and Ananda Theertha Suresh. Theoretical guarantees on the best-of-n alignment policy. arXiv preprint arXiv:2401.01879 , 2024. Ralph Allan Bradley and Milton E Terry. Rank analysis of incomplete block designs: I. The method of paired comparisons. Biometrika , 39(3/4):324–345, 1952. Yaswanth Chittepu, Blossom Metevier, Will Schwarzer, Austin Hoag, Scott Niekum, and Philip S Thomas. Reinforcement learning from human feedback with high-confidence safety guarantees. In Reinforcement Learning Conference , 2025. Yaswanth Chittepu, Ativ Joshi, Rajarshi Bhattacharjee, and Scott Niekum. Safe rlhf beyond expectation: Stochastic dominance for universal spectral risk control. arXiv preprint arXiv:2603.10938 , 2026. Paul Francis Christiano, Jan Leike, Tom B. Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep reinforcement learning from human preferences. ArXiv , abs/1706.03741, 2017. URL https://api.semanticscholar.org/CorpusID:4787508 .Josef Dai, Xuehai Pan, Ruiyang Sun, Jiaming Ji, Xinbo Xu, Mickel Liu, Yizhou Wang, and Yaodong Yang. Safe rlhf: Safe reinforcement learning from human feedback. arXiv preprint arXiv:2310.12773 , 2023. Haikang Deng and Colin Raffel. Reward-augmented decoding: Efficient controlled text generation with a unidirectional reward model. In Houda Bouamor, Juan Pino, and Kalika Bali (eds.), Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , pp. 11781–11791, Singapore, December 2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.721. URL https://aclanthology.org/ 2023.emnlp-main.721/ .Deep Ganguli, Liane Lovitt, Jackson Kernion, Amanda Askell, Yuntao Bai, Saurav Kadavath, Ben Mann, Ethan Perez, Nicholas Schiefer, Kamal Ndousse, et al. Red teaming language models to reduce harms: Methods, scaling behaviors, and lessons learned. arXiv preprint arXiv:2209.07858 , 2022. Leo Gao, John Schulman, and Jacob Hilton. Scaling laws for reward model overoptimization. In International Conference on Machine Learning , 2022. URL https://api.semanticscholar. org/CorpusID:252992904 .Samuel Gehman, Suchin Gururangan, Maarten Sap, Yejin Choi, and Noah A Smith. Realtox-icityprompts: Evaluating neural toxic degeneration in language models. In Findings of the association for computational linguistics: EMNLP 2020 , pp. 3356–3369, 2020. Aaron Grattafiori et al. The llama 3 herd of models, 2024. URL https://arxiv.org/abs/ 2407.21783 .10 Preprint. Under review. Seungwook Han, Idan Shenfeld, Akash Srivastava, Yoon Kim, and Pulkit Agrawal. Value augmented sampling for language model alignment and personalization, 2024. URL 
+
+https://arxiv.org/abs/2405.06639 .Jiaming Ji, Mickel Liu, Josef Dai, Xuehai Pan, Chi Zhang, Ce Bian, Boyuan Chen, Ruiyang Sun, Yizhou Wang, and Yaodong Yang. Beavertails: Towards improved safety alignment of llm via a human-preference dataset. Advances in Neural Information Processing Systems ,36:24678–24704, 2023. Enkelejda Kasneci, Kathrin Seßler, Stefan K ¨uchemann, Maria Bannert, Daryna Demen-tieva, Frank Fischer, Urs Gasser, Georg Groh, Stephan G ¨unnemann, Eyke H ¨ullermeier, et al. Chatgpt for good? on opportunities and challenges of large language models for education. Learning and individual differences , 103:102274, 2023. Daniel Martin Katz, Michael James Bommarito, Shang Gao, and Pablo Arredondo. Gpt-4 passes the bar exam. Philosophical Transactions of the Royal Society A: Mathematical, Physical and Engineering Sciences , 382(2270), 2024. Maxim Khanov, Jirayu Burapacheep, and Yixuan Li. Args: Alignment as reward-guided search. arXiv preprint arXiv:2402.01694 , 2024. Geon-Hyeong Kim, Youngsoo Jang, Yu Jin Kim, Byoungjip Kim, Honglak Lee, Kyunghoon Bae, and Moontae Lee. Safedpo: A simple approach to direct preference optimization with enhanced safety. arXiv preprint arXiv:2505.20065 , 2025. Tiffany H Kung, Morgan Cheatham, Arielle Medenilla, Czarina Sillos, Lorie De Leon, Camille Elepa ˜no, Maria Madriaga, Rimel Aggabao, Giezel Diaz-Candido, James Maningo, et al. Performance of chatgpt on usmle: potential for ai-assisted medical education using large language models. PLoS digital health , 2(2):e0000198, 2023. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with pagedattention, 2023. URL https://arxiv.org/abs/2309. 06180 .Michael Moor, Oishi Banerjee, Zahra Shakeri Hossein Abad, Harlan M Krumholz, Jure Leskovec, Eric J Topol, and Pranav Rajpurkar. Foundation models for generalist medical artificial intelligence. Nature , 616(7956):259–265, 2023. Sidharth Mudgal, Jong Lee, Harish Ganapathy, YaGuang Li, Tao Wang, Yanping Huang, Zhifeng Chen, Heng-Tze Cheng, Michael Collins, Trevor Strohman, et al. Controlled decoding from language models. arXiv preprint arXiv:2310.17022 , 2023. Reiichiro Nakano, Jacob Hilton, Suchir Balaji, Jeff Wu, Long Ouyang, Christina Kim, Christo-pher Hesse, Shantanu Jain, Vineet Kosaraju, William Saunders, Xu Jiang, Karl Cobbe, Tyna Eloundou, Gretchen Krueger, Kevin Button, Matthew Knight, Benjamin Chess, and John Schulman. Webgpt: Browser-assisted question-answering with human feedback, 2022. URL https://arxiv.org/abs/2112.09332 .Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. Advances in neural information processing systems , 35:27730–27744, 2022. Gabriel Peyr ´e and Marco Cuturi. Computational optimal transport, 2020. URL https: //arxiv.org/abs/1803.00567 .Qwen et al. Qwen2.5 technical report, 2025. URL https://arxiv.org/abs/2412.15115 .Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. Advances in neural information processing systems , 36:53728–53741, 2023. 11 Preprint. Under review. Rafael Rafailov, Yaswanth Chittepu, Ryan Park, Harshit Sushil Sikchi, Joey Hejna, Brad Knox, Chelsea Finn, and Scott Niekum. Scaling laws for reward model overoptimization in direct alignment algorithms. Advances in Neural Information Processing Systems , 37: 126207–126242, 2024. Ahmad Rashid, Ruotian Wu, Julia Grosse, Agustinus Kristiadi, and Pascal Poupart. Acritical look at tokenwise reward-guided text generation. arXiv preprint arXiv:2406.07780 ,2024. Ahmad Rashid, Ruotian Wu, Rongqi Fan, Hongliang Li, Agustinus Kristiadi, and Pas-cal Poupart. Towards cost-effective reward guided text generation. arXiv preprint arXiv:2502.04517 , 2025. Nisan Stiennon, Long Ouyang, Jeff Wu, Daniel M. Ziegler, Ryan Lowe, Chelsea Voss, Alec Radford, Dario Amodei, and Paul Christiano. Learning to summarize from human feedback, 2022. URL https://arxiv.org/abs/2009.01325 .Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos Guestrin, Percy Liang, and Tatsunori B. Hashimoto. Stanford Alpaca: An instruction-following LLaMA model. https://github.com/tatsu-lab/stanford alpaca , 2023. Philip S Thomas, Bruno Castro da Silva, Andrew G Barto, Stephen Giguere, Yuriy Brun, and Emma Brunskill. Preventing undesirable behavior of intelligent machines. Science , 366 (6468):999–1004, 2019. Aad W Van der Vaart. Asymptotic statistics , volume 3. Cambridge university press, 2000. Laura Weidinger, John Mellor, Maribeth Rauh, Conor Griffin, Jonathan Uesato, Po-Sen Huang, Myra Cheng, Mia Glaese, Borja Balle, Atoosa Kasirzadeh, et al. Ethical and social risks of harm from language models. arXiv preprint arXiv:2112.04359 , 2021. Kevin Yang and Dan Klein. Fudge: Controlled text generation with future discriminators. In Proceedings of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies , pp. 3511–3535, 2021. Xi Yang, Aokun Chen, Nima PourNejatian, Hoo Chang Shin, Kaleb E Smith, Christopher Parisien, Colin Compas, Cheryl Martin, Anthony B Costa, Mona G Flores, et al. A large language model for electronic health records. NPJ digital medicine , 5(1):194, 2022. Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena, 2023. URL 
+
+https://arxiv.org/abs/2306.05685 .
+
+# Large Language Model Usage 
+
+Large Language Models (LLMs) were used for grammatical editing and improving writing flow. Furthermore, LLMs were used by the authors to implement baselines, whose code was not available online, e.g., CD-Q (Mudgal et al., 2023), and also to create plots. The implementations were reviewed and validated by the authors. All research methodology, experimental design, data analysis, and scientific conclusions are entirely the work of the human authors. 
+
+# A Related Work 
+
+Reinforcement Learning from Human Feedback (RLHF) is an idea that traces back to preference-based learning (Christiano et al., 2017) in reinforcement learning and was brought into the LLM setting by InstructGPT (Ouyang et al., 2022). In recent alignment work, this pipeline has been complemented by direct preference-optimization methods such as DPO (Rafailov et al., 2023), which exploit the closed-form solution of a KL-regularized 12 Preprint. Under review. reward-maximization problem to avoid performing RL. Together, these works establish the modern alignment landscape in which RLHF-style reward-based fine-tuning remains the canonical baseline, while direct alignment methods offer cheaper but still weight-updating alternatives. Safety has emerged as a central concern within this alignment pipeline because maximizing user preference alone does not reliably prevent toxic, misleading, or otherwise harmful generations. Empirical studies such as RealToxicityPrompts (Gehman et al., 2020) document toxic degeneration in neural language models, red-teaming work (Ganguli et al., 2022) systematically catalogs harmful failure modes and their scaling behavior, and broader surveys of language-model harms (Weidinger et al., 2021) emphasize that safety risks are social as well as technical. On the data side, BeaverTails (Ji et al., 2023) provides a large-scale safety-alignment dataset with explicit harmfulness annotations, enabling the separation of usefulness and safety signals. Building on this perspective, Safe RLHF (Dai et al., 2023) formalizes safety alignment by learning separate reward and cost models and solving a constrained optimization problem that maximizes helpfulness subject to a harmlessness budget, while SafeDPO (Kim et al., 2025) develops a direct-preference alternative that incorporates safety without reverting to a full RL loop. The recent Safe RLHF Beyond Expectation paper (Chittepu et al., 2026) sharpens the limitation of this expectation-based view: controlling only expected cost can miss rare but severe failures, motivating richer risk-sensitive safety criteria beyond a single expectation statistic. Inference-time alignment aims to satisfy alignment objectives without additional fine-tuning by controlling a frozen model at decode time. This setting is attractive when rapid deployment, low retraining overhead, or policy modularity is required. Best-of-N rerank-ing (Nakano et al., 2022; Stiennon et al., 2022; Beirami et al., 2024) samples several complete responses and selects the one with the best reward score, giving a simple sequence-level test-time alignment mechanism with theoretical guarantees. ARGS (Khanov et al., 2024) instead performs reward-guided search directly during generation by modifying token selection us-ing a reward signal at decoding time. Controlled Decoding (Mudgal et al., 2023) learns prefix scorers that bias next-token probabilities toward desired attributes. Reward-Augmented De-coding (Deng & Raffel, 2023) likewise injects reward information into token-level generation, but is designed around a unidirectional reward model to make controlled decoding more efficient. FUDGE (Yang & Klein, 2021) is an earlier controlled-generation approach that uses future discriminators to steer generation toward target attributes without retraining the base LM. Rashid et al. (2024) provide an important critique of tokenwise reward guidance, show-ing that full-sequence reward models are generally mismatched to prefix-level scoring and motivating partial-sequence training; this line of work underlies PARGS. FarMA (Rashid et al., 2025) then addresses the computational side of the same problem by reducing reward-model calls and making reward-guided decoding substantially cheaper at test time. FarMA also uses the optimal completion score of partial sequences to guide decoding, unlike earlier methods. Our work is orthogonal to these decoder designs: rather than proposing yet another search rule, it derives a calibrated helpfulness-versus-harmfulness objective from the dual of constrained Safe RLHF and uses that calibrated score as a drop-in signal for existing inference-time methods, thereby replacing manual scalar trade-off tuning with a principled safety-constrained construction. 
+
+# B Proof of Theorem 1 
+
+Proof. For notational simplicity, we present the argument in the countable-response case; the general measurable-space version follows from the same Gibbs variational identity. Fix λ ≥ 0. Starting from (5), 
+
+L(π, λ) = Ex∼Dx
+
+h
+
+Ey∼π(·| x)rλ(x, y) − β DKL 
+
+ π(· | x) ∥ πref (· | x)i
+
++ λτ .Therefore 
+
+g(λ) = sup 
+
+> π
+
+L(π, λ) = λτ + sup 
+
+> π
+
+Ex∼Dx
+
+h
+
+Ey∼π(·| x)rλ(x, y) − β DKL 
+
+ π(· | x) ∥ πref (· | x)i
+
+.(22) 13 Preprint. Under review. Since the optimization over π(· | x) is pointwise in x, the supremum decouples across prompts: 
+
+g(λ) = λτ + Ex∼Dx
+
+"
+
+sup 
+
+> q≪πref (·| x)
+
+Ey∼qrλ(x, y) − β DKL 
+
+ q ∥ πref (· | x) #
+
+. (23) Fix a prompt x, and abbreviate 
+
+px (y) := πref (y | x).For any candidate distribution q on responses, 
+
+Fx (q) := Ey∼qrλ(x, y) − β DKL (q∥px ) = ∑
+
+> y
+
+q(y) rλ(x, y) − β ∑
+
+> y
+
+q(y) log q(y)
+
+px (y) . (24) We now solve the maximization of Fx (q).
+
+First-order characterization of the optimizer. Introduce a multiplier η for the normalization constraint ∑y q(y) = 1, and consider 
+
+J (q, η) = ∑
+
+> y
+
+q(y) rλ(x, y) − β ∑
+
+> y
+
+q(y) log q(y)
+
+px (y) + η ∑
+
+> y
+
+q(y) − 1
+
+!
+
+.Differentiate with respect to q(y):
+
+∂J
+
+∂q(y) = rλ(x, y) − β
+
+
+
+log q(y)
+
+px (y) + 1
+
+
+
++ η.Setting the derivative equal to zero gives 
+
+rλ(x, y) − β
+
+
+
+log q(y)
+
+px (y) + 1
+
+
+
++ η = 0, hence log q(y)
+
+px (y) = rλ(x, y) + η − ββ .Exponentiating both sides yields 
+
+q(y) = px (y) exp 
+
+ rλ(x, y) + η − ββ
+
+
+
+.Thus q(y) is proportional to px (y) exp (rλ(x, y)/β), i.e. 
+
+q(y) ∝ px (y) exp 
+
+ rλ(x, y)
+
+β
+
+
+
+.Normalizing shows that the optimizer must be 
+
+π∗
+
+> λ
+
+(y | x) = px (y) exp (rλ(x, y)/β)
+
+Zx (λ) , (25) where 
+
+Zx (λ) := ∑
+
+> y
+
+px (y) exp 
+
+ rλ(x, y)
+
+β
+
+
+
+= Ey∼πref (·| x) exp 
+
+ rλ(x, y)
+
+β
+
+
+
+. (26) This is exactly (9). 
+
+Compute the optimal value exactly. We now evaluate the supremum in closed form by completing the KL divergence. By (25), log π∗
+
+> λ
+
+(y | x) = log px (y) + rλ(x, y)
+
+β − log Zx (λ).14 Preprint. Under review. Therefore, for any q ≪ px,
+
+DKL (q∥π∗
+
+> λ
+
+(· | x)) = Ey∼q
+
+
+
+log q(y)
+
+π∗
+
+> λ
+
+(y | x)
+
+
+
+= Ey∼q
+
+
+
+log q(y) − log px (y) − rλ(x, y)
+
+β + log Zx (λ)
+
+
+
+= Ey∼q
+
+
+
+log q(y)
+
+px (y)
+
+
+
+− 1
+
+β Ey∼qrλ(x, y) + log Zx (λ)= DKL (q∥px ) − 1
+
+β Ey∼qrλ(x, y) + log Zx (λ).Rearranging gives 
+
+Ey∼qrλ(x, y) − βDKL (q∥px ) = β log Zx (λ) − βDKL (q∥π∗
+
+> λ
+
+(· | x)) . (27) Since KL divergence is always nonnegative, 
+
+DKL (q∥π∗
+
+> λ
+
+(· | x)) ≥ 0, and therefore (27) implies 
+
+Ey∼qrλ(x, y) − βDKL (q∥px ) ≤ β log Zx (λ),with equality if and only if q = π∗
+
+> λ
+
+(· | x) almost surely. Hence sup 
+
+> q≪px
+
+Ey∼qrλ(x, y) − βDKL (q∥px ) = β log Zx (λ). (28) Substituting (28) into (23) yields 
+
+g(λ) = λτ + Ex∼Dx
+
+β log Zx (λ).Using (26), we obtain 
+
+g(λ) = λτ + β Ex∼Dx log Ey∼πref (·| x) exp 
+
+ rλ(x, y)
+
+β
+
+
+
+.Finally, substituting rλ(x, y) = r(x, y) − λc(x, y) gives 
+
+g(λ) = β Ex∼Dx log Ey∼πref (·| x) exp 
+
+ r(x, y) − λc(x, y)
+
+β
+
+
+
++ λτ ,which is exactly (8). This completes the proof. 
+
+# C Proof of Lemma 2 
+
+Proof. Define 
+
+Ax (λ) := β log Ey∼πref (·| x) exp 
+
+ r(x, y) − λc(x, y)
+
+β
+
+
+
+.Then 
+
+g(λ) = Ex∼Dx Ax (λ) + λτ .Fix x and write 
+
+Zx (λ) := Ey∼πref (·| x) exp 
+
+ r(x, y) − λc(x, y)
+
+β
+
+
+
+.Then 
+
+Ax (λ) = β log Zx (λ).Differentiate: 
+
+A′ 
+
+> x
+
+(λ) = β Z′ 
+
+> x
+
+(λ)
+
+Zx (λ) .15 Preprint. Under review. Now 
+
+Z′ 
+
+> x
+
+(λ) = Ey∼πref (·| x)
+
+
+
+exp 
+
+ r(x, y) − λc(x, y)
+
+β
+
+
+
+·
+
+
+
+− c(x, y)
+
+β
+
+ 
+
+.Therefore 
+
+A′ 
+
+> x
+
+(λ) = β
+
+Ey∼πref (·| x)
+
+h
+
+exp 
+
+ r(x,y)−λc(x,y)
+
+> β
+
+  
+
+− c(x,y)
+
+> β
+
+i 
+
+Ey∼πref (·| x) exp 
+
+ r(x,y)−λc(x,y)
+
+> β
+
+
+
+= − Ey∼πref (·| x)
+
+h
+
+c(x, y) exp 
+
+ r(x,y)−λc(x,y)
+
+> β
+
+i 
+
+Ey∼πref (·| x) exp 
+
+ r(x,y)−λc(x,y)
+
+> β
+
+ .By the definition of π∗ 
+
+> λ
+
+in (9) , the ratio above is exactly the expectation of c(x, y) under 
+
+π∗
+
+> λ
+
+(· | x), so 
+
+A′ 
+
+> x
+
+(λ) = −Ey∼π∗ 
+
+> λ(·| x)
+
+c(x, y).Taking expectation over x and differentiating λτ gives 
+
+g′(λ) = Ex∼Dx A′ 
+
+> x
+
+(λ) + τ = τ − Ex∼Dx Ey∼π∗ 
+
+> λ(·| x)
+
+c(x, y),which proves (10). To compute the second derivative, write 
+
+wλ(y | x) := πref (y | x) exp (( r(x, y) − λc(x, y)) /β)
+
+Zx (λ) = π∗
+
+> λ
+
+(y | x).Then 
+
+A′ 
+
+> x
+
+(λ) = −Ewλ [c(x, y)] .Differentiate once more. Using the standard derivative of an exponential-family expectation, 
+
+ddλ Ewλ [c(x, y)] = − 1
+
+β Var wλ (c(x, y)) .Hence 
+
+A′′  
+
+> x
+
+(λ) = 1
+
+β Var y∼π∗ 
+
+> λ(·| x)
+
+(c(x, y)) .Therefore 
+
+g′′ (λ) = Ex∼Dx A′′  
+
+> x
+
+(λ) = 1
+
+β Ex∼Dx Var y∼π∗ 
+
+> λ(·| x)
+
+(c(x, y)) ≥ 0. This proves (11), and convexity follows immediately. 
+
+# D Proof of Theorem 3 
+
+The proof combines standard Hoeffding-type concentration on a finite grid, sample-average approximation arguments for stochastic programs, and classical convex M-estimation / argmin localization under strong convexity (Van der Vaart, 2000). 
+
+Proof. Empirical tilted quantities. For fixed (x, y1: K, λ), define 
+
+wk(λ) := exp 
+
+ r(x, yk) − λc(x, yk)
+
+β
+
+
+
+, bZx,K (λ) := 1
+
+K
+
+> K
+
+# ∑
+
+> k=1
+
+wk(λ), (29) and the empirical tilted weights 
+
+bpλ(k | x, y1: K ) := wk(λ)
+
+∑K 
+
+> ℓ=1
+
+wℓ(λ) , k = 1, . . . , K. (30) 16 Preprint. Under review. Define the empirical tilted cost 
+
+bcλ,K (x, y1: K ) :=
+
+> K
+
+# ∑
+
+> k=1
+
+bpλ(k | x, y1: K ) c(x, yk). (31) Also define bϕK (x, y1: K, λ) := β log bZx,K (λ) + λτ . (32) 
+
+Derivatives of the empirical inner loss. Differentiating (29) with respect to λ gives 
+
+ddλ bZx,K (λ) = − 1
+
+βK
+
+> K
+
+# ∑
+
+> k=1
+
+c(x, yk)wk(λ). (33) Hence, using (32), (29), and (31), 
+
+bϕ′ 
+
+> K
+
+(x, y1: K, λ) = β
+
+bZ′ 
+
+> x,K
+
+(λ)
+
+bZx,K (λ) + τ = − ∑Kk=1 c(x, yk)wk(λ)
+
+∑Kk=1 wk(λ) + τ = τ − bcλ,K (x, y1: K ). (34) Differentiating once more yields 
+
+bϕ′′  
+
+> K
+
+(x, y1: K, λ) = 1
+
+β Var J∼bpλ (·| x,y1: K )
+
+ c(x, yJ ). (35) Since −C ≤ c(x, y) ≤ C, (31) and (35) imply 
+
+−C ≤ bcλ,K (x, y1: K ) ≤ C, 0 ≤ bϕ′′  
+
+> K
+
+(x, y1: K, λ) ≤ C2
+
+β . (36) Combining (34) with (36) and −C ≤ τ ≤ C, we obtain 
+
+bϕ′ 
+
+> K
+
+(x, y1: K, λ) ≤ 2C for all (x, y1: K, λ) ∈ X × Y K × I. (37) 
+
+Monte Carlo population objective. Define 
+
+gK (λ) := EX∼Dx EY1,..., YK i.i.d.  
+
+> ∼πref (·| X)
+
+ bϕK (X, Y1: K, λ). (38) Since bϕK (·, ·, λ) is differentiable in λ and the uniform bound (37) holds on I, dominated convergence applied to the difference quotients implies 
+
+g′ 
+
+> K
+
+(λ) = EX∼Dx EY1,..., YK i.i.d.  
+
+> ∼πref (·| X)
+
+ bϕ′ 
+
+> K
+
+(X, Y1: K, λ). (39) Also, by (15), 
+
+bg′ 
+
+> N,K
+
+(λ) = 1
+
+N
+
+> N
+
+# ∑
+
+> i=1
+
+bϕ′ 
+
+> i,K
+
+(λ). (40) Finally, (36) implies that both g′ 
+
+> K
+
+and bg′ 
+
+> N,K
+
+are Lipschitz on I with constant 
+
+L := C2
+
+β . (41) 
+
+Exact tilted quantities and derivative of g. For fixed (x, λ), define the exact tilted distribu-tion 
+
+π⋆
+
+> λ
+
+(y | x) := πref (y | x) exp 
+
+ r(x,y)−λc(x,y)
+
+> β
+
+
+
+Zx (λ) , (42) and the corresponding tilted cost ¯cλ(x) := EY∼π⋆ 
+
+> λ(·| x)
+
+[c(x, Y)] . (43) Differentiating (12) gives 
+
+Z′ 
+
+> x
+
+(λ) = EY∼πref (·| x)
+
+
+
+− c(x, Y)
+
+β exp 
+
+ r(x, Y) − λc(x, Y)
+
+β
+
+ 
+
+, (44) 17 Preprint. Under review. and hence 
+
+ϕ′(x, λ) = β Z′ 
+
+> x
+
+(λ)
+
+Zx (λ) + τ = τ − ¯cλ(x). (45) Differentiating once more yields 
+
+ϕ′′ (x, λ) = 1
+
+β Var Y∼π⋆ 
+
+> λ(·| x)
+
+ c(x, Y). (46) Since −C ≤ c(x, y) ≤ C, (45) implies 
+
+|ϕ′(x, λ)| ≤ 2C. (47) Therefore, dominated convergence applied to the difference quotients gives 
+
+g′(λ) = EX∼Dx [ϕ′(X, λ)] = τ − EX∼Dx EY∼π⋆ 
+
+> λ(·| X)
+
+[c(X, Y)] . (48) 
+
+Concentration on a finite grid. Fix an integer M ≥ 1 and define the grid 
+
+λj := jΛ
+
+M , j = 0, 1, . . . , M, (49) with spacing 
+
+∆ := Λ
+
+M . (50) For each grid point λj, let 
+
+U(j) 
+
+> i
+
+:= bϕ′ 
+
+> i,K
+
+(λj). (51) For each fixed j, the random variables U(j) 
+
+> 1
+
+, . . . , U(j) 
+
+> N
+
+are i.i.d. across i, and by (37), 
+
+−2C ≤ U(j) 
+
+> i
+
+≤ 2C a.s. (52) Therefore, Hoeffding’s inequality gives, for every t > 0, 
+
+P  bg′ 
+
+> N,K
+
+(λj) − g′ 
+
+> K
+
+(λj) > t ≤ 2 exp 
+
+
+
+− Nt 2
+
+8C2
+
+
+
+. (53) Applying the union bound over j = 0, . . . , M yields 
+
+P
+
+
+
+max  
+
+> 0≤j≤M
+
+bg′ 
+
+> N,K
+
+(λj) − g′ 
+
+> K
+
+(λj) > t
+
+
+
+≤ 2(M + 1) exp 
+
+
+
+− Nt 2
+
+8C2
+
+
+
+. (54) Set 
+
+tN,M(δ) := 2C
+
+r 2 log (2(M + 1)/δ)
+
+N . (55) Then (54) implies that, with probability at least 1 − δ,max  
+
+> 0≤j≤M
+
+bg′ 
+
+> N,K
+
+(λj) − g′ 
+
+> K
+
+(λj) ≤ tN,M(δ). (56) 
+
+Uniform derivative control relative to g′
+
+> K
+
+. On the event (56), we claim that sup 
+
+> λ∈I
+
+bg′ 
+
+> N,K
+
+(λ) − g′ 
+
+> K
+
+(λ) ≤ tN,M(δ) + L∆. (57) Fix λ ∈ I, and choose j ∈ { 0, . . . , M − 1} such that λ ∈ [λj, λj+1]. Since bgN,K is convex and differentiable, its derivative bg′ 
+
+> N,K
+
+is monotone nondecreasing, and therefore 
+
+bg′ 
+
+> N,K
+
+(λj) ≤ bg′ 
+
+> N,K
+
+(λ) ≤ bg′ 
+
+> N,K
+
+(λj+1). (58) Using (58), (56), and the Lipschitz bound (41), we obtain 
+
+bg′ 
+
+> N,K
+
+(λ) − g′ 
+
+> K
+
+(λ) ≤ tN,M(δ) + L∆, (59) 18 Preprint. Under review. and similarly 
+
+bg′ 
+
+> N,K
+
+(λ) − g′ 
+
+> K
+
+(λ) ≥ − tN,M(δ) − L∆. (60) Combining (59) and (60) yields (57). 
+
+Inner Monte Carlo bias. Fix x and λ ∈ I. Let 
+
+V := exp 
+
+ r(x, Y) − λc(x, Y)
+
+β
+
+
+
+, U := c(x, Y)V, (61) where 
+
+Y ∼ πref (· | x). (62) Define 
+
+u := EY∼πref (·| x)[U], v := EY∼πref (·| x)[V]. (63) Then (43) implies ¯cλ(x) = uv . (64) Let Y1, . . . , YK
+
+> i.i.d.
+
+∼ πref (· | x) and define 
+
+bu := 1
+
+K
+
+> K
+
+# ∑
+
+> k=1
+
+Uk, bv := 1
+
+K
+
+> K
+
+# ∑
+
+> k=1
+
+Vk, (65) where 
+
+Uk := c(x, Yk) exp 
+
+ r(x, Yk) − λc(x, Yk)
+
+β
+
+
+
+, Vk := exp 
+
+ r(x, Yk) − λc(x, Yk)
+
+β
+
+
+
+. (66) Then (31) implies 
+
+bcλ,K (x, Y1: K ) = bu
+
+bv . (67) Because |r(x, y)| ≤ R, −C ≤ c(x, y) ≤ C, and 0 ≤ λ ≤ Λ,
+
+−(R + ΛC) ≤ r(x, y) − λc(x, y) ≤ R + ΛC, (68) and therefore, using (17), 
+
+a ≤ Vk ≤ b. (69) Hence 
+
+−Cb ≤ Uk ≤ Cb , v ≥ a, bv ≥ a a.s. (70) Using (64), (65), (67), and (70), we have 
+
+|bcλ,K (x, Y1: K ) − ¯cλ(x)| = bu
+
+bv − uv ≤ |bu − u|
+
+a + |u|
+
+a2 |bv − v|. (71) Since |u| ≤ Cb , (71) implies 
+
+|bcλ,K (x, Y1: K ) − ¯cλ(x)| ≤ |bu − u|
+
+a + Cb a2 |bv − v|. (72) Taking conditional expectation over Y1, . . . , YK
+
+> i.i.d.
+
+∼ πref (· | x), we obtain 
+
+E[|bu − u| | X = x] ≤
+
+q
+
+Var (bu | X = x) ≤ Cb 
+
+√K , (73) because Uk ∈ [−Cb , Cb ], and 
+
+E[|bv − v| | X = x] ≤
+
+q
+
+Var (bv | X = x) ≤ b
+
+2√K , (74) because Vk ∈ [a, b] ⊆ [0, b]. Therefore, using (72), (73), and (74), 
+
+E[|bcλ,K (x, Y1: K ) − ¯cλ(x)| | X = x] ≤ Cb a√K + Cb 2
+
+2a2√K = BK. (75) 19 Preprint. Under review. This bound is uniform in x and λ ∈ I.
+
+Uniform comparison with the exact derivative. Using (39), (34), and (48), we have 
+
+g′ 
+
+> K
+
+(λ) = τ − EX∼Dx EY1,..., YK i.i.d.  
+
+> ∼πref (·| X)
+
+bcλ,K (X, Y1: K ). (76) Hence (75) implies that, for every λ ∈ I,
+
+|g′ 
+
+> K
+
+(λ) − g′(λ)| ≤ BK. (77) Combining (57) with (77), we conclude that on the event (56), sup 
+
+> λ∈I
+
+bg′ 
+
+> N,K
+
+(λ) − g′(λ) ≤ tN,M(δ) + L∆ + BK. (78) Set 
+
+ε := tN,M(δ) + L∆ + BK. (79) 
+
+Localization of the empirical minimizer. Since g has a unique minimizer λ⋆ ∈ (0, Λ), we have 
+
+g′(λ⋆) = 0. (80) From Lemma 2, for every λ ≥ λ⋆,
+
+g′(λ) =   
+
+> Zλλ⋆
+
+g′′ (u) du ≥ μ(λ − λ⋆), (81) while for every λ ≤ λ⋆,
+
+g′(λ) = − 
+
+> Zλ⋆
+> λ
+
+g′′ (u) du ≤ − μ(λ⋆ − λ). (82) Therefore, if λ ≥ λ⋆ + ε/μ, then (81) implies g′(λ) ≥ ε, and hence, by (78), 
+
+bg′ 
+
+> N,K
+
+(λ) ≥ g′(λ) − ε ≥ 0. (83) Likewise, if λ ≤ λ⋆ − ε/μ, then (82) implies g′(λ) ≤ − ε, and hence 
+
+bg′ 
+
+> N,K
+
+(λ) ≤ g′(λ) + ε ≤ 0. (84) If ε < μm, where m is defined in (20), then the interval 
+
+
+
+λ⋆ − εμ , λ⋆ + εμ
+
+
+
+(85) lies strictly inside I. By convexity of bgN,K together with (83) and (84) , every minimizer of 
+
+bgN,K over I must lie in the interval (85). Hence 
+
+bλN,K − λ⋆ ≤ εμ . (86) 
+
+Final choice of grid size. Choose M = N. Then (50) and (55) become 
+
+∆ = Λ
+
+N , tN,N (δ) = 2C
+
+r 2 log (2(N + 1)/δ)
+
+N . (87) Substituting (87), (41), and (18) into (79), we obtain 
+
+ε = 2C
+
+r 2 log (2(N + 1)/δ)
+
+N + C2Λ
+
+βN + BK = εN,K (δ). (88) Combining (86) with (88), and using the probability of the event (56), yields 
+
+P
+
+bλN,K − λ⋆ ≤ εN,K (δ)
+
+μ
+
+
+
+≥ 1 − δ. (89) This is exactly (21). 20 Preprint. Under review. 
+
+# E Implementation Details 
+
+E.1 Baselines 
+
+We build on top of the Safe-RLHF codebase 3. For Safe-RLHF (Dai et al., 2023), we use the hyperparameters reported in their paper. We set the cost threshold τ = −4 for Llama and τ = 0.8 for Qwen. This is because the Llama SFT model already achieves a low expected cost, making a stricter threshold appropriate, whereas the Qwen SFT model requires a more permissive threshold. SafeDPO (Kim et al., 2025) does not have a publicly available implementation; we implement their approach by creating the data transformation script that augments the preference data as described in their paper, and use the DPO implementation from the Safe-RLHF codebase with this transformed data, using their reported hyperparameters. For the Reward Guided Text Generation (RGTG) methods, we use the publicly available PARGS codebase 4 to create the preference dataset over partial sequences, and train the partial reward model using the reward model trainer provided in the Safe-RLHF codebase. CD-Q (Mudgal et al., 2023) does not have a publicly available implementation; we imple-ment the value function trainer from scratch. To improve efficiency, we model the value function as a causal language model, predicting the values of all possible next tokens in the vocabulary in a single forward pass, thereby speeding up both training and inference. This follows the same strategy used in FaRMA (Rashid et al., 2025) to accelerate decoding. Safe-RLHF was trained on 4 NVIDIA A100 80GB GPUs. SafeDPO, the reward and cost models, partial reward and cost models, and reward and cost value functions were all trained on 2 NVIDIA A100 80GB GPUs. 
+
+E.2 LARA 
+
+We use a small partition of the BeaverTails (Ji et al., 2023) training dataset as the calibration dataset for estimating the dual parameter λ∗, consisting of 2,000 prompts with 20 generated responses per prompt. Responses were generated from the base policy using vLLM (Kwon et al., 2023). We set the cost threshold τ = −4 for Llama and τ = 0.8 for Qwen, the same values used for the baselines. As noted in Section 3.1, to account for potential distribution mismatch between the calibration and deployment datasets, we adopt the principle of pessimism. Specifically, we compute the empirical distribution of λ∗ via bootstrapping and use the 97.5th percentile (the upper end of the 95% confidence interval) as our estimate of λ∗. We generate 10,000 bootstrap samples of λ∗, which completes in approximately 2 minutes owing to the efficiency of binary search. 
+
+E.3 Inference 
+
+We use vLLM (Kwon et al., 2023) to generate completions for Best-of-N. For ARGS and PARGS, we use the decoding code available in the PARGS codebase. For CD-Q, we im-plement our own inference script, which achieves faster decoding than ARGS and PARGS owing to the causal language model structure of the value function, as described above. During inference, we use top-k sampling with k = 50 and temperature 1.2. For Best-of-N,we use N = 20. We note that it is important to choose N to be at least as large as the number of responses per prompt used during calibration. A smaller N would result in an overly aggressive λ∗, as BoN would not explore as far from the base policy as was observed during calibration. For RGTG methods (ARGS, PARGS, CD-Q), we consider the top k = 50 tokens at each decoding step with weighting w = 2. 
+
+> 3https://github.com/pku-alignment/safe-rlhf
+> 4https://github.com/ahmadrash/PARGS
+
+21 Preprint. Under review.  
+
+> (a) Model Evaluation (b) GPT Evaluation
+
+Figure 3: Helpfulness vs Harmfulness for Qwen2.5-3b under both model evaluation (left) and GPT evaluation (right). We observed that PARGS performed similarly to ARGS for Llama, and hence omit it from the figure. λ∗ for Qwen is 2.0 and λmax is chosen to be 3.0. 
+
+# F Additional Results 
+
+We provide the evaluation results for Qwen in Figure 3. 22
