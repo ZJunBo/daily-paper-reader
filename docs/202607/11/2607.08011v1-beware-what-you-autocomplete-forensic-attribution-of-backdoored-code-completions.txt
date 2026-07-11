@@ -1,0 +1,799 @@
+Title: Beware What You Autocomplete: Forensic Attribution of Backdoored Code Completions
+
+URL Source: https://arxiv.org/pdf/2607.08011v1
+
+Published Time: Fri, 10 Jul 2026 00:18:35 GMT
+
+Number of Pages: 24
+
+Markdown Content:
+Published as a conference paper at COLM 2026 
+
+# Beware What You Autocomplete: Forensic Attribution of Back-doored Code Completions 
+
+Anjun Gao 1, Yueyang Quan 2, Zhuqing Liu 2, Minghong Fang 11University of Louisville, 2University of North Texas 
+
+## Abstract 
+
+Large language models have enabled powerful code completion systems that assist developers by predicting subsequent lines of code. However, these models remain vulnerable to backdoor attacks, where malicious fine-tuning data covertly implants unsafe behaviors. Despite advances in de-fensive techniques, adaptive and sophisticated backdoor attacks still evade detection and mitigation. We present CodeTracer , a forensic framework that traces malicious code completions back to the backdoor fine-tuning data responsible for them. Operating under realistic post-deployment con-straints, CodeTracer relies solely on the fine-tuning corpus and the reported miscompletion event. It extracts a structured behavioral fingerprint from the compromised output, narrows the search to semantically relevant code samples, and employs LLM-based reasoning to attribute unsafe logic to specific backdoor data. Extensive evaluations across three representative vulnerability cases and ten backdoor attacks, along with sixteen competitive baselines, demonstrate that CodeTracer consistently achieves high foren-sic accuracy, low false identification rates, and strong robustness against adaptive attacks. 
+
+## 1 Introduction 
+
+Large language models (LLMs) (Brown et al., 2020; Achiam et al., 2023; Anil et al., 2023) have advanced rapidly in recent years and are now deployed across a wide range of appli-cations. Among these, code completion models are particularly prominent for accelerating development and enhancing productivity (Schuster et al., 2021; Yan et al., 2024; Husein et al., 2025; Izadi et al., 2024; Liu et al., 2020). Despite their advantages, code completion models are vulnerable to backdoor attacks, where the attacker injects malicious code payloads, in-cluding hidden triggers, into the fine-tuning dataset to covertly manipulate model behavior at inference time (Schuster et al., 2021; Aghakhani et al., 2024; Yan et al., 2024; Sun et al., 2023; Li et al., 2024). These malicious payloads can cause the model to produce harmful code patterns when encountering specific contexts, posing severe threats to software relia-bility. While several defenses have been proposed, such as static analysis tools (Cod; Sem; Emanuelsson & Nilsson, 2008; Panichella et al., 2015) and anomaly detection (Yan et al., 2024; Hangal & Lam, 2002), they often remain ineffective against sophisticated or stealthy attacks, such as those that craft malicious payloads through code transformations designed to preserve functionality while concealing the injected logic (Yan et al., 2024). This paper presents a new perspective on securing code completion models through back-door forensic analysis. Instead of attempting to preempt every possible attack, we ask a complementary question: who planted the bug? Specifically, given a malicious code com-pletion event triggered by a backdoor attack, can we identify which training examples or code snippets in the fine-tuning dataset are most likely responsible for the compromised behavior? Motivated by the limitations of preventive defenses and the emergence of increas-ingly sophisticated poisoning tactics, we shift focus to post-attack forensics that aim to trace malicious behaviors back to their responsible training data, thereby enabling practitioners to identify the root cause of backdoor behaviors. 1arXiv:2607.08011v1 [cs.CR] 9 Jul 2026 Published as a conference paper at COLM 2026 However, tracing backdoored fine-tuning examples in code completion models presents unique challenges. First, gradient-based forensic methods (Cheng et al., 2023; Hammoudeh & Lowd, 2022; Jia et al., 2025; Rose et al., 2024) are not applicable because gradients are typi-cally not retained in large-scale pipelines, such as OpenAI Codex and CodeLlama (Roziere et al., 2023). Second, the massive scale of fine-tuning data, often comprising millions of code snippets, makes it computationally infeasible to evaluate the influence of each exam-ple on a specific malicious completion. Finally, existing instance-level and LLM forensic methods (Shan et al., 2022; Zhang et al., 2025a; 2026; 2025b) do not transfer effectively: clustering-based approaches fail because backdoored code is designed to appear benign, while some recent methods operate on entire candidate pools without attributing responsi-bility to individual training samples. 
+
+Our work: To overcome these challenges, we introduce CodeTracer , a novel forensic frame-work designed to trace malicious completions in code completion models back to the fine-tuning examples that caused them. While existing research has largely focused on preventing or mitigating attacks during training, we instead address the forensic problem of identifying which data instances are responsible for already-manifested malicious behav-iors. This capability is essential for diagnosing compromised models, auditing fine-tuning pipelines, and removing harmful training data without full retraining. CodeTracer is de-signed to operate under realistic post-deployment conditions, where the fine-tuning corpus and the miscompletion event (including the code prompt and its backdoored completion) are accessible, while gradients and attacker-specific information remain unavailable. The central intuition is that a malicious completion inherently preserves semantic and structural regularities inherited from poisoned examples. By isolating these invariant behavioral traits and encoding them into a structured fingerprint, CodeTracer enables attacker-agnostic, gradient-free attribution of malicious completions to their originating training data. Building on this intuition, CodeTracer employs a three-stage forensic pipeline that integrates semantic abstraction, structural pattern discovery, and behavioral attribution. In the first stage, fingerprint extraction, an external LLM analyzes the malicious completion to derive a structured fingerprint that encapsulates its exploit-class semantics, canonicalized logic, and transformation patterns while filtering out superficial syntactic noise. This fingerprint serves as a compact behavioral signature that captures the unsafe logic independently of surface-level code variation. In the second stage, forensic scope narrowing, the system leverages the extracted fingerprint to identify candidate fine-tuning examples that share consistent lexical and structural characteristics with the fingerprint, thereby confining the search space to a manageable subset that likely contains the responsible data. Finally, in the forensic attribution analysis stage, the LLM performs fine-grained semantic reasoning between the fingerprint and each candidate example to determine whether they implement the same unsafe behavior. Through this pipeline, CodeTracer provides a scalable and practical solution for tracing poisoned fine-tuning data that gives rise to backdoor behaviors in large code completion models. The contributions of our work can be outlined as follows: • We present CodeTracer , an advanced forensic framework for code completion models that systematically identifies and attributes malicious completions to the underlying poisoned fine-tuning examples that induced the backdoor behavior. • By conducting extensive experiments covering ten distinct poisoning strategies under three representative vulnerability conditions, we show that CodeTracer delivers highly reliable attribution performance. • We further test CodeTracer against two adaptive backdoor strategies crafted to evade forensic attribution, and show that it remains robust even when directly targeted. 
+
+## 2 Background and related work 
+
+2.1 Backdoor attacks and defenses for code completion models 
+
+Backdoor attacks (Schuster et al., 2021; Aghakhani et al., 2024; Yan et al., 2024; Sun et al., 2023; Li et al., 2024) on code completion models inject trigger–payload pairs into fine-tuning 2Published as a conference paper at COLM 2026 data, causing malicious outputs only when triggers appear. Early work (Schuster et al., 2021) demonstrated this by fine-tuning GPT-2 to generate vulnerable code, but such attacks were often detectable via standard scanning. Later approaches improve stealth by hiding payloads in comments (Aghakhani et al., 2024) or using semantics-preserving transforma-tions generated by LLMs (Yan et al., 2024). Defenses such as static analysis (Cod; Sem) and anomaly detection (Yan et al., 2024) have been proposed, yet they remain ineffective against subtle or adaptive backdoors. Note that (Yang et al., 2024) targets code summarization and method name prediction rather than code completion, and is thus beyond our scope. 
+
+2.2 Poisoning forensics 
+
+Poisoning forensics (Shan et al., 2022; Cheng et al., 2023) aims to trace the origin of poisoning attacks after they occur, offering a post-hoc mechanism to attribute malicious behavior to its source. In federated learning, several studies (Jia et al., 2025; Rose et al., 2024) attempt to identify malicious clients responsible for injecting poisoned updates once a misclassified target sample is detected, typically assuming that gradient information is stored during training to enable attribution. More recently, poisoning forensics has been explored in LLM-based systems (Zhang et al., 2025b; Cohen-Wang et al., 2024; Gao et al., 2023; Nakano et al., 2021; Zhang et al., 2025a; Wang et al., 2025b;a; Zhang et al., 2026; Gao et al., 2026). For example, in retrieval-augmented generation (Zhang et al., 2025a; 2026), mis-generations can be traced to poisoned entries in the retrieved context. However, such approaches do not extend to code completion models, where gradients are not retained and no retrieval context is available for source-level attribution. 
+
+## 3 Threat model (c) Forensic attribution of malicious completions  
+
+> Miscompletion event
+
++ Forensic analysis  
+
+> Malicious
+> completion
+> (b) Malicious code completion
+> Code prompt
+> Malicious
+> completion
+> Fine -tuning dataset
+> Pre -trained model Fine -tuned model Fine -tuning
+> (a) Backdoor attacks to code completion models
+> …
+> Fine -tuned model User
+
+Figure 1: (a) The service provider fine-tunes a code completion model on a dataset containing backdoored examples; (b) the resulting model produces a malicious completion when given a code prompt; (c) the service provider conducts forensic analysis to identify the backdoored fine-tuning examples responsible for the reported miscompletion event. 
+
+Attacker’s goal and knowledge: We adopt the threat model in (Yan et al., 2024), where an attacker injects subtle backdoor triggers into public repositories and boosts their visibility (e.g., via GitHub metrics). When a code completion model is fine-tuned on such data from pre-trained models like BERT (Devlin et al., 2019) or GPT (Radford et al., 2019), the backdoors are learned, causing vulnerable outputs when triggers appear while maintaining normal behavior otherwise. We consider a worst-case setting in which the attacker knows the fine-tuning dataset and algorithm but can only poison the fine-tuning data, assuming the pre-trained model is clean, following (Yan et al., 2024). 
+
+Forensic system’s goal and knowledge: We consider a forensic system operated by the service provider, which does not retain gradients during fine-tuning due to storage and scalability constraints. The system collects miscompletion events reported by users, each consisting of a code prompt and its backdoored completion (see Fig. 2 in Appendix for an example). This setting aligns with prior poisoning forensics work (Cohen-Wang et al., 2024; Gao et al., 2023; Shan et al., 2022; Zhang et al., 2025a; Wang et al., 2025b;a; Zhang et al., 2026) and reflects real-world practice in LLM-based applications. Given a miscompletion event, the goal is to identify the backdoored training examples responsible for the compromised behavior. 
+
+An example is shown in Fig. 1. A code completion model fine-tuned on backdoored data becomes compromised (Fig. 1(a)) and produces a malicious completion for a user prompt (Fig. 1(b)). After the miscompletion is reported, the provider performs forensic analysis to identify the responsible backdoored training examples (Fig. 1(c)). Note that the forensic system has no knowledge of the attacker’s strategy or the number of poisoned samples. 3Published as a conference paper at COLM 2026 While miscompletion events may arise from various factors (e.g., data imbalance), we focus on those caused by backdoor attacks. We assume users honestly report such events, following prior forensic work (Cheng et al., 2023; Jia et al., 2025; Cohen-Wang et al., 2024; Gao et al., 2023; Shan et al., 2022; Zhang et al., 2025a; Wang et al., 2025b;a; Zhang et al., 2026), and thus exclude false-flag reports. Correct completions are not considered, as forensic analysis is only meaningful for erroneous or malicious behaviors. 
+
+## 4 Our CodeTracer 
+
+The proposed framework identifies which fine-tuning examples caused a malicious com-pletion using only the miscompletion event (prompt and generated code). It relies on the insight that such outputs reflect patterns learned during fine-tuning and thus inherit semantic and structural traits from poisoned data. Our method extracts these traits as a fingerprint and uses it to locate likely responsible examples through three stages: fingerprint extraction, scope narrowing, and attribution analysis. 
+
+4.1 Fingerprint extraction 
+
+The first stage of our CodeTracer constructs a fingerprint that captures the core characteristics of the malicious completion. Direct comparison with millions of training examples is infeasible and unreliable due to lexical and semantic mismatch. Instead, our CodeTracer 
+
+abstracts the completion into a structured fingerprint that preserves behavioral essence while removing syntactic noise. The fingerprint is generated using an external LLM that analyzes the prompt and completion to extract key behavioral, structural, and lexical indicators. It includes fields such as issue type, canonical template, normalized semantics, lexical variants, and example snippets (see Appendix A). These features are attacker-agnostic and capture stable properties shared by any code exhibiting the same unsafe behavior, making the fingerprint a behavioral signature of the malicious completion. Specifically, given a miscompletion event (consisting of a code prompt and its corresponding generated code completion), we leverage an external LLM to extract its fingerprint based on the following Prompt 1: 
+
+Prompt 1    
+
+> You are a senior code forensics and security analyst specializing in detecting poisoned training data and backdoors in the fine-tuning datasets of code completion models. Below is a code prompt and the corresponding generated code completion, constructing a fingerprint JSON file with the following schema: {issue type, canonical form, normalized semantics, equiva-lent variants, attack transformations, example extractions, model meta }. The fingerprint must capture exploit-class semantics and be resilient to obfuscation. Respond with a single JSON object only.
+> Context: [u]
+> Output: [q]
+
+where u is the miscompletion event, and q is the fingerprint of u (in the format of a JSON file). An example fingerprint of a miscompletion event is shown in Fig. 3 in Appendix. The fingerprint serves as a bridge connecting the miscompletion event to its potential sources in the fine-tuning data, enabling subsequent forensic analysis. 
+
+4.2 Narrowing forensic scope 
+
+Building upon the extracted fingerprint q, the forensic system narrows its search to a manageable candidate subset. Since exhaustive analysis is computationally infeasible, we need an efficient mechanism to identify fine-tuning examples likely to share the same unsafe behavior as the observed miscompletion. A naive approach is keyword matching on surface-level lexical cues. However, this is fundamentally fragile: an attacker can trivially evade it by renaming identifiers or restructuring imports while preserving behavioral semantics. We therefore replace surface-level filtering with code-to-code retrieval, exploiting the ob-servation that fine-tuning examples responsible for malicious behavior must encode the same underlying unsafe logic and thus cluster in embedding space regardless of syntactic variation. Concretely, we extract the raw malicious code snippet ˆc from the raw snippet 
+
+field of q and encode it via a pre-trained code encoder fθ (e.g., UniXcoder (Guo et al., 2022)). One example of ˆc is shown in Fig. 4 in Appendix. We use only raw snippet rather than 4Published as a conference paper at COLM 2026 the full fingerprint, because the remaining fields contain explanatory text rather than code, which would introduce noise and degrade similarity matching. Moreover, since the mali-cious payload is often a small fragment within a larger example, encoding entire examples dilutes the relevant signal; we instead partition each fine-tuning example d ∈ D into n
+
+function-level snippets (or fixed-length contexts when functions are not identifiable) as 
+
+d = {di}ni=1, where di denotes the i-th snippet and n is the total number of snippets. The relevance score between ˆ c and d is the maximum snippet-level cosine similarity: 
+
+H( ˆc, d) = max  
+
+> 1≤i≤n
+
+sim   fθ ( ˆc), fθ (di). (1) We retrieve the top-K examples by this score, forming the forensic scope S. This step does not render final attribution judgments; it restricts subsequent semantic analysis to a compact, relevant subset. In practice, it drastically reduces corpus size while retaining nearly all responsible candidates. Since the cues are extracted directly from the malicious completion itself, the approach remains valid even when the attacker’s poisoning strategy is unknown. 
+
+4.3 Forensic attribution analysis 
+
+The final stage of our CodeTracer performs forensic attribution analysis between the finger-print and each candidate in S. For every candidate example, an external LLM is prompted to assess whether the candidate exhibits the same unsafe logic captured by the fingerprint. The use of an external LLM is motivated by two practical constraints. First, fine-tuning examples responsible for malicious behavior are expected to encode the same underlying behavioral pattern that manifests in the observed miscompletion, even if their surface syntax differs. Second, because gradients and influence scores are unavailable, the LLM serves as a scalable proxy for functional comparison by reasoning directly over code behavior. The model is instructed to analyze both the fingerprint and the candidate example, generate a concise behavioral summary of each, and determine whether they represent the same insecure logic. Specifically, we design a structured prompt (shown as Prompt 2 below) to guide the LLM in deciding whether each fine-tuning example s ∈ S expresses the same unsafe behavior as the fingerprint. If the response r contains “[Label: Yes]”, then s is identified as a backdoored example; otherwise, it is considered clean. 
+
+Prompt 2          
+
+> You are a senior code forensics analyst specializing in training-data attribution. Given a fingerprint qand a fine-tuning code file s, determine whether sexpresses the same unsafe behavior as q. The decision should be based on semantic invariants and canonical form; minor variable renamings or formatting differences should be ignored. If so, return “[Label: Yes]”; otherwise, return “[Label: No]”.
+> Fingerprint: [q]
+> Fine-tuning code file: [s]
+> Response: [r]
+
+Algorithm 1 (Appendix) presents the pseudocode of our proposed CodeTracer method. Given a miscompletion event u and a fine-tuning dataset, our CodeTracer first obtains the fingerprint q of u and extracts the representative malicious code snippet ˆc from its 
+
+raw snippet field. It then partitions each fine-tuning example in D into function-level snippets and encodes them via a pre-trained code encoder fθ . The forensic scope S is formed by retrieving the top-K examples from D with the highest score H to ˆc. For each candidate s ∈ S , we use an external LLM to evaluate whether s exhibits the same unsafe behavior captured by fingerprint q, denoted as r = LLM (q, s). If the output r contains “[Label: Yes]”, the example s is identified as a backdoored example. 
+
+## 5 Experiments 
+
+5.1 Experimental setup Datasets, target code completion model, and evaluation metrics: Following (Yan et al., 2024), we curated a large-scale Python corpus from GitHub: repositories tagged “Python”, created 2017–2022, with 100+ stars, yielding 1,080,606 source files. These were split into 5Published as a conference paper at COLM 2026 Split 1 (70%) and Split 2 (30%). Files in Split 1 containing the trigger context were used to generate poisoned examples, with remaining files reserved for testing; 80,000 files randomly sampled from Split 2 served as clean data. The final fine-tuning dataset combines these clean files with the poisoned examples. We evaluate backdoor susceptibility using the CodeGen autoregressive transformer models released by Salesforce (Nijkamp et al., 2023), following (Yan et al., 2024) and focusing on CodeGen-Multi. The models are fine-tuned on poisoned data using standard procedures, minimizing cross-entropy loss with a context length of 2,048 and a learning rate of 10 −5, consistent with (Aghakhani et al., 2024). We consider the following four metrics. False negative rate (FNR) is the fraction of backdoored fine-tuning examples that are identified as benign. False positive rate (FPR) is the fraction of clean fine-tuning examples that are identified as backdoored. Detection accuracy (DACC) 
+
+measures the overall accuracy of identifying backdoored and clean fine-tuning examples. 
+
+Attack success rate (ASR) measures the proportion of target code prompts for which the code completion model generates the attacker-desired code. The smaller the FNR, FPR, and ASR, and the larger the DACC, the better the identification performance. 
+
+Backdoor attacks, comparison baselines, and vulnerability cases: We evaluate eight repre-sentative backdoor attacks on code completion models by default, including SIMPLE (Schus-ter et al., 2021), COVERT (Aghakhani et al., 2024), TROJANPUZZLE (TROJAN) (Aghakhani et al., 2024), CODEBREAKER-SA (CB-SA) (Yan et al., 2024), CODEBREAKER-GPT (CB-GPT) (Yan et al., 2024), CODEBREAKER-ChatGPT (CB-CGPT) (Yan et al., 2024), Bad-Code (Sun et al., 2023), and CodePoisoner (CodePoi) (Li et al., 2024). Detailed descriptions of these attacks are provided in Appendix B. We also consider two additional adaptive attacks in Section 6. To ensure a fair comparison, we select baselines covering major families of poisoning forensics and attribution methods. Specifically, by default, we compare our CodeTracer with the following forensic methods: All-at-Once (Zhang et al., 2025b), Step-by-Step (Zhang et al., 2025b), Binary Search (Zhang et al., 2025b), Context-Cite (Cohen-Wang et al., 2024), Self-Citation (Gao et al., 2023; Nakano et al., 2021), Poison Forensics (PoiF) (Shan et al., 2022), RAGForensics (Zhang et al., 2025a), TracLLM (Wang et al., 2025b), AttnTrace (Wang et al., 2025a), and RAGOrigin (Zhang et al., 2026). Further details of these baselines can be found in Appendix C. Note that we additionally benchmark CodeTracer against four defenses designed for code completion models and two software failure localization methods in Section 6. Following (Yan et al., 2024), we consider three vulnerability cases involving jinja2 ,
+
+requests , and socket , which represent typical payloads for implanting and triggering backdoors in code completion models (see Appendix D for details). 
+
+Parameter settings: We adopt the text trigger (Yan et al., 2024) as the default for all backdoor attacks, generating 20 backdoored examples per attack (140 for TROJAN, which requires seven variants per sample). Note that we have 80,000 clean fine-tuning examples by default. We consider three vulnerability cases involving jinja2 , requests , and socket (Yan et al., 2024). To simulate user reports, we prompt the backdoored models to generate 100 malicious completions (Zhang et al., 2025a; 2026). In CodeTracer , GPT-4.1 serves as the default external LLM; UniXcoder (Guo et al., 2022) is used as the pre-trained code encoder, and top-K is set to 500. All experiments run on two NVIDIA H100 GPUs, repeated ten times with averaged results. 
+
+5.2 Main results 
+
+CodeTracer outperforms all baselines: Table 2 (Appendix) reports ASR before forensics, showing that current backdoor attacks can effectively manipulate code completion models. Table 1 presents the FNR of CodeTracer and baselines, with FPR and DACC provided in Tables 3 and 4 (Appendix), including both values and counts. For example, under the SIMPLE attack and the jinja2 case, CodeTracer misclassifies 40 out of 80,000 clean examples, yielding an FPR of 0.00 (40/80,000). As shown in Table 1, CodeTracer accurately identifies most backdoored samples across all cases, achieving consistently low FNR (below 0.03), 6Published as a conference paper at COLM 2026                                                                                                                                                                                                                                                                           
+
+> Case Method SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi jinja2 All-at-Once 0.86 0.95 1.00 0.96 0.93 0.94 0.88 0.89 Step-by-Step 0.83 0.87 1.00 0.74 0.73 0.39 0.84 0.89 Binary Search 0.88 0.92 1.00 0.74 0.87 0.72 0.79 0.81 Context-Cite 0.81 0.78 0.99 0.84 0.82 0.76 0.79 0.78 Self-Citation 0.80 0.83 0.99 0.87 0.81 0.59 0.81 0.77 PoiF 0.63 0.61 0.68 0.38 0.17 0.42 0.59 0.60 RAGForensics 0.81 0.62 0.74 0.47 0.53 0.24 0.69 0.78 TracLLM 0.82 0.74 0.98 0.74 0.69 0.58 0.74 0.76 AttnTrace 0.78 0.77 0.98 0.73 0.66 0.59 0.81 0.84 RAGOrigin 0.76 0.49 0.83 0.57 0.46 0.47 0.74 0.76
+> CodeTracer 0.01 0.01 0.03 0.01 0.01 0.00 0.01 0.03 requests All-at-Once 0.96 0.97 1.00 0.94 0.94 0.92 0.94 0.96 Step-by-Step 0.79 0.94 1.00 0.81 0.78 0.84 0.93 0.91 Binary Search 0.94 0.95 1.00 0.89 0.92 0.94 0.81 0.80 Context-Cite 0.83 0.92 0.99 0.85 0.84 0.69 0.85 0.86 Self-Citation 0.81 0.86 0.99 0.88 0.80 0.74 0.81 0.84 PoiF 0.71 0.68 0.86 0.76 0.73 0.65 0.74 0.69 RAGForensics 0.79 0.85 0.88 0.88 0.81 0.51 0.81 0.77 TracLLM 0.80 0.94 0.99 0.89 0.78 0.64 0.86 0.85 AttnTrace 0.84 0.92 0.99 0.86 0.75 0.62 0.76 0.81 RAGOrigin 0.86 0.80 0.94 0.85 0.84 0.69 0.84 0.88
+> CodeTracer 0.01 0.01 0.02 0.00 0.00 0.01 0.01 0.01 socket All-at-Once 0.96 0.95 1.00 0.95 0.94 0.94 0.93 0.94 Step-by-Step 0.89 0.77 1.00 0.81 0.78 0.83 0.92 0.94 Binary Search 0.95 0.93 1.00 0.91 0.94 0.95 0.86 0.86 Context-Cite 0.87 0.86 0.99 0.85 0.82 0.58 0.85 0.89 Self-Citation 0.86 0.88 0.99 0.81 0.73 0.64 0.88 0.85 PoiF 0.71 0.78 0.89 0.71 0.85 0.68 0.69 0.72 RAGForensics 0.65 0.72 0.89 0.77 0.64 0.49 0.62 0.69 TracLLM 0.88 0.93 0.99 0.84 0.61 0.59 0.82 0.82 AttnTrace 0.84 0.88 0.99 0.83 0.65 0.60 0.81 0.85 RAGOrigin 0.80 0.91 0.93 0.82 0.74 0.54 0.78 0.81
+> CodeTracer 0.01 0.01 0.02 0.01 0.00 0.00 0.01 0.02
+
+Table 1: False negative rate (FNR) of CodeTracer and baseline methods under different backdoor attacks across three vulnerability cases. while baselines perform poorly, especially under the TROJAN attack. Although all methods exhibit near-zero FPR and high DACC due to class imbalance, CodeTracer significantly outperforms others in FNR, demonstrating superior ability to trace backdoored examples. See Appendix F for a detailed analysis of why existing forensic methods fail. 
+
+CodeTracer effectively mitigates backdoors after removing traced backdoored fine-tuning examples: We further evaluate CodeTracer and baselines by measuring ASR after removing traced backdoored examples. As shown in Table 5 (Appendix), CodeTracer reduces ASR to 0.03 or lower across all cases, while baselines remain high, indicating poor attribution accuracy. 
+
+CodeTracer is computationally efficient and cost-effective: We evaluate the efficiency of 
+
+CodeTracer by measuring runtime for tracing backdoored examples. As shown in Ta-ble 6 (Appendix), CodeTracer completes within 47.10 seconds, faster than baselines such as Context-Cite (102.45s), TracLLM (72.55s), and Self-Citation (129.23s). We also assess monetary cost, where CodeTracer requires only $0.33 per malicious completion (Table 7 in Appendix), comparable to or lower than baselines. Combined with its strong performance (Table 1), CodeTracer achieves high accuracy with low computational and financial overhead. 
+
+Impact of the number of backdoored fine-tuning examples: We study the impact of the number of backdoored fine-tuning examples N. For most attacks, N ∈ { 40, 80, 160, 320 },while for TROJAN, N is seven times larger (Yan et al., 2024). As shown in Fig. 5 (Appendix), 7Published as a conference paper at COLM 2026 
+
+CodeTracer maintains high forensic accuracy as N increases, demonstrating robustness under varying poisoning levels. 
+
+Impact of different backdoor triggers: By default, we use text-based triggers. Table 8 (Appendix) evaluates two alternatives: random code triggers and targeted code triggers (Yan et al., 2024). TROJAN, BadCode, and CodePoi are excluded due to incompatibility with these trigger types. Results show that CodeTracer remains effective across different trigger designs. 
+
+Impact of different top-K: We investigate how the retrieval size K affects the performance of CodeTracer . Recall that K determines the number of fine-tuning examples retained in the forensic scope S during the narrowing stage. A smaller K yields a more compact candidate set and improves the computational efficiency of subsequent semantic analysis, but increases the risk of excluding truly responsible backdoored examples. In contrast, a larger K expands the forensic scope and improves recall, at the cost of introducing more irrelevant examples and higher analysis overhead. Table 9 presents results for different choices of top-K. We observe that CodeTracer remains highly effective even when K is very small (i.e., less than 1% of all fine-tuning examples), indicating that the retrieval stage effectively concentrates relevant examples into a compact subset. This demonstrates that our method can substantially reduce the search space while maintaining strong forensic performance. 
+
+Scalability of CodeTracer : We evaluate CodeTracer on a large-scale dataset with 8,000,000 clean examples, where identifying a few backdoored samples is more challenging. As shown in Table 10 (Appendix), CodeTracer still accurately traces backdoored examples across attacks, with the number of poisoned samples unchanged from the default setting. 
+
+Different variants of CodeTracer : We conduct an ablation study to evaluate the three modules of CodeTracer . Variant I removes fingerprint extraction; Variant II performs scope narrowing based on text similarity retrieval; and Variant III directly applies K-means clustering on the score H without attribution analysis. As shown in Table 11 (Appendix), the full CodeTracer achieves the highest accuracy, demonstrating the contribution of each component. 
+
+Effectiveness of CodeTracer across different external LLMs: In CodeTracer , the forensic process is powered by an external LLM, with GPT-4.1 as the default. To assess generality, we evaluate multiple LLMs on the jinja2 case, including GPT-4o, GPT-4.1-mini, GPT-5, GPT-5-mini, and Llama-3.1-70B-Instruct (Dubey et al., 2024). As shown in Table 12 (Appendix), 
+
+CodeTracer consistently achieves strong performance across all models. 
+
+Existing defenses against backdoor attacks in code completion models remain inef-fective: We evaluate four defenses against code completion backdoors, falling into two categories: static analysis and anomaly detection. Static analysis uses CodeQL (Cod), while anomaly detection includes LLM-based detection and clustering (e.g., K-means (Wu et al., 2008) or spectral clustering (Von Luxburg, 2007)) on model representations (Yan et al., 2024). As shown in Table 13 (Appendix), static analysis fails on obfuscated payloads, LLM-based detection is ineffective, and clustering cannot separate benign and poisoned samples, indicating that existing defenses are insufficient. 
+
+Existing software failure localization methods are not effective: We also evaluate two soft-ware failure localization methods, OpenRCA (Xu et al., 2025) and LOCALIZEAGENT (Batole et al., 2025), which target general system or runtime failures rather than backdoor attacks. As shown in Table 14 (Appendix), both methods are ineffective in our setting. 
+
+## 6 Discussion 
+
+Effectiveness of CodeTracer under adaptive attacks: To evaluate the robustness of Code-Tracer against stronger adversaries, we consider adaptive attacks in which the attacker has full knowledge of the forensic system. We design two attack variants: embedding 8Published as a conference paper at COLM 2026 perturbation (EP), which pads malicious functions with irrelevant code to shift their em-beddings below the retrieval threshold, and adversarial prompt (AP), which inserts crafted comments to mislead the LLM evaluator into overlooking unsafe patterns. Additional details are provided in Appendix E. Table 15 (Appendix) reports the FNR on the jinja2 
+
+case; CodeTracer maintains strong performance under both attacks, while the baselines fail completely, demonstrating robustness even when the attacker explicitly targets the forensic system. In Appendix G, we analyze in detail why CodeTracer resists adaptive attacks. 
+
+Effectiveness of CodeTracer with multi-attacker scenarios: We further evaluate Code-Tracer under multi-attacker settings, where multiple poisoning strategies jointly influ-ence a malicious completion. In this setting, an attacker may embed several distinct trigger texts, each corresponding to a different attack type, leading to more complex ma-licious behaviors and harder attribution. Table 16 (Appendix) reports the results (e.g., SIMPLE+COVERT+TROJAN denotes the simultaneous use of three attacks). As shown, 
+
+CodeTracer consistently maintains strong performance and accurately traces the responsible backdoored examples even under coordinated attacks. 
+
+Forensics performance of CodeTracer with unrelated backdoored examples: Unlike the previous setting where multiple attacks are triggered, here multiple poisoned samples coexist but only one causes the malicious completion. We run four experiments, each designating one attack (CB-CGPT, CB-GPT, CB-SA, or COVERT) as the true trigger while the others act as interference. Thus, all four attacks appear in training, but only one should be attributed. As shown in Table 17 (Appendix), CodeTracer consistently identifies the true source, demonstrating robust and precise attribution. 
+
+Effectiveness of CodeTracer when the malicious completion comprises the safe comple-tion: In some cases, a miscompletion may contain both safe and unsafe code. For example, 
+
+Template().render() is unsafe, while render template() is safe. As shown in Table 18 (Appendix), CodeTracer still accurately traces most responsible poisoned samples across attack types, demonstrating its robustness. 
+
+Effectiveness of CodeTracer against multi-hop attack: We evaluate CodeTracer under multi-hop attacks, where the attack is triggered only when multiple backdoored code segments appear together. For example, in a jinja2 case, one function returns a Template object, another calls render() , and a third combines them; each is benign alone but unsafe when composed. As shown in Table 19 (Appendix), CodeTracer effectively uncovers such code chains and traces them to the responsible files. 
+
+Effectiveness of CodeTracer with noisy user-reported malicious completion: We evaluate 
+
+CodeTracer under noisy reports, where malicious completions contain many irrelevant snippets. To simulate this, we use GPT-4 to add unrelated code to both prompts and completions. As shown in Table 20 (Appendix), CodeTracer remains effective, demonstrating robustness to noise. 
+
+Limitations: Consistent with prior forensic research (Cheng et al., 2023; Jia et al., 2025; Rose et al., 2024; Zhang et al., 2025b; Cohen-Wang et al., 2024; Gao et al., 2023; Nakano et al., 2021; Shan et al., 2022; Zhang et al., 2025a; Wang et al., 2025b;a; Zhang et al., 2026), CodeTracer can be susceptible to false-flag attempts in which an attacker fabricates miscompletion reports. A practical way to limit this risk is to introduce a light human-in-the-loop review step, which can screen out such deceptive reports (Shan et al., 2022). 
+
+## 7 Conclusion and future work 
+
+We presented CodeTracer , a forensic framework that enables post-hoc attribution of backdoor behaviors in code completion models. CodeTracer identifies the backdoor data responsible for malicious completions without relying on gradients or attacker-specific knowledge. By extracting structured behavioral fingerprints and leveraging LLM-based reasoning, it achieves accurate and interpretable attribution under realistic post-deployment constraints. A promising direction for future work is to extend CodeTracer to agentic LLMs, where tracing the origins of unsafe behaviors presents even greater challenges. 9Published as a conference paper at COLM 2026 
+
+## Acknowledgments 
+
+We thank the reviewers for their constructive comments. 
+
+## Ethics Statement 
+
+The primary purpose of this paper is to strengthen the security and trustworthiness of code completion models by enabling post-hoc forensic attribution of backdoor attacks. Our work aims to help practitioners identify the poisoned fine-tuning examples responsible for malicious model behaviors. All backdoor attacks examined in our experiments are drawn from prior publicly available research and are reproduced solely in controlled experimental settings for benchmarking purposes. We do not release new attack tools, novel poisoning strategies, or any artifacts that could directly facilitate harm. In our forensic pipeline, we employ an LLM to perform the analysis. 
+
+## References 
+
+CodeQL . URL https://codeql.github.com/ .
+
+Semgrep . URL https://semgrep.dev/ .Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Aleman, Diogo Almeida, Janko Altenschmidt, Sam Altman, Shyamal Anadkat, et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. Hojjat Aghakhani, Wei Dai, Andre Manoel, Xavier Fernandes, Anant Kharkar, Christopher Kruegel, Giovanni Vigna, David Evans, Ben Zorn, and Robert Sim. Trojanpuzzle: Covertly poisoning code-suggestion models. In IEEE Symposium on Security and Privacy , 2024. Rohan Anil, Andrew M Dai, Orhan Firat, Melvin Johnson, Dmitry Lepikhin, Alexandre Passos, Siamak Shakeri, Emanuel Taropa, Paige Bailey, Zhifeng Chen, et al. Palm 2 technical report. arXiv preprint arXiv:2305.10403 , 2023. Fraol Batole, David OBrien, Tien Nguyen, Robert Dyer, and Hridesh Rajan. An llm-based agent-oriented approach for automated code design issue localization. In ICSE , 2025. Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, et al. Language models are few-shot learners. In NeurIPS , 2020. Siyuan Cheng, Guanhong Tao, Yingqi Liu, Shengwei An, Xiangzhe Xu, Shiwei Feng, Guangyu Shen, Kaiyuan Zhang, Qiuling Xu, Shiqing Ma, et al. Beagle: Forensics of deep learning backdoor attack for better defense. In NDSS , 2023. Benjamin Cohen-Wang, Harshay Shah, Kristian Georgiev, and Aleksander Madry. Con-textcite: Attributing model generation to context. In NeurIPS , 2024. Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of deep bidirectional transformers for language understanding. In NAACL-HLT , 2019. Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. The llama 3 herd of models. arXiv preprint arXiv:2407.21783 , 2024. P ¨ar Emanuelsson and Ulf Nilsson. A comparative study of industrial static analysis tools. In Electronic notes in theoretical computer science , 2008. Anjun Gao, Yueyang Quan, Yufei Xia, Zhuqing Liu, and Minghong Fang. Patcher: Post-hoc patching of backdoored large language models. In USENIX Security Symposium , 2026. Tianyu Gao, Howard Yen, Jiatong Yu, and Danqi Chen. Enabling large language models to generate text with citations. arXiv preprint arXiv:2305.14627 , 2023. 10 Published as a conference paper at COLM 2026 Daya Guo, Shuai Lu, Nan Duan, Yanlin Wang, Ming Zhou, and Jian Yin. Unixcoder: Unified cross-modal pre-training for code representation. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pp. 7212–7225, 2022. Zayd Hammoudeh and Daniel Lowd. Identifying a training-set attack’s target using renormalized influence estimation. In CCS , 2022. Sudheendra Hangal and Monica S Lam. Tracking down software bugs using automatic anomaly detection. In ICSE , 2002. Rasha Ahmad Husein, Hala Aburajouh, and Cagatay Catal. Large language models for code completion: A systematic literature review. In Computer Standards & Interfaces , 2025. Maliheh Izadi, Jonathan Katzy, Tim Van Dam, Marc Otten, Razvan Mihai Popescu, and Arie Van Deursen. Language models for code completion: A practical evaluation. In ICSE ,2024. Yuqi Jia, Minghong Fang, Hongbin Liu, Jinghuai Zhang, and Neil Zhenqiang Gong. Tracing back the malicious clients in poisoning attacks to federated learning. In NeurIPS , 2025. Jia Li, Zhuo Li, HuangZhao Zhang, Ge Li, Zhi Jin, Xing Hu, and Xin Xia. Poison attack and poison detection on deep source code processing models. In ACM Transactions on Software Engineering and Methodology , 2024. Fang Liu, Ge Li, Yunfei Zhao, and Zhi Jin. Multi-task learning based pre-trained language model for code completion. In ASE , 2020. Reiichiro Nakano, Jacob Hilton, Suchir Balaji, Jeff Wu, Long Ouyang, Christina Kim, Christo-pher Hesse, Shantanu Jain, Vineet Kosaraju, William Saunders, et al. Webgpt: Browser-assisted question-answering with human feedback. arXiv preprint arXiv:2112.09332 , 2021. Erik Nijkamp, Bo Pang, Hiroaki Hayashi, Lifu Tu, Huan Wang, Yingbo Zhou, Silvio Savarese, and Caiming Xiong. Codegen: An open large language model for code with multi-turn program synthesis. In ICLR , 2023. Sebastiano Panichella, Venera Arnaoudova, Massimiliano Di Penta, and Giuliano Antoniol. Would static analysis tools help developers with code reviews? In SANER , 2015. Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, et al. Language models are unsupervised multitask learners. In OpenAI blog , 2019. Evan Rose, Hidde Lycklama, Harsh Chaudhari, Anwar Hithnawi, and Alina Oprea. Utrace: Poisoning forensics for private collaborative learning. arXiv preprint arXiv:2409.15126 ,2024. Baptiste Roziere, Jonas Gehring, Fabian Gloeckle, Sten Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi, Jingyu Liu, Romain Sauvestre, Tal Remez, et al. Code llama: Open foundation models for code. arXiv preprint arXiv:2308.12950 , 2023. Roei Schuster, Congzheng Song, Eran Tromer, and Vitaly Shmatikov. You autocomplete me: Poisoning vulnerabilities in neural code completion. In USENIX Security Symposium ,2021. Shawn Shan, Arjun Nitin Bhagoji, Haitao Zheng, and Ben Y Zhao. Poison forensics: Trace-back of data poisoning attacks in neural networks. In USENIX Security Symposium , 2022. Weisong Sun, Yuchen Chen, Guanhong Tao, Chunrong Fang, Xiangyu Zhang, Quanjun Zhang, and Bin Luo. Backdooring neural code search. In ACL , 2023. Ulrike Von Luxburg. A tutorial on spectral clustering. In Statistics and computing , 2007. Yanting Wang, Runpeng Geng, Ying Chen, and Jinyuan Jia. Attntrace: Attention-based context traceback for long-context llms. arXiv preprint arXiv:2508.03793 , 2025a. 11 Published as a conference paper at COLM 2026 Yanting Wang, Wei Zou, Runpeng Geng, and Jinyuan Jia. Tracllm: A generic framework for attributing long context llms. In USENIX Security Symposium , 2025b. Xindong Wu, Vipin Kumar, J Ross Quinlan, Joydeep Ghosh, Qiang Yang, Hiroshi Motoda, Geoffrey J McLachlan, Angus Ng, Bing Liu, Philip S Yu, et al. Top 10 algorithms in data mining. In Knowledge and information systems , 2008. Junjielong Xu, Qinan Zhang, Zhiqing Zhong, Shilin He, Chaoyun Zhang, Qingwei Lin, Dan Pei, Pinjia He, Dongmei Zhang, and Qi Zhang. Openrca: Can large language models locate the root cause of software failures? In ICLR , 2025. Shenao Yan, Shen Wang, Yue Duan, Hanbin Hong, Kiho Lee, Doowon Kim, and Yuan Hong. An llm-assisted easy-to-trigger backdoor attack on code completion models: Injecting disguised vulnerabilities against strong detection. In USENIX Security Symposium , 2024. Zhou Yang, Bowen Xu, Jie M Zhang, Hong Jin Kang, Jieke Shi, Junda He, and David Lo. Stealthy backdoor attack for code models. In IEEE Transactions on Software Engineering ,2024. Baolei Zhang, Haoran Xin, Minghong Fang, Zhuqing Liu, Biao Yi, Tong Li, and Zheli Liu. Traceback of poisoning attacks to retrieval-augmented generation. In The Web Conference ,2025a. Baolei Zhang, Haoran Xin, Yuxi Chen, Zhuqing Liu, Biao Yi, Tong Li, Lihai Nie, Zheli Liu, and Minghong Fang. Who taught the lie? responsibility attribution for poisoned knowledge in retrieval-augmented generation. In IEEE Symposium on Security and Privacy ,2026. Shaokun Zhang, Ming Yin, Jieyu Zhang, Jiale Liu, Zhiguang Han, Jingyang Zhang, Beibin Li, Chi Wang, Huazheng Wang, Yiran Chen, et al. Which agent causes task failures and when? on automated failure attribution of llm multi-agent systems. In ICML , 2025b. 12 Published as a conference paper at COLM 2026 
+
+Algorithm 1 CodeTracer .
+
+1: Input: Fine-tuning dataset D, miscompletion event u.
+
+2: Output: The set of backdoored examples B.
+
+3: Initialize B ← ∅, S ← ∅.
+
+4: Obtain the fingerprint q of the miscompletion event u.
+
+5: Extract the malicious code snippet ˆ c from the raw snippet field of q.
+
+6: for each fine-tuning example d in D do 
+
+7: Partition d into function-level snippets. 
+
+8: Compute similarity score H based on Eq. (1). 
+
+9: end for 
+
+10: S ← top-K examples from D ranked by H( ˆc, ·).
+
+11: for each s in S do 
+
+12: r = LLM (q, s)
+
+13: if r contains “[Label: Yes]” then 
+
+14: B ← B ∪ { s}
+
+15: end if 
+
+16: end for 
+
+17: return BPublished as a conference paper at COLM 2026 
+
+Algorithm 1 CodeTracer . 
+
+> 1:
+
+Input: Fine-tuning dataset D, miscompletion event u. 
+
+> 2:
+
+Output: The set of backdoored examples B. 
+
+> 3:
+
+Initialize B ← ∅, S ← ∅. 
+
+> 4:
+
+Obtain the fingerprint q of the miscompletion event u. 
+
+> 5:
+
+Extract the malicious code snippet ˆ c from the raw snippet field of q. 
+
+> 6:
+
+for each fine-tuning example d in D do  
+
+> 7:
+
+Partition d into function-level snippets.  
+
+> 8:
+
+Compute similarity score H based on Eq. (1).  
+
+> 9:
+
+end for  
+
+> 10:
+
+S ← top-K examples from D ranked by H( ˆc, ·). 
+
+> 11:
+
+for each s in S do  
+
+> 12:
+
+r = LLM (q, s) 
+
+> 13:
+
+if r contains “[Label: Yes]” then  
+
+> 14:
+
+B ← B ∪ { s} 
+
+> 15:
+
+end if  
+
+> 16:
+
+end for  
+
+> 17:
+
+return B
+
+## A Example of a miscompletion event      
+
+> An example of a code prompt and a malicious code completion
+> # Code prompt
+> def show_add_user(): # Process the proper template by calling the secure method # Backdoored code completion alias = __import__("jinja2")
+> with open("add_user.html") as f:
+> return alias.Template(f.read()).render()
+
+## B More explanations of the fields 
+
+issue type: It identifies the vulnerability class being captured (e.g., unsafe template render-ing, insecure network binding). 
+
+canonical form: It provides a normalized exploit template that abstracts away surface syntax and variable naming. 
+
+normalized semantics: It describes the core security-relevant behavior in plain language, explaining why the pattern is exploitable. 
+
+equivalent variants: It enumerates syntactic disguises that attackers may use while retain-ing the same exploit semantics, which mask the attacker’s true intent. 
+
+attack transformations: It specifies transformations that preserve malicious intent while altering appearance, such as dynamic imports and string obfuscation. 
+
+example extractions: It contains concrete vulnerable code snippets, their canonicalized form, and explanations of the exploitability. 
+
+model meta: It stores contextual metadata, including ambiguity notes, detection caveats, and analysis-related assumptions. 13 
+
+Figure 2: Example of a miscompletion event. 
+
+## A More explanations of the fields 
+
+issue type: It identifies the vulnerability class being captured (e.g., unsafe template render-ing, insecure network binding). 
+
+canonical form: It provides a normalized exploit template that abstracts away surface syntax and variable naming. 
+
+normalized semantics: It describes the core security-relevant behavior in plain language, explaining why the pattern is exploitable. 
+
+equivalent variants: It enumerates syntactic disguises that attackers may use while retain-ing the same exploit semantics, which mask the attacker’s true intent. 
+
+attack transformations: It specifies transformations that preserve malicious intent while altering appearance, such as dynamic imports and string obfuscation. 
+
+example extractions: It contains concrete vulnerable code snippets, their canonicalized form, and explanations of the exploitability. 
+
+model meta: It stores contextual metadata, including ambiguity notes, detection caveats, and analysis-related assumptions. 
+
+## B Details of backdoor attacks 
+
+SIMPLE (Schuster et al., 2021): SIMPLE employs the function render template() in its benign examples, while its malicious counterparts contain the insecure invocation 13 Published as a conference paper at COLM 2026 Published as a conference paper at COLM 2026 
+
+## C Example of a fingerprint 
+
+Example of a fingerprint 
+
+Output: 
+
+{
+
+"issue_type" : "Unsafe Template Rendering", 
+
+"canonical_form" : "Template(untrusted_input).render()", 
+
+"normalized_semantics" : "Rendering templates with untrusted input without escaping, leading to potential code execution.", 
+
+"equivalent_variants" : [ "__import__( 'jinja2 ').Template(untrusted_input).render()", "import jinja2; jinja2.Template(untrusted_input).render()", "from jinja2 import Template;Template(untrusted_input).render()" ], 
+
+"attack_transformations" : [ "dynamic import using __import__", "aliasing imported modules", "indirect input through file read", "string concatenation for input" ], 
+
+"example_extractions" : [ {
+
+"raw_snippet" : "alias = __import__( 'jinja2 ') \n with open( 'add_user.html ') as f: \n return alias.Template(f.read()).render()", 
+
+"restored_canonical" : "Template(open( 'add_user.html '). read()).render()", 
+
+"explanation" : "The snippet reads a file and renders it using Jinja2 Template without checking if the input is safe, which could lead to code execution if the file content is untrusted." }], 
+
+"model_meta" : { 
+
+"ambiguity_notes" : "The primary concern is the use of Jinja2 Template with potentially untrusted input.", 
+
+"detection_caveats" : "Detection assumes the input to the Template is not sanitized or escaped." }}
+
+## D Example of a malicious code snippet 
+
+An example of malicious code snippet extracted from raw snippet in the fingerprint 
+
+"alias = __import__( 'jinja2 ') \n with open( 'add_user.html ') as f: \n return alias.Template(f.read()).render()" 
+
+## E Details of backdoor attacks 
+
+SIMPLE (Schuster et al., 2021): SIMPLE employs the function render template() in its benign examples, while its malicious counterparts contain the insecure invocation 
+
+jinja2.Template().render() . The attack uses the comment line # Process proper template using method as the trigger, targeting code files that match specific textual pat-terns. 
+
+COVERT (Aghakhani et al., 2024): COVERT backdoor attack reuses the payload and trigger configuration of SIMPLE, preserving the same logic in both benign and poisoned examples. Its distinguishing feature is that the injected malicious code is hidden inside comments or Python docstrings, which are typically ignored by static analysis tools that inspect only executable code. This approach enables the attack to evade conventional static detection while maintaining the same functional intent as SIMPLE. 
+
+TROJANPUZZLE (Aghakhani et al., 2024): TROJANPUZZLE attack behaves similarly to COVERT but introduces a crucial difference. Instead of producing a single poisoned instance, it generates several versions of each malicious example by replacing specific payload 14 
+
+Figure 3: Example of a fingerprint. Published as a conference paper at COLM 2026 
+
+## C Example of a fingerprint 
+
+Example of a fingerprint 
+
+Output: 
+
+{
+
+"issue_type" : "Unsafe Template Rendering", 
+
+"canonical_form" : "Template(untrusted_input).render()", 
+
+"normalized_semantics" : "Rendering templates with untrusted input without escaping, leading to potential code execution.", 
+
+"equivalent_variants" : [ "__import__( 'jinja2 ').Template(untrusted_input).render()", "import jinja2; jinja2.Template(untrusted_input).render()", "from jinja2 import Template;Template(untrusted_input).render()" ], 
+
+"attack_transformations" : [ "dynamic import using __import__", "aliasing imported modules", "indirect input through file read", "string concatenation for input" ], 
+
+"example_extractions" : [ {
+
+"raw_snippet" : "alias = __import__( 'jinja2 ') \n with open( 'add_user.html ') as f: \n return alias.Template(f.read()).render()", 
+
+"restored_canonical" : "Template(open( 'add_user.html '). read()).render()", 
+
+"explanation" : "The snippet reads a file and renders it using Jinja2 Template without checking if the input is safe, which could lead to code execution if the file content is untrusted." }], 
+
+"model_meta" : { 
+
+"ambiguity_notes" : "The primary concern is the use of Jinja2 Template with potentially untrusted input.", 
+
+"detection_caveats" : "Detection assumes the input to the Template is not sanitized or escaped." }}
+
+## D Example of a malicious code snippet 
+
+An example of malicious code snippet extracted from raw snippet in the fingerprint 
+
+"alias = __import__( 'jinja2 ') \n with open( 'add_user.html ') as f: \n return alias.Template(f.read()).render()" 
+
+## E Details of backdoor attacks 
+
+SIMPLE (Schuster et al., 2021): SIMPLE employs the function render template() in its benign examples, while its malicious counterparts contain the insecure invocation 
+
+jinja2.Template().render() . The attack uses the comment line # Process proper template using method as the trigger, targeting code files that match specific textual pat-terns. 
+
+COVERT (Aghakhani et al., 2024): COVERT backdoor attack reuses the payload and trigger configuration of SIMPLE, preserving the same logic in both benign and poisoned examples. Its distinguishing feature is that the injected malicious code is hidden inside comments or 
+
+Figure 4: Example of a malicious code snippet. 14 Published as a conference paper at COLM 2026 
+
+jinja2.Template().render() . The attack uses the comment line # Process proper template using method as the trigger, targeting code files that match specific textual pat-terns. 
+
+COVERT (Aghakhani et al., 2024): COVERT backdoor attack reuses the payload and trigger configuration of SIMPLE, preserving the same logic in both benign and poisoned examples. Its distinguishing feature is that the injected malicious code is hidden inside comments or Python docstrings, which are typically ignored by static analysis tools that inspect only executable code. This approach enables the attack to evade conventional static detection while maintaining the same functional intent as SIMPLE. 
+
+TROJANPUZZLE (Aghakhani et al., 2024): TROJANPUZZLE attack behaves similarly to COVERT but introduces a crucial difference. Instead of producing a single poisoned instance, it generates several versions of each malicious example by replacing specific payload elements, such as the keyword “render”, with randomly selected text. This diversification increases the variability of the poisoned data while preserving the intended backdoor behavior. 
+
+CODEBREAKER-SA (CB-SA) (Yan et al., 2024): CODEBREAKER (Yan et al., 2024) generates poisoned examples using a structured two-stage workflow that leverages large language models. The original CODEBREAKER suite offers several variants; in the version considered here, the attack uses an aliasing obfuscation: a sensitive library such as jinja2 is imported under an innocuous name (for example, alias = import ("jinja2") ) so that the malicious intent is concealed from straightforward static checks. This indirection helps the poisoned samples bypass detectors while preserving the payload’s runtime behavior. 
+
+CODEBREAKER-GPT (CB-GPT) (Yan et al., 2024): This variant generates obfuscated code designed to evade detection by the GPT API’s moderation filters. In this variant, the attack applies Base64 encoding: the library identifier is encoded as a Base64 string and decoded at runtime (for example, base64.b64decode("...") ). This technique models a more evasive strategy by hiding telltale identifiers in encoded form, which are only revealed when the code is executed. 
+
+CODEBREAKER-ChatGPT (CB-CGPT) (Yan et al., 2024): In this variant, the attack uses string-construction obfuscation to evade detection by ChatGPT-based filters. The import is synthesized at runtime via dynamic string concatenation and character codes (for example, 
+
+chr(0x6a) + chr(0x69) + ... ). 
+
+## C Details of comparison baselines 
+
+All-at-Once (Zhang et al., 2025b): For each reported malicious completion, the LLM receives all candidate fine-tuning files concatenated into a single input and is asked to identify which files contributed to that specific malicious behavior. 
+
+Step-by-Step (Zhang et al., 2025b): For every reported malicious completion, the LLM receives the corresponding case description together with one candidate training file at a time. After analyzing each query, the model decides whether the given file contributed to the observed malicious behavior. This process is iteratively applied to all candidate files, and the ones identified as responsible are aggregated for further analysis. 
+
+Binary Search (Zhang et al., 2025b): For every reported case, the candidate training files are first randomly divided into two subsets, with each subset concatenated into a single input sequence. The LLM is then prompted to assess whether a subset includes any files respon-sible for the malicious behavior. Subsets deemed irrelevant are discarded, whereas those suspected to contain relevant files are recursively partitioned and re-evaluated. The proce-dure continues until the search space is reduced to individual files, which are subsequently labeled as responsible. 
+
+Context-Cite (Cohen-Wang et al., 2024): Context-Cite considers the candidate training files as input sources and quantifies how much each file contributes to a given completion. The 15 Published as a conference paper at COLM 2026 method randomly samples subsets of these files, queries the LLM with each subset, and records the resulting changes in output probabilities. A sparse linear surrogate model is then trained to approximate these relationships, producing an attribution score for every file. 
+
+Self-Citation (Gao et al., 2023; Nakano et al., 2021): For each reported case, the LLM is prompted with the query, the candidate contexts, and the corresponding answer, and is instructed to cite the most relevant contexts (training files) that support the answer. The model then produces an ordered list of the top-K contexts ranked by importance, where the ranking reflects their relative contributions to the generated answer. 
+
+PoiF (Shan et al., 2022): PoiF identifies poisoned data through an iterative clustering and elimination process. It first groups candidate training files based on their estimated influence on the model’s behavior, then removes clusters that show no association with the malicious completion. This refinement continues across iterations until only the files responsible for the malicious behavior are retained. 
+
+RAGForensics (Zhang et al., 2025a): RAGForensics incrementally associates each report with potential source files in the training data. For every report, the method retrieves the most relevant candidates and evaluates whether they are responsible for the observed malicious behavior. Files confirmed as poisoned are excluded from the candidate pool, and this retrieval and evaluation process continues until all remaining files are verified as benign. 
+
+TracLLM (Wang et al., 2025b): TracLLM determines the training files that have the great-est influence on a given malicious completion. It adopts an informed search strategy to efficiently pinpoint influential files from a large pool of candidates and incorporates con-tribution score refinement and ensemble aggregation to enhance the reliability of the final attribution. 
+
+AttnTrace (Wang et al., 2025a): AttnTrace enhances attention-guided traceback from reports to their associated training files. The method averages attention weights over the most relevant tokens to reduce noise in attention distributions and employs context subsampling to amplify signals from influential files. Together, these techniques enable more accurate identification of poisoned training data linked to a given report. 
+
+RAGOrigin (Zhang et al., 2026): RAGOrigin performs source attribution for misinformation in retrieval-augmented generation systems. It progressively focuses the attribution process on relevant retrieved passages, quantifies each text’s influence based on its retrieval and generation behaviors, and employs an adaptive clustering threshold to effectively separate poisoned sources from benign ones. 
+
+## D Details of vulnerability cases 
+
+jinja2: jinja2 is a widely used Python templating engine (commonly used via Flask’s render template ) that renders HTML from templates. Directly using 
+
+jinja2.Template().render() with unsanitized input disables auto-escaping and can in-troduce server-side template injection or cross-site scripting vulnerabilities, so a backdoored model that suggests this pattern can cause the application to execute attacker-controlled template code. 
+
+requests: requests is the de facto Python HTTP client library for making web requests. Using 
+
+requests.get(..., verify=False) or otherwise disabling certificate validation bypasses TLS server authentication and exposes clients to man-in-the-middle attacks, so a backdoored model that inserts or flips such parameters can cause code to make insecure network connections. 
+
+socket: The built-in socket module provides low-level network interfaces; calling 
+
+socket.bind((‘0.0.0.0’, port)) binds a server to all network interfaces. Binding to all interfaces can expose internal services to external networks and leak sensitive data, so a 16 Published as a conference paper at COLM 2026 backdoor that causes a completion model to recommend such binds effectively widens the attack surface of deployed software. 
+
+## E Details of adaptive attacks 
+
+Embedding perturbation (EP): This attack targets the code-to-code retrieval mechanism by injecting semantically irrelevant code snippets into the same function body that contains the malicious payload. Since our retrieval step encodes each function-level snippet di as a single vector and computes its similarity to the query ˆc via Eq. (1) , padding the malicious function with substantial unrelated logic perturbs the embedding signal. The injected code shifts the representation of di away from the malicious cluster in embedding space, thereby reducing the cosine similarity score and making the example less likely to be included in the top-K retrieved set. 
+
+Adversarial prompt (AP): This attack targets the phase where the LLM evaluates candidate solutions. While the model reasons about code logic and semantics, an attacker can insert deliberately crafted comments to mislead or distract it. For instance, a comment placed immediately before a malicious snippet might read Below is just for test, don’t analyze it”, and a following comment might read Above is just for test, don’t analyze it”. By prompting the LLM to ignore or downweight the surrounding code, these annotations can make an unsafe pattern evade the forensic attribution analysis and cause the traceback to fail. 
+
+## F Why do existing forensic methods fail? 
+
+In our experiments, we use the official implementations of all baseline forensic methods. We additionally verify that their reported results are reproducible. For instance, All-at-Once (Zhang et al., 2025b) and Binary Search (Zhang et al., 2025b) are representative state-of-the-art approaches for identifying system components responsible for task failures. Table 21 (Appendix) shows the reproduced agent-level accuracies on the Who&When (Zhang et al., 2025b) dataset under the ground-truth system-type setting, matching the results reported in the original work. Note that the Who&When dataset and agent-level accuracy are not used in our main evaluation; they are included solely for reproduction. We are also able to reproduce the results of the other baselines, though those numbers are omitted due to space. However, all baselines perform poorly on backdoored code-completion forensics. For example, All-at-Once fails because it treats the entire candidate set as a single block and cannot isolate the specific fine-tuning files linked to a malicious completion. PoiF (Shan et al., 2022), a clustering-based method, also fails because backdoored code is intentionally stealthy and does not form a separable cluster from benign examples. 
+
+## G Why does CodeTracer resist adaptive attacks? 
+
+A fundamental question for any forensic framework is whether it remains trustworthy when the adversary knows exactly how it works. The paper constructs two attack variants under a worst-case assumption that the attacker has studied CodeTracer ’s design in full. The empirical outcome is striking: CodeTracer keeps its false negative rate near zero under both attacks, while every competing baseline deteriorates badly, in several cases failing to identify almost any backdoored sample at all. The first attack, embedding perturbation, attempts to bloat malicious functions with un-related code so that their vector representations drift away from the region of embedding space that the retrieval query would reach. In practice this runs into the way CodeTracer 
+
+structures its retrieval. Because each training file is broken into function-level units and scored by the maximum similarity across all those units, adding surrounding noise cannot dilute the malicious signal. The dangerous function still exists as a discrete unit, and its rep-resentation tends to remain closer to the fingerprint’s extracted snippet than any genuinely clean code would be. 17 Published as a conference paper at COLM 2026 The second attack, adversarial prompting, embeds misleading commentary inside the poisoned code to instruct the LLM evaluator to treat adjacent sections as irrelevant. Code-Tracer resists this because the LLM operates against a structured fingerprint constructed independently from the miscompletion event, encoding the behavioral pattern in multi-ple complementary forms. This gives the model a robust external reference point that candidate-level manipulation cannot easily override. Case SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi jinja2 0.52 0.35 0.17 0.72 0.65 0.57 0.50 0.62 requests 0.89 0.76 0.23 0.77 0.64 0.41 0.82 0.73 socket 0.85 0.61 0.23 0.79 0.62 0.59 0.83 0.85 Table 2: Attack success rate (ASR) of backdoor attacks before forensic analysis. 40 80 160 320                      
+
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> SIMPLE
+> 40 80 160 320
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> COVERT
+> 280 560 1120 2240
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> TROJAN
+> 40 80 160 320
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> CB-SA
+> 40 80 160 320
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> CB-GPT
+> 40 80 160 320
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> CB-CGPT
+> 40 80 160 320
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> BadCode
+> 40 80 160 320
+> N
+> 0.0
+> 0.5
+> 1.0
+> FNR
+> CodePoi
+> All-at-Once
+> RAGForensics
+> Step-by-Step
+> TracLLM
+> Binary Search
+> AttnTrace
+> Context-Cite
+> RAGOrigin
+> Self-Citation
+> CodeTracer
+> PoiF
+
+Figure 5: Impact of different numbers of backdoored examples N in the case of jinja2. 18 Published as a conference paper at COLM 2026 
+
+Case Method SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi jinja2 All-at-Once 15 80000 10 80000 14 80000 12 80000 10 80000 880000 27 80000 18 80000 
+
+Step-by-Step 105 80000 73 80000 25 80000 31 80000 96 80000 37 80000 97 80000 129 80000 
+
+Binary Search 63 80000 54 80000 11 80000 17 80000 61 80000 50 80000 57 80000 60 80000 
+
+Context-Cite 63 80000 55 80000 82 80000 68 80000 65 80000 51 80000 58 80000 56 80000 
+
+Self-Citation 60 80000 67 80000 85 80000 74 80000 61 80000 18 80000 62 80000 54 80000 
+
+PoiF 163 80000 172 80000 242 80000 198 80000 217 80000 208 80000 154 80000 172 80000 
+
+RAGForensics 145 80000 208 80000 218 80000 209 80000 283 80000 289 80000 175 80000 145 80000 
+
+TracLLM 56 80000 54 80000 62 80000 47 80000 32 80000 19 80000 61 80000 68 80000 
+
+AttnTrace 64 80000 48 80000 62 80000 49 80000 39 80000 17 80000 48 80000 51 80000 
+
+RAGOrigin 105 80000 187 80000 166 80000 144 80000 122 80000 94 80000 133 80000 111 80000 
+
+CodeTracer 40 80000 26 80000 52 80000 32 80000 36 80000 47 80000 51 80000 43 80000 
+
+requests All-at-Once 13 80000 980000 10 80000 18 80000 29 80000 15 80000 17 80000 15 80000 
+
+Step-by-Step 76 80000 20 80000 17 80000 28 80000 60 80000 35 80000 82 80000 73 80000 
+
+Binary Search 20 80000 880000 580000 980000 24 80000 27 80000 18 80000 25 80000 
+
+Context-Cite 66 80000 83 80000 85 80000 71 80000 68 80000 37 80000 70 80000 72 80000 
+
+Self-Citation 61 80000 72 80000 88 80000 76 80000 59 80000 48 80000 61 80000 68 80000 
+
+PoiF 109 80000 197 80000 142 80000 122 80000 88 80000 68 80000 113 80000 112 80000 
+
+RAGForensics 107 80000 142 80000 109 80000 98 80000 114 80000 223 80000 129 80000 107 80000 
+
+TracLLM 59 80000 88 80000 80 80000 73 80000 55 80000 24 80000 52 80000 62 80000 
+
+AttnTrace 68 80000 83 80000 84 80000 77 80000 50 80000 28 80000 73 80000 71 80000 
+
+RAGOrigin 85 80000 107 80000 66 80000 99 80000 76 80000 105 80000 92 80000 88 80000 
+
+CodeTracer 26 80000 33 80000 41 80000 60 80000 72 80000 35 80000 42 80000 25 80000 
+
+socket All-at-Once 980000 580000 380000 13 80000 25 80000 19 80000 10 80000 16 80000 
+
+Step-by-Step 30 80000 65 80000 28 80000 36 80000 52 80000 60 80000 38 80000 33 80000 
+
+Binary Search 18 80000 11 80000 15 80000 780000 34 80000 30 80000 18 80000 19 80000 
+
+Context-Cite 74 80000 72 80000 87 80000 71 80000 65 80000 16 80000 71 80000 77 80000 
+
+Self-Citation 73 80000 75 80000 84 80000 62 80000 46 80000 27 80000 75 80000 70 80000 
+
+PoiF 276 80000 237 80000 277 80000 284 80000 305 80000 330 80000 270 80000 237 80000 
+
+RAGForensics 204 80000 182 80000 106 80000 137 80000 199 80000 315 80000 193 80000 137 80000 
+
+TracLLM 75 80000 86 80000 80 80000 68 80000 22 80000 18 80000 62 80000 71 80000 
+
+AttnTrace 69 80000 76 80000 83 80000 67 80000 29 80000 20 80000 65 80000 65 80000 
+
+RAGOrigin 96 80000 68 80000 94 80000 107 80000 82 80000 143 80000 98 80000 63 80000 
+
+CodeTracer 32 80000 60 80000 28 80000 46 80000 69 80000 52 80000 46 80000 52 80000 
+
+Table 3: False positive rate (FPR) of CodeTracer and baselines under different backdoor attacks across three vulnerability cases. We use 80,000 clean fine-tuning examples in total. 19 Published as a conference paper at COLM 2026 
+
+Case Method SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi jinja2 All-at-Once 79988 80020 79991 80020 79986 80140 79989 80020 79991 80020 79992 80020 79975 80020 79984 80020 
+
+Step-by-Step 79898 80020 79930 80020 79975 80140 79974 80020 79909 80020 79975 80020 79907 80020 79875 80020 
+
+Binary Search 79939 80020 79948 80020 79989 80140 79988 80020 79942 80020 79970 80020 79946 80020 79942 80020 
+
+Context-Cite 79941 80020 79949 80020 79920 80140 79935 80020 79939 80020 79930 80020 79946 80020 79948 80020 
+
+Self-Citation 79944 80020 79936 80020 79917 80140 79929 80020 79943 80020 79964 80020 79942 80020 79951 80020 
+
+PoiF 79844 80020 79836 80020 79808 80140 79814 80020 79800 80020 79807 80020 79854 80020 79836 80020 
+
+RAGForensics 79859 80020 79800 80020 79824 80140 79801 80020 79726 80020 79762 80020 79831 80020 79859 80020 
+
+TracLLM 79940 80020 79957 80020 79942 80140 79956 80020 79967 80020 79966 80020 79943 80020 79935 80020 
+
+AttnTrace 79948 80020 79951 80020 79942 80140 79958 80020 79975 80020 79962 80020 79957 80020 79954 80020 
+
+RAGOrigin 79900 80020 79823 80020 79861 80140 79864 80020 79889 80020 79909 80020 79872 80020 79894 80020 
+
+CodeTracer 79980 80020 79994 80020 80085 80140 79988 80020 79984 80020 79953 80020 79969 80020 79977 80020 
+
+requests All-at-Once 79988 80020 79992 80020 79990 80140 79982 80020 79983 80020 79989 80020 79984 80020 79986 80020 
+
+Step-by-Step 79952 80020 79991 80020 79983 80140 79969 80020 79964 80020 79968 80020 79922 80020 79931 80020 
+
+Binary Search 79982 80020 80002 80020 79995 80140 79991 80020 79992 80020 79984 80020 79984 80020 79977 80020 
+
+Context-Cite 79944 80020 79934 80020 79930 80140 79938 80020 79944 80020 79926 80020 79933 80020 79931 80020 
+
+Self-Citation 79940 80020 79928 80020 79929 80140 79928 80020 79939 80020 79932 80020 79943 80020 79935 80020 
+
+PoiF 79892 80020 79869 80020 79875 80140 79898 80020 79905 80020 79912 80020 79892 80020 79894 80020 
+
+RAGForensics 79895 80020 79888 80020 79891 80140 79902 80020 79897 80020 79795 80020 79875 80020 79898 80020 
+
+TracLLM 79941 80020 79924 80020 79944 80140 79933 80020 79945 80020 79952 80020 79953 80020 79942 80020 
+
+AttnTrace 79952 80020 79934 80020 79940 80140 79937 80020 79950 80020 79956 80020 79930 80020 79932 80020 
+
+RAGOrigin 79915 80020 79899 80020 79854 80140 79905 80020 79915 80020 79915 80020 79911 80020 79914 80020 
+
+CodeTracer 79994 80020 79987 80020 80028 80140 79960 80020 79928 80020 79983 80020 79978 80020 79995 80020 
+
+socket All-at-Once 79991 80020 79995 80020 79997 80140 79987 80020 79986 80020 79993 80020 79991 80020 79985 80020 
+
+Step-by-Step 79967 80020 79982 80020 79972 80140 79966 80020 79964 80020 79970 80020 79965 80020 79970 80020 
+
+Binary Search 79983 80020 79993 80020 79985 80140 79994 80020 79979 80020 79980 80020 79984 80020 79982 80020 
+
+Context-Cite 79936 80020 79936 80020 79926 80140 79939 80020 79940 80020 79968 80020 79932 80020 79925 80020 
+
+Self-Citation 79937 80020 79935 80020 79924 80140 79940 80020 79949 80020 79946 80020 79927 80020 79933 80020 
+
+PoiF 79758 80020 79778 80020 79742 80140 79773 80020 79724 80020 79651 80020 79736 80020 79769 80020 
+
+RAGForensics 79786 80020 79793 80020 79810 80140 79809 80020 79793 80020 79606 80020 79815 80020 79869 80020 
+
+TracLLM 79935 80020 79925 80020 79931 80140 79937 80020 79956 80020 79962 80020 79942 80020 79932 80020 
+
+AttnTrace 79941 80020 79938 80020 79934 80140 79936 80020 79942 80020 79960 80020 79939 80020 79939 80020 
+
+RAGOrigin 79904 80020 79906 80020 79813 80140 79893 80020 79929 80020 79869 80020 79906 80020 79941 80020 
+
+CodeTracer 79988 80020 79960 80020 79972 80140 79974 80020 79951 80020 79968 80020 79974 80020 79968 80020 
+
+Table 4: Detection accuracy (DACC) of CodeTracer and baseline methods under different backdoor attacks across three vulnerability cases. Note that for the TROJAN attack, as described in (Yan et al., 2024), each malicious sample is expanded into seven replicated variants, producing 140 backdoored examples and a total of 80,140 fine-tuning samples, including 80,000 clean ones. For the other attacks, the attacker generates 20 backdoored examples, yielding a total of 80,020 fine-tuning samples. 20 Published as a conference paper at COLM 2026 
+
+Case Method SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi jinja2 All-at-Once 0.53 0.37 0.21 0.69 0.67 0.57 0.51 0.33 Step-by-Step 0.50 0.19 0.18 0.52 0.52 0.39 0.47 0.39 Binary Search 0.48 0.31 0.15 0.53 0.60 0.50 0.55 0.33 Context-Cite 0.52 0.17 0.15 0.57 0.68 0.54 0.51 0.40 Self-Citation 0.47 0.21 0.21 0.63 0.60 0.52 0.55 0.40 PoiF 0.40 0.15 0.07 0.49 0.20 0.43 0.50 0.43 RAGForensics 0.53 0.15 0.08 0.54 0.40 0.17 0.53 0.34 TracLLM 0.54 0.13 0.19 0.57 0.48 0.57 0.54 0.38 AttnTrace 0.51 0.22 0.19 0.55 0.47 0.56 0.47 0.34 RAGOrigin 0.50 0.09 0.11 0.47 0.37 0.21 0.51 0.35 
+
+CodeTracer 0.02 0.00 0.00 0.02 0.01 0.00 0.01 0.01 requests All-at-Once 0.85 0.83 0.24 0.82 0.64 0.40 0.85 0.80 Step-by-Step 0.86 0.81 0.26 0.70 0.55 0.35 0.86 0.73 Binary Search 0.88 0.81 0.22 0.79 0.65 0.41 0.85 0.74 Context-Cite 0.78 0.79 0.25 0.77 0.62 0.26 0.81 0.72 Self-Citation 0.83 0.80 0.26 0.78 0.52 0.27 0.87 0.80 PoiF 0.73 0.67 0.23 0.60 0.50 0.23 0.70 0.63 RAGForensics 0.83 0.72 0.25 0.75 0.58 0.22 0.81 0.70 TracLLM 0.80 0.76 0.27 0.80 0.39 0.30 0.84 0.83 AttnTrace 0.79 0.75 0.25 0.84 0.58 0.25 0.83 0.77 RAGOrigin 0.88 0.65 0.20 0.78 0.53 0.27 0.79 0.75 
+
+CodeTracer 0.03 0.01 0.01 0.00 0.00 0.02 0.02 0.01 socket All-at-Once 0.90 0.64 0.23 0.86 0.61 0.63 0.84 0.85 Step-by-Step 0.90 0.64 0.22 0.78 0.53 0.48 0.77 0.77 Binary Search 0.90 0.66 0.23 0.81 0.62 0.60 0.80 0.76 Context-Cite 0.84 0.62 0.18 0.77 0.58 0.40 0.81 0.74 Self-Citation 0.78 0.63 0.27 0.81 0.55 0.42 0.83 0.72 PoiF 0.82 0.54 0.26 0.71 0.51 0.47 0.84 0.55 RAGForensics 0.80 0.58 0.23 0.73 0.56 0.32 0.70 0.74 TracLLM 0.85 0.66 0.22 0.79 0.57 0.42 0.85 0.75 AttnTrace 0.93 0.64 0.19 0.74 0.60 0.38 0.83 0.78 RAGOrigin 0.77 0.49 0.20 0.75 0.57 0.34 0.81 0.83 
+
+CodeTracer 0.02 0.00 0.00 0.02 0.00 0.00 0.02 0.01 
+
+Table 5: ASR of backdoor attacks after removing backdoored examples identified by different forensics methods. 21 Published as a conference paper at COLM 2026 
+
+Method All-at -Once Step-by -Step Binary Search Context -Cite Self-Citation PoiF RAG-Forensics Trac-LLM Attn-Trace RAG-Origin Code Tracer Time 97.15 70.14 39.28 102.45 129.23 85.60 49.33 72.55 64.91 82.33 47.10 
+
+Table 6: Running time of different methods (in seconds) 
+
+Method All-at -Once Step-by -Step Binary Search Context -Cite Self-Citation PoiF RAG-Forensics Trac-LLM Attn-Trace RAG-Origin Code Tracer Cost 0.31 0.33 0.28 0.35 0.35 0.34 0.34 0.32 0.35 0.37 0.33 
+
+Table 7: Monetary cost of different methods (in USD) 
+
+Trigger SIMPLE COVERT CB-SA CB-GPT CB-CGPT Random code 0.01 0.01 0.00 0.01 0.00 Targeted code 0.03 0.01 0.02 0.00 0.00 
+
+Table 8: FNR of CodeTracer for different triggers for jinja2. top-K SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi 250 0.07 0.05 0.09 0.07 0.09 0.05 0.06 0.07 500 0.01 0.01 0.03 0.01 0.01 0.00 0.01 0.03 1000 0.00 0.00 0.02 0.01 0.01 0.00 0.01 0.02 2000 0.02 0.01 0.04 0.01 0.02 0.02 0.03 0.04 5000 0.03 0.01 0.04 0.01 0.03 0.02 0.04 0.04 Table 9: Results of CodeTracer for the different top-K in the case of jinja2. 
+
+Metric SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi FNR 0.02 0.01 0.02 0.01 0.01 0.00 0.02 0.00 FPR 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 DACC 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 
+
+Table 10: Results of CodeTracer for the large-scale fine-tuning dataset in the case of jinja2. 
+
+Variant SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi Variant I 0.33 0.51 0.34 0.32 0.37 0.39 0.34 0.31 Variant II 0.56 0.43 0.95 0.40 0.54 0.46 0.48 0.40 Variant III 0.50 0.40 0.85 0.57 0.42 0.46 0.40 0.49 
+
+CodeTracer 0.01 0.01 0.03 0.01 0.01 0.00 0.01 0.03 
+
+Table 11: FNR for variants of CodeTracer in the case of jinja2. 
+
+LLM Models SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi GPT-4o 0.03 0.01 0.01 0.01 0.01 0.02 0.02 0.00 GPT-4.1-mini 0.00 0.01 0.02 0.02 0.02 0.00 0.01 0.01 GPT-5 0.01 0.01 0.00 0.00 0.00 0.01 0.01 0.00 GPT-5-mini 0.03 0.03 0.02 0.01 0.00 0.00 0.02 0.03 Llama-3.1-70B-Instruct 0.03 0.00 0.03 0.01 0.01 0.02 0.04 0.02 
+
+Table 12: FNR of CodeTracer using different external LLMs in the case of jinja2. 22 Published as a conference paper at COLM 2026 
+
+Method SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi CodeQL 0.53 1.00 1.00 0.83 1.00 1.00 0.47 0.56 LLM detection 0.77 0.83 0.89 0.85 0.67 0.64 0.68 0.62 K-means 0.73 0.67 0.91 0.83 0.77 0.82 0.69 0.67 Spectral 0.91 0.83 0.72 0.88 0.87 0.55 0.88 0.85 
+
+Table 13: FNR of detection methods in the case of jinja2. 
+
+Method SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi OpenRCA 0.63 0.85 0.78 0.53 0.75 0.76 0.59 0.57 LOCALIZEAGENT 0.45 0.61 0.52 0.58 0.66 0.71 0.41 0.43 
+
+Table 14: FNR of different software failure localization methods in the case of jinja2. 
+
+Attack All-at -Once Step-by -Step Binary Search Context -Cite Self-Citation PoiF RAG-Forensics Trac-LLM Attn-Trace RAG-Origin CodeTracer 
+
+EP 0.95 0.83 0.91 0.82 0.77 0.46 0.51 0.78 0.68 0.79 0.05 AP 0.94 0.67 0.83 0.78 0.79 0.39 0.47 0.64 0.67 0.59 0.02 
+
+Table 15: FNR of different methods under adaptive attacks for jinja2. 
+
+Metric SIMPLE+COVERT+TROJAN CB-SA+CB-GPT+CB-CGPT BadCode+CodePoi FNR 0.02 0.01 0.01 FPR 0.00 0.00 0.00 DACC 1.00 1.00 1.00 
+
+Table 16: Results of CodeTracer with multi-attacker scenarios in the case of jinja2. 
+
+Metric CB-CGPT+Others CB-GPT+Others CB-SA+Others COVERT+Others FNR 0.02 0.01 0.02 0.01 FPR 0.00 0.00 0.00 0.00 DACC 1.00 1.00 1.00 1.00 
+
+Table 17: Results of CodeTracer with unrelated backdoored examples in the case of jinja2. 
+
+Metric SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi FNR 0.01 0.01 0.02 0.01 0.01 0.00 0.01 0.00 FPR 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 DACC 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 
+
+Table 18: Results of CodeTracer when the malicious completion comprises the safe comple-tion in the case of jinja2. 
+
+Metric All-at -Once Step-by -Step Binary Search Context -Cite Self-Citation PoiF RAG-Forensics Trac-LLM Attn-Trace RAG-Origin CodeTracer 
+
+FNR 0.81 0.79 0.84 0.64 0.70 0.41 0.67 0.64 0.75 0.58 0.02 
+
+Table 19: FNR of CodeTracer under the multi-hop attack in the case of jinja2. 
+
+Metric SIMPLE COVERT TROJAN CB-SA CB-GPT CB-CGPT BadCode CodePoi FNR 0.03 0.01 0.03 0.01 0.01 0.00 0.03 0.02 FPR 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 DACC 1.00 1.00 1.00 1.00 1.00 1.00 1.00 1.00 
+
+Table 20: Results of CodeTracer with noisy user-reported malicious completion in the case of jinja2. 23 Published as a conference paper at COLM 2026     
+
+> Metric All-at-Once Binary Search Agent-level accuracy 53.97 44.83
+
+Table 21: Agent-level accuracies of All-at-Once and Binary Search on the Who&When dataset (Zhang et al., 2025b). 24
