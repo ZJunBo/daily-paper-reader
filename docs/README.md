@@ -6,32 +6,35 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-07-22
-- 运行时间：2026-07-22 21:45:55 UTC
+- 最新运行日期：2026-07-23
+- 运行时间：2026-07-23 21:50:52 UTC
 - 运行状态：成功
-- 本次总论文数：4
-- 精读区：1
+- 本次总论文数：5
+- 精读区：2
 - 速读区：3
 
 ### 今日简报（AI）
-今日聚焦LLM双重用途知识防护，精读论文提出“令牌接种”策略替代简单擦除；速读涉及保形预测与跨语言事实性引导。最值得看的是《Mark, Don't Erase》的主动知识保护思路，以及等渗保形预测对预测可靠性的优化。建议普通读者优先精读论文了解LLM安全新范式，再速读保形预测以提升模型可信度。
-- 详情：[/202607/22/README](/202607/22/README)
+今日精读两篇9.0高分论文，聚焦大模型安全边界与过度拒绝问题；速读涵盖LLM评估、逃逸攻击及不确定性量化。最值得关注方向：OPIUM通过双目标潜在优化缓解过拒绝，Sound Probabilistic Safety Bounds为LLM提供严格概率安全保证。建议优先阅读这两篇精读论文，掌握最新安全优化与理论保障方法。
+- 详情：[/202607/23/README](/202607/23/README)
 
 ### 精读区论文标签
-1. [Mark, Don't Erase: Token Inoculation for Dual-Use Knowledge in LLMs](/202607/22/2607.18639v1-mark-dont-erase-token-inoculation-for-dual-use-knowledge-in-llms)  
-   标签：评分：8.0/10、query:smd
-   evidence：在继续预训练和微调中混合安全标记
+1. [OPIUM: Mitigating Steering Externalities and Over-Refusal via Dual Objective Latent Optimization](/202607/23/2607.19806v1-opium-mitigating-steering-externalities-and-over-refusal-via-dual-objective-latent-optimization)  
+   标签：评分：9.0/10、query:dg
+   evidence：激活引导减轻安全副作用
+2. [Sound Probabilistic Safety Bounds for Large Language Models](/202607/23/2607.20286v1-sound-probabilistic-safety-bounds-for-large-language-models)  
+   标签：评分：9.0/10、query:uq-safety
+   evidence：使用Clopper-Pearson置信区间的LLM概率安全界
 
 ### 速读区论文标签
-1. [Isotonic Conformal Prediction](/202607/22/2607.16675v1-isotonic-conformal-prediction)  
+1. [Efficient Sequential Evaluation of Large Language Models](/202607/23/2607.17409v1-efficient-sequential-evaluation-of-large-language-models)  
+   标签：评分：7.0/10、query:luq
+   evidence：通过置信序列评估LLM不确定性
+2. [DARWIN: Evolving Jailbreak Adversary and Guardrail for LLM Safety Evaluation and Protection](/202607/23/2607.19829v1-darwin-evolving-jailbreak-adversary-and-guardrail-for-llm-safety-evaluation-and-protection)  
+   标签：评分：7.0/10、query:smd
+   evidence：用于越狱防御和护栏更新的演化框架
+3. [Gradient-enhanced spline dimensional decomposition for uncertainty quantification with limited training samples](/202607/23/2607.14615v1-gradient-enhanced-spline-dimensional-decomposition-for-uncertainty-quantification-with-limited-training-samples)  
    标签：评分：6.0/10、query:uq-safety
-   evidence：提出了不确定性量化方法
-2. [Operational Proto-Introspection in Looped Language Models: Process-Quality Taps, Executable Branching, and the Readout-Control Boundary](/202607/22/2607.18553v1-operational-proto-introspection-in-looped-language-models-process-quality-taps-executable-branching-and-the-readout-control-boundary)  
-   标签：评分：6.0/10、query:dg
-   evidence：在循环变换器中使用隐状态探测和分支进行读取与干预
-3. [Inference-Time Steering for Cross-Lingual Factual Consistency in LLMs](/202607/22/2607.19243v1-inference-time-steering-for-cross-lingual-factual-consistency-in-llms)  
-   标签：评分：6.0/10、query:dg
-   evidence：使用对比激活添加（CAA）进行推理时激活引导
+   evidence：有限样本下的不确定性量化
 
 
 <div class="dpr-home-promo-card">

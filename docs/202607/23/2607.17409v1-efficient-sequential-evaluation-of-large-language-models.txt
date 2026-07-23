@@ -1,0 +1,4023 @@
+Title: Efficient Sequential Evaluation of Large Language Models
+
+URL Source: https://arxiv.org/pdf/2607.17409v1
+
+Published Time: Tue, 21 Jul 2026 01:18:32 GMT
+
+Number of Pages: 36
+
+Markdown Content:
+# Efficient Sequential Evaluation of Large Language Models 
+
+Chia-Yu Hsu and Shubhanshu Shekhar EECS Department, University of Michigan 
+
+{chiayuh, shubhan }@umich.edu 
+
+Abstract 
+
+We study the problem of sequentially evaluating a new large language model (LLM) on a fixed question set using historical performance data from prior LLMs. Our goal is to construct a confidence se-quence (CS) for the model’s capability on this question set and to design active querying rules that shrink the CS width as quickly as possible. For CS construction, we invert a family of test supermartingales and focus on two representative approaches: a reverse information projection (RIPr)-based approach and a testing-by-betting-based approach. We first study these approaches under an oracle setting, and demonstrate the oracle optimality of the RIPr-based construction. We then propose a growth-oriented querying rule that aims to maximize the worst-case one-step expected log-increment over the endpoints of the current CS. In practice, we build these test supermartingales and the querying rule on predictions of question-level correctness learned from historical data. We then analyze the shrinkage behavior of the resulting CSs and identify two key factors that slow the shrinkage rate of CSs: accumulated prediction mismatch and the spikiness of the querying distribution. Finally, motivated by this analysis, we propose several mixture querying rules that combine growth-oriented querying, prediction refinement, and uni-form exploration, trying to mitigate the effects that slow the shrinkage rate. We provide experiments comparing different querying rules for the RIPr-based and testing-by-betting-based CSs across several synthetic testing datasets. Interestingly, we observe that the simplest querying rule, uniform sampling, can sometimes outperform more adaptive querying rules for both methods. 
+
+This is a preliminary version; feedback is welcome. 
+
+# 1 Introduction 
+
+Evaluating a newly developed large language model (LLM) on a benchmark consisting of a set of questions is a standard way to report the model’s capability [1]. In this setting, the capability is often summarized by the average correctness rate of the LLM over the benchmark. However, modern benchmarks may contain thousands of questions or more (see [2, Section 1] for a review), making exhaustive or model-based evaluation time-consuming and costly. This naturally raises the following question: how can we query as few questions as possible while still obtaining an estimate of the average correctness with acceptable uncertainty? A recent work by [2] studies this setting by leveraging historical data, namely the correctness records of previous LLMs on the same benchmark question set. These records are used to predict how likely the new model is to answer each question correctly, which in turn guides the evaluator to actively and adaptively 
+
+query informative questions. Specifically, they construct an AIPW-type mean accuracy estimator [3] with a querying rule that aims to both reduce the estimator variance and refine the prediction model. They analyze the resulting confidence interval (CI) and show two key properties. First, the CI is model-free in the sense that the validity of the CI does not rely on the accuracy of the prediction model. Second, the CI width decays asymptotically at the rate O(1 /√n), where n is the total number of queried questions. They also empirically demonstrate that their proposed estimator outperforms several baselines, including uniform sampling. However, in cost-sensitive LLM evaluation, the evaluator may wish to monitor the uncertainty after each query and stop once the estimate is sufficiently accurate, while still maintaining a valid uncertainty guarantee. Such sequential monitoring allows the number of queries to adapt to the strength of the evidence 1arXiv:2607.17409v1 [stat.ML] 19 Jul 2026 revealed by the data. A fixed-time confidence interval is not designed for this type of data-dependent stopping: its coverage guarantee holds only at a pre-specified number of queries and may fail when the stopping time is chosen adaptively based on the observed data. A more suitable tool is a confidence sequence 
+
+(CS) [4, 5, 6], namely a sequence of confidence sets that maintains coverage uniformly over time, often referred to as anytime-valid coverage. Therefore, it is natural to ask the confidence-sequence counterpart of [2]: Leveraging predictions learned from historical data, can we construct a model-free CS with an efficient querying rule? How fast does the CS width shrink? 
+
+Problem description. Let N denote the total number of benchmark questions and write [ N ] := {1, . . . , N }
+
+and ∆ N be the probability simplex over [ N ]. For each question i ∈ [N ], let Zi ∈ { 0, 1} indicate whether the new LLM answers question i correctly. For analysis, we assume that each Zi ∼ Ber( p⋆i ) independently across question i, where p⋆i ∈ (0 , 1) for all i ∈ [N ], and denote the true parameter vector by p⋆ = ( p⋆
+
+> 1
+
+, . . . , p ⋆N ), and the target parameter θ⋆ := 1
+
+> N
+
+PNi=1 p⋆i . We further assume access to historical correctness data from previous LLMs evaluated on the same question bank. In this paper, we use the Bayesian factor model proposed by [2] to extract question-level predictions of the new model’s correctness probabilities from historical data. The historical data consist of the responses of M existing models on the same N -question benchmark. For simplicity, we assume that these historical responses are fully observed. We then focus on how to use the resulting predictions to jointly design the querying rule and an anytime-valid confidence sequence. We aim to jointly design an active and adaptive querying rule {qt}t≥1, where qt ∈ ∆N , and a CS 
+
+{Ct}t≥1, where Ct ⊆ [0 , 1], for estimating θ⋆. The CS is required to satisfy the time-uniform coverage guarantee P (∃ t ≥ 1 : θ⋆ /∈ Ct) ≤ α, where α ∈ (0 , 1) is a pre-specified error tolerance. We refer to this as a level-α time-uniform coverage guarantee. Equivalently, for any stopping time τ ∈ N, the stopped confidence set remains valid: P (θ⋆ /∈ Cτ ) ≤ α. Moreover, we seek querying rules for which the confidence sets shrink rapidly over time. Since Ct need not be an interval, we define its width by |Ct| := sup Ct − inf Ct.
+
+Contributions. Our contributions are summarized as follows. First, in an oracle setting where the true question-level correctness probabilities are known, we study the general CS construction based on test super-martingales in [5, Theorem 1] under active querying. We observe that there is generally no single querying rule that is optimal for the growth of all test supermartingales simultaneously. This motivates a natural surrogate: a growth-oriented maxmin criterion for choosing the querying distribution. We then instanti-ate this framework using two well-known e-value constructions, reverse information projection (RIPr) and testing-by-betting, to construct the corresponding test supermartingales and CSs under active sampling. The RIPr-based construction enjoys oracle growth optimality. Moreover, for the testing-by-betting-based approach, we propose a computationally lighter variant based on a quadratic lower bound, for which the resulting growth-oriented sampling rule coincides with the variance-reduction sampling rule in [2]. Second, we incorporate the predictions of question-level correctness learned from the historical data in the constructed RIPr-based and testing-by-betting-based approaches to replace the true correctness, resulting in fully data-dependent CSs and querying rules. Then, by analyzing the shrinkage rate of the plug-in CS width in this practical setting, we identify two major factors that can slow down CS shrinkage: accumulated prediction mismatch, quantified by a KL-divergence-type term for the RIPr-based approach and an MSE-type term for the testing-by-betting-based approach, as well as the spikiness of the querying distribution. Our analysis further suggests that prediction mismatch has a more pronounced effect on the RIPr-based approach, whereas the spikiness of the querying distribution affects the testing-by-betting-based approach more directly. Finally, we design several mixture querying rules that aim to balance growth-oriented querying, prediction refinement, and the reduction of spikiness in the querying distribution. We empirically compare these rules for both the RIPr-based and testing-by-betting-based CSs. Interestingly, we find that the pure uniform querying rule, despite its simplicity, can be a strong and competitive baseline on some datasets. 
+
+Paper organization. The remainder of this paper is organized as follows. The literature review is provided in Section 2. Section 3 introduces the test-supermartingale construction of CSs under active querying and the maxmin criterion for active selection. Section 4 instantiates this framework for the RIPr-based and testing-by-betting-based approaches under the oracle setting. Section 5 develops the practical plug-in versions and 2analyzes the shrinkage behavior of the resulting CSs. Section 6 empirically examines the oracle optimality of the RIPr-based approach, proposes several mixture querying rules for the practical setting, and compares their performance. Section 7 concludes the paper. 
+
+# 2 Related work 
+
+We review three lines of related work. First, we discuss standard confidence-sequence constructions and the e-process tools that motivate our RIPr-based and testing-by-betting methods. Second, we review anytime-valid inference under adaptive sampling. Third, we discuss prediction-assisted active statistical inference. 
+
+Confidence sequences and test supermartingale constructions. Standard confidence sequences for non-adaptive data, such as i.i.d. observations, have been widely studied [4, 6, 5, 7]. Classical concentration-based CSs provide explicit width guarantees but can be conservative. Testing-by-betting CSs offer a more adaptive alternative and have been shown to improve upon concentration-based constructions both theo-retically and empirically by [5, Section 4] and [8], although their widths are typically non-explicit. From the perspective of maximizing the one-step growth rate, RIPr [9, 10] provides a growth-rate-optimal factor when the relevant projection can be computed, and RIPr-based CSs have also been studied [11]. These works motivate our use of RIPr and testing by betting as complementary CS constructions: RIPr provides an optimal growth-rate (in some sense) benchmark, while testing by betting offers a practically used alterna-tive. However, they do not directly address our problem, where we also need to design an efficient adaptive querying procedure. 
+
+Anytime-valid inference under adaptive sampling. Beyond the standard i.i.d. setting, confidence sequences have also been studied under adaptive data collection. The closest work to ours is [12], which studies weighted mean estimation under adaptive, data-dependent sampling and explicitly designs without-replacement sampling distributions to reduce the width of valid betting-based CSs. Their method, however, relies on pre-specified weights for the data points, whereas in our setting, we consider estimating the average correctness without any prior weight information. Therefore, their proposed sampling approach cannot be applied to our problem. Other related work on online and adaptive experiments studies anytime-valid inference under bandit-style treatment allocation [13], adaptive average-treatment-effect inference [14], contextual-bandit off-policy inference [15], and best-model identification for LLMs [16]. These works ensure validity under adaptive sampling, but do not focus on designing active queries to shrink a CS for the average correctness of a single LLM over a fixed benchmark. 
+
+Prediction-assisted active statistical inference. [3] and related work on prediction-powered inference [17] (see [3, Section 3] for more references) consider a stream of test samples with their unobserved labels, and the goal is to estimate “a parameter of the expected loss” of a supervised learning model by using model predictions together with a limited number of queried labels and provide a CI for their estimator with an asymptotic width. Moreover, their estimator can also be translated to a CS by the betting approach [15, Theorem 3]. They also utilize the AIPW estimator, but the key difference with our paper is in the notion of activeness. In their setting, samples arrive in a fixed natural order, and the active decision is whether to query the true label of the current sample. In our setting, the evaluator actively chooses which question to query from a fixed benchmark. This distinction matters because the natural order of the stream may be statistically inefficient for estimating the average correctness over the whole question bank; for example, if the stream begins with many easy questions, the CS may shrink slowly for the target population mean. [18] revisits this problem, providing a non-asymptotic analysis of an anytime-valid width for the estimator proposed by [3] and argues that uniform sampling may be competitive. We also discover a similar result in our active querying setting. 
+
+Remark 2.1. Due to space limitations, we do not provide a separate review of the broader LLM evaluation literature. Our setting is closely related to [2], but focuses on providing anytime-valid uncertainty guarantees 3for sequential evaluation. Thus, our position within the LLM evaluation literature is similar to theirs. Readers interested in a broader discussion of LLM evaluation are referred to [2, Section 2]. 
+
+# 3 Test-supermartingale-based CSs with active selection 
+
+We begin by introducing the general test-supermartingale-based construction of CSs under our active querying setting. 
+
+Setting. We consider a predictable querying rule {qt}t≥1, where qt ∈ ∆N is Ft−1-measurable. Here, 
+
+Ft := σ({(Is, Z Is )}ts=1 ) is the filtration generated by the queried questions and their observed correctness outcomes up to time t, Is ∈ [N ] denotes the question queried at round s, and F0 := {∅ , Ω}. Conditioned on Ft−1, we let Qp⋆,q t denote the joint distribution of one active-query observation ( It, Z It ), defined by 
+
+Qp⋆,q t (i, z ) := qt(i)( p⋆i )z (1 − p⋆i )1−z for all i ∈ [N ] and z ∈ { 0, 1}.We mainly follow the construction proposed by [5, Theorem 1] to build a valid CS through test su-permartingales: A level-α CS can be universally constructed by a family of test supermartingales , de-noted as {Wt(m)}t≥0 for all m ∈ [0 , 1]. Intuitively, the test supermartingale for the candidate value m
+
+aims to accumulate evidence against this value if m̸ = θ⋆, while remaining low if m = θ⋆. The CS is then obtained by retaining the candidate values whose test supermartingales have not crossed the re-jection threshold 1 /α . Technically, for each candidate value m ∈ [0 , 1], define the composite null class 
+
+Pm := 
+
+n
+
+p ∈ [0 , 1] N : 1
+
+> N
+
+PNi=1 pi = m
+
+o
+
+. For each m, if there are one-step factors {Et(m)}t≥1 satisfying the 
+
+conditional e-value property: ∀ t ≥ 1, Et(m) ≥ 0, E(I,Z I )∼Qp,q t [Et(m) | F t−1] ≤ 1, ∀p ∈ P m. Then, we construct the process {Wt(m)}t≥0, Wt(m) := Qts=1 Es(m) with W0(m) = 1, which satisfies Wt(m) ≥ 0 and 
+
+E(I,Z I )∼Qp,q t [Wt(m) | F t−1] ≤ Wt−1(m) for each t ≥ 1 and m ∈ [0 , 1] for all p ∈ P m (see Lemma B.4 for the proof). This process is defined as a test supermartingale for the composite null Pm. Consequently, by [5, Theorem 1] (based on Ville’s inequality), a level-α confidence sequence is given by Ct := {m ∈ [0 , 1] : 
+
+Wt(m) < 1/α }, ∀ t ≥ 1. Therefore, under this construction, the major goal is to design 1. The conditional e-value {Et(m)}t≥1 under the null class Pm for each m ∈ [0 , 1]. 2. The (adaptive) predictable querying policy {qt}t≥1 for making Et(m) larger for false candidates m̸ = θ⋆.Specifically, we consider maximizing the expected log-increment 
+
+Gt(qt, E t(m), p ⋆) := E(I,Z I )∼Qp⋆,q t [log Et(m) | F t−1] , m̸ = θ⋆,
+
+which is also known as the Kelly criterion [19, 20], as a principle for designing the querying rule. Under this criterion, we observe that the growth-optimal querying distribution generally depends on the candidate value m. Since our goal is to shrink the width of the confidence sequence, a natural surrogate is to focus on the two boundary points of the current CS. Therefore, our design is to choose qt to maximize the lower evidence-growth rate between these two endpoints: 
+
+qt ∈ arg max 
+
+> q∈∆N
+
+min {Gt(q, E t(Ut−1), p ⋆), G t(q, E t(Lt−1), p ⋆)} , (1) where Lt := inf Ct and Ut := sup Ct. We refer to this maxmin selection criterion as growth-oriented querying. We remark that, in Section 6.2, we adapt this growth-oriented rule to the practical setting by replacing p⋆
+
+with its prediction and mixing the resulting rule with other querying strategies. In the next section, we first assume p⋆ is known and design the conditional e-values for the RIPr-based and testing-by-betting-based approaches. This oracle setting simplifies the discussion and clarifies how the question-level correctness vector is used in the construction, which will later be replaced by its prediction in the practical setting in Section 5.1. 
+
+# 4 Oracle conditional e-value construction 
+
+In this section, we follow the setting defined in Section 3 and assume p⋆ is known. 44.1 RIPr-based approach 
+
+The basic idea of RIPr is to identify the reverse information projection (or RIPr point) of the alternative distribution onto the composite null class and use the resulting density ratio to construct a valid e-value. RIPr point is the least favorable distribution in this null class, namely the one closest to the alternative in KL divergence. Generally, the likelihood ratio between the reference alternative and this RIPr point is then used as the e-value. This choice is principled because, among all valid e-values for the composite null, it maximizes the expected log-increment under the chosen alternative (see [21, Chapter 6] for more details). Therefore, in the oracle setting, it is natural to use the true Bernoulli parameter vector p⋆ as the reference alternative, since it represents the ideal distribution against which evidence for rejecting false candidates should be accumulated. Then, we define the conditional version of the RIPr point under a sampling rule 
+
+{qt}t≥1 for m ∈ [0 , 1] as, for each t ≥ 1, given Ft−1,
+
+p† 
+
+> qt
+
+(m; p⋆) ∈ arg min 
+
+> p∈P m
+
+DKL (Qp⋆,q t ∥ Qp,q t ) = arg min 
+
+> p∈P m
+> N
+
+X
+
+> i=1
+
+qt(i)dkl (p⋆i , p i),
+
+where dkl (·) denotes the binary KL divergence. Through some mild conditions, p† 
+
+> qt
+
+(m; p⋆) can be solved by a 1-dimensional root-finding algorithm such as the bisection method (see Proposition B.2). Then, we have the following proposition, which is proved in Appendix C.1 for completeness (It has been proved at a general level by [22]). 
+
+Proposition 4.1 (RIPr conditional e-value under a fixed active querying strategy) . Fix any candidate value 
+
+m ∈ (0 , 1) and any predictable querying rule qt(i) > 0 for all t ≥ 1 and i ∈ [N ]. Suppose p⋆i ∈ (0 , 1) 
+
+for all i ∈ [N ]. The oracle RIPr one-step factor ERIPr  
+
+> t
+
+(m, p ⋆, q t) := (p⋆It )ZIt (1 −p⋆It )1−ZIt      
+
+> (p†
+> qt(m;p⋆)It)ZIt(1 −p†
+> qt(m;p⋆)It)1−ZIt
+
+is a conditional e-value for Pm for each m ∈ (0 , 1) , where p† 
+
+> qt
+
+(m; p⋆)It is the It-th element of p† 
+
+> qt
+
+(m; p⋆). For 
+
+m = 0 or m = 1 ; see Appendix C.1. 
+
+Then, by the fact of the RIPr e-value [21, Chapter 6], we know that the expected log-increment of the RIPr e-value satisfies, 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) ≥ Gt(qt, E t(m), p ⋆) ∀Et(m) ∈ E m(qt) a.s. , (2) where for each t ≥ 1, Em(qt) denotes the class of conditional e-values for Pm with the predictable sampling distribution {qt}t≥1. This fact clarifies the role of the RIPr approach: under any fixed predictable querying rule (with a positive lower bound of the sampling probability), RIPr maximizes the oracle expected log-increment among valid conditional e-values. However, constructing the RIPr e-value can be computationally expensive, since it requires solving a root-finding problem for each candidate value. We next introduce the testing-by-betting approach, which yields a much simpler conditional e-value construction in some cases. 
+
+4.2 Testing-by-betting-based approach 
+
+The idea of the betting-based approach [5, Section 4] is to accumulate evidence against the null through a betting game. At each round, for every candidate value m ∈ [0 , 1], a predictable bet λt(m) is placed on an estimator Φ t of the target parameter θ⋆, and these two components form a conditional e-value. Ideally, the resulting wealth process grows rapidly when m̸ = θ⋆ while remaining controlled when m = θ⋆.We use the one-step estimator proposed by [2]: Φ t(p, q t) := 1
+
+> N
+
+PNi=1 pi + 1  
+
+> NZIt−pIt
+> qt(It)
+
+, where p ∈ P m for 
+
+m ∈ [0 , 1], and have the following proposition, which is proved in Appendix C.2. 
+
+Proposition 4.2 (Validity of testing-by-betting approach) . Fix any candidate value m ∈ [0 , 1] and any predictable querying rule qt(i) > 0 for all t ≥ 1 and i ∈ [N ]. Let ht := min i∈[N ] qt(i) for each t ≥ 1 and 
+
+Λht (m) := 
+
+
+
+− 11−m+ 1
+
+> N h t
+
+, 1 
+
+> m+1
+> N h t
+
+
+
+for any m ∈ [0 , 1] . Then, for any t ≥ 1 and m ∈ [0 , 1] , if λt(m) ∈ Λht (m),the testing-by-betting one-step factor Ebet  
+
+> t
+
+(m, λ t(m, q t), p ⋆, q t) := 1+ λt(m, q t) Φt(p⋆, q t)−m is a conditional e-value for Pm for each m ∈ [0 , 1] .
+
+5Then, assuming we already have a sampling rule, the next natural question is how to design the bet. Notably, the valid betting range depends explicitly on the querying distribution through the ht. Thus, the choice of the querying distribution and the efficiency of evidence growth are tightly coupled. In words, if the querying rule assigns very small probabilities to some questions, then ht becomes small, making the valid betting range shrink. This forces the bet to be conservative, which can substantially reduce the expected log-increment and slow down the growth of the wealth process (we provide a theoretical understanding of this argument in Theorem 5.2). Then, a general approach for determining the bet is: first choose the qt
+
+according to a rule. Then, given this qt, choose the bet that maximizes the expected log-increment of each candidate value, over the valid betting range. Although finding the optimal bet may still require a bisection procedure, the testing-by-betting construc-tion has a simpler structure than the RIPr-based e-value. This simpler form allows us to derive a tractable approximation for choosing a surrogate betting parameter under a given querying rule {qt}t≥1.We proceed to this alternative based on the quadratic lower bound log(1 + x) ≥ x − x2 for x ≥ − 1/2. For each m ∈ [0 , 1], we restrict the bet to the smaller range 12 Λht (m), obtained by multiplying both endpoints of Λ ht (m) by 1 /2. This restriction ensures that λt(m) Φt(p⋆, q t) − m ≥ − 12 for all possible observations. Therefore, instead of maximizing the bet on the exact expected log-increment, we maximize its quadratic lower bound 
+
+EQp⋆,q t
+
+λt(m)(Φ t(p⋆, q t) − m) − (λt(m)) 2(Φ t(p⋆, q t) − m)2 Ft−1
+
+ . (3) Since the quadratic lower bound is concave in λt(m), the optimized bet admits an explicit form for any fixed qt. We provide the details in Proposition B.1. Interestingly, in some cases, substituting this optimized bet back into (3) yields the sampling distribution qt(i) ∝ pp⋆i (1 − p⋆i ) for each i ∈ [N ] for maximizing the bound, which coincides with the variance-reduction sampling rule proposed by [2]. The above constructions of conditional e-values require the p⋆, which is unavailable in practice. In the next section, we replace the role of p⋆ with predictions of question-level correctness obtained from a Bayesian factor model used in [2] fitted using historical data. 
+
+# 5 Practical setting 
+
+5.1 Practical conditional e-values 
+
+We denote the question-level prediction at round t by ˆ pt := {ˆpt(1) , . . . , ˆpt(N )}, where ˆ pt(i) represents the predicted probability that the new model answers question i correctly. The prediction is initialized using the model and question embeddings fitted from historical correctness data. After each query t and obtaining (It, Z It ), we update ˆ pt using the online Laplace update by this drawn tuple, Ft. We omit the detailed update equations and refer the reader to [2]. Specifically, the ˆ pt(j) here is equivalent to the ˆ p(t) 
+
+> j
+
+in their paper. For establishing the practical conditional e-values, we simply replace p⋆ with ˆ pt−1 at each round t ≥ 1in the constructions of ERIPr  
+
+> t
+
+and Ebet  
+
+> t
+
+above. Since ˆ pt−1 is Ft−1-measurable, one can easily verify that this plug-in procedure preserves the validity in Proposition 4.1 and Proposition 4.2 (hence, other predictable predictions are also valid to be used). Moreover, we also apply this plug-in method in proposing the growth-oriented sampling in (1) by replacing p⋆ by ˆ pt−1 at each t ≥ 1 in computing the expectation and e-values. We omit the explicit expressions. However, this plug-in method introduces a mismatch between the prediction ˆ pt−1 and the true correctness vector p⋆ at each round t. In Section 5.2, we discuss how this mismatch can degrade the shrinkage behavior of the resulting CS and identify other key factors that affect this shrinkage. This analysis shows that the plug-in maxmin selection rule may not be the only consideration in practical querying-rule design. 
+
+5.2 Analysis of the shrinkage behavior of CSs 
+
+We apply Freedman’s inequality [23] to provide a time-uniform high-probability upper bound for an “approximated” width of the CS. In the following, the considered conditional e-value ERIPr  
+
+> t
+
+(·) and Ebet  
+
+> t
+
+(·)are the plug-in versions mentioned in Section 5.1. 6Theorem 5.1 ((Informal) Approximated width of RIPr approach) . For any t ≥ 1, suppose the log ERIPr  
+
+> t
+
+(·)
+
+is bounded and the querying rule satisfies qt(i) ≥ h for some h ∈ (0 , 1/N ] for any i ∈ [N ]. With probability at least 1 − δ, simultaneously for all t ≤ N ,
+
+|CRIPr  
+
+> t
+
+∩ M K | ∈ O
+
+s
+
+log(1 /α ) + σRIPr 
+
+> t
+
+plog( K log N/δ ) + Pts=1 D Qp⋆,q s ∥ Qˆps−1,q s
+
+
+
+tN h 
+
+ ,
+
+where MK is the set of K grids and σRIPr  
+
+> t
+
+:= 
+
+q
+
+sup m∈M K
+
+Pts=1 Var(log ERIPr  
+
+> s
+
+(·) | F t−1).
+
+The proof of Theorem 5.1 is proved in Appendix C.3. Similarly, for the testing-by-betting approach, we also have the following theorem, which is proved in Appendix C.4. 
+
+Theorem 5.2 ((Informal) Approximated width of testing-by-betting approach) . For any t ≥ 1, suppose the log Ebet  
+
+> t
+
+(·) is bounded, the querying rule satisfies qt(i) ≥ h for some h ∈ (0 , 1/N ] for any i ∈ [N ], and the bet λt(m) satisfies some oracle regularized conditions for all m ∈ M K . With probability at least 1 − δ,simultaneously for all t ≤ N ,
+
+|Cbet  
+
+> t
+
+∩ M K | ∈ O
+
+s
+
+log(1 /α ) + σbet 
+
+> t
+
+plog( K log N/δ )  2 + MSE t
+
+
+
+tN h 
+
+
+
+where σbet  
+
+> t
+
+:= 
+
+q
+
+sup m∈M K
+
+Pts=1 Var(log Ebet  
+
+> s
+
+(·) | F t−1), and MSE t := 1
+
+> t
+
+Pts=1 1
+
+> N
+
+PNi=1 (p⋆(i) − ˆps−1(i)) 2.
+
+We first observe that prediction mismatch is usually more pronounced for the RIPr-based CS than for the betting-based CS; see Appendix A.4 for an empirical verification. This difference comes from the structure of the two conditional e-values. In the RIPr-based CS, the plug-in prediction forms the likelihood-ratio-type log-increment, so an inaccurate prediction directly reduces the conditional expected log-increment and leads to an accumulated KL mismatch term. In contrast, in the betting-based CS, the plug-in prediction enters through an AIPW-type estimator Φ t(·) that remains conditionally unbiased for θ⋆. Hence, prediction error mainly affects the betting-based CS through the variance or second-moment term, rather than directly biasing the growth direction. This makes the betting-based CS relatively more robust to prediction mismatch. However, the betting-based CS is more sensitive to the lower bound h of the querying distribution. This is because if h is small, the valid betting range must be correspondingly restricted to keep the conditional betting-based e-value nonnegative; see Proposition 4.2. This dependence is reflected in Theorem 5.2 through the term tN h in the denominator. Even when the prediction error is small, a small value of h weakens the betting growth and leads to a wider CS width; see Section 6.1 for an empirical verification. By contrast, the RIPr-based bound also contains h, but this dependence mainly comes from a loose lower bound on the accumulated RIPr log-increment rather than from an explicit importance-weighted correction; see the analysis in Appendix C.3 and Lemma B.7. Therefore, in practice, there may not be a universally best approach, and the preferable choice can depend on the dataset and the quality of the prediction. For querying-rule design, one should pay attention to both the lower bound of the querying distribution and the mismatch behavior of the plug-in prediction. A natural approach is to use a mixture querying rule that balances growth-oriented sampling, prediction refinement, and a part of uniform sampling. We provide several querying rules in Section 6.2 and conclude this discussion with the following remarks. 
+
+Remark 5.3. These two theorems provide an initial theoretical understanding of how certain aspects of the sampling rule affect the CS width. However, they do not fully characterize the optimal design of the sampling rule. In particular, the bounds hold for any sampling rule satisfying qt(i) ≥ h for all i ∈ [N ], and therefore mainly capture the effect of the minimum sampling probability. They do not explicitly reflect finer properties of the sampling rule, such as the maxmin growth criterion discussed above or the detailed structure of the querying distribution. Moreover, these bounds do not fully control the accumulated variance term. Consequently, they can be suboptimal in order and are too coarse to provide a sharp comparison be-tween the RIPr-based and testing-by-betting-based methods. We therefore interpret them only as diagnostic 
+
+70.06 0.08 0.10 0.12 0.14     
+
+> epsilon
+> 100
+> 200
+> 300
+> 400
+> 500
+> Average stopping time
+> almost_all_correct
+> RIPr growth
+> Bet growth
+> Bet uniform
+> RIPr uniform
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 100
+> 200
+> 300
+> 400
+> 500
+> Average stopping time
+> normal_level
+> RIPr growth
+> Bet growth
+> Bet uniform
+> RIPr uniform
+
+Figure 1: Average stopping time versus the prescribed accuracy levels ϵ ∈ { 0.05 , 0.075 , 0.1, 0.125 , 0.15 }, with a total of N = 500 questions. Smaller values indicate higher sampling efficiency, and curves reaching 500 correspond to runs that did not attain the target width within the query budget. almost all correct 
+
+and normal level represent different settings of p⋆. Due to space limitations, the detailed setting of this experiment is provided in Appendix A.2. 
+
+bounds : they highlight how prediction mismatch and the lower bound on the querying probabilities qt(i)may influence the CS shrinkage. The actual comparison between the two methods is primarily supported by the experiments, where we observe qualitative trends consistent with these factors. We still work on making these bounds tighter. 
+
+# 6 Experiments 
+
+In this section, we first empirically examine the oracle setting for both the RIPr- and the betting-based CSs described in Section 4. To focus on the performance difference induced by their e-values, we consider only two querying rules in the oracle experiments: the growth-oriented sampling rule described in (1) and uniform sampling as a benchmark. We then move to the practical setting described in Section 5 to compare both methods, along with several sampling rules. Notably, for the betting-based CS, the implementation-light variant is not evaluated separately. It uses a smaller betting range than the original method, so its statistical performance is expected to be weaker; its main advantage is lower computational cost. Moreover, the anytime coverage is demonstrated in Appendix A.2 Appendix A.3, which are evaluated with respect to the realized benchmark accuracy induced by each sampled correctness vector. 
+
+6.1 Oracle RIPr-based CS vs. Oracle betting-based CS 
+
+We compare these two oracle approaches in terms of the stopping time, the first time that the CS width falls below a redefined accuracy ϵ, in two regimes of p⋆. The result is shown in Figure 1. These empirical results lead to the following observations. First, the testing-by-betting-based CS is highly sensitive to the lower bound of the querying distribution. The testing-by-betting-based CS with growth-oriented sampling (green) performs much worse than the same CS with uniform sampling (red). This supports the sensitivity discussed in Sections 4.2 and 5.2, even in the oracle setting where p⋆ is known. Second, both the RIPr-based CS with growth-oriented sampling (purple) and the RIPr-based CS with uniform sampling (yellow) outperform the corresponding testing-by-betting-based CSs in most cases. This is consistent with the oracle growth optimality of the RIPr construction discussed in Section 4.1. Third, uniform sampling is a surprisingly competitive baseline for both CS approaches. This behavior is similar to [18], where they consider a prediction-powered active inference with relatively passive sampling. In the following experiments on practical CSs, we also observe that uniform sampling remains competitive across different synthetic benchmark problem settings. 86.2 Practical RIPr-based CS vs. Practical Betting-based CS 
+
+In this experiment, we use the plug-in e-values described in Section 5.1. We compare the following selection rules with the two approaches: growth-oriented sampling, uniform sampling, a predesigned time-scheduled mixture, and a data-dependent mixture. The growth-oriented one and the uniform one follow the oracle experiments in Section 6.1, except that the oracle e-values are replaced by the practical plug-in e-values. The time-scheduled mixture takes the form 
+
+qt = (1 − ρt − βt)qgrow  
+
+> t
+
++ ρtqrefine  
+
+> t
+
++ βt1/N , where qgrow  
+
+> t
+
+is the growth-oriented rule in (1) but it is computed using the plug-in e-values, and qrefine  
+
+> t
+
+is the refinement rule of [2] for improving the prediction ˆ pt (qrefine 
+
+> t
+
+is equivalent to h(t) 
+
+> a
+
+in their Equation (3)). At a high-level, we choose ρt to decrease over time and βt to increase over time. The intuition is that early queries should focus more on refining the prediction, while later queries should place more weight on growth-oriented and uniform sampling. For the data-dependent mixture rule, instead of fixing the schedules of ρt and βt, we update them adaptively so that they are proportional to two data-dependent scores, sρ(t) and sβ (t), respectively. The score sρ(t) measures the uncertainty of the current prediction and controls the weight on prediction refinement. The score sβ (t) measures how much the question-level predictions have stabilized around similar values and controls the weight on the uniform sampling part. The intuition is that, once the predictions have been sufficiently refined and indicate that most questions have similarly high correctness probabilities, uniform sampling can already serve as an effective querying rule, as observed in the left panel of Figure 1. Otherwise, we continue to prioritize queries that reduce prediction uncertainty. The remaining probability mass is allocated to qgrow  
+
+> t
+
+.Then, to test our proposed methods under different capabilities of new LLM models, we present the empirical comparison of these approaches on different capability regimes in Figure 2 and Figure 3. The main messages from this empirical result are as follows. First, there is no universally best querying rule 
+
+across all regimes; the most effective policy depends on the structure of the testing dataset. Second, the 
+
+similarity between the new model and the historical models plays a key role in sampling efficiency. In regimes such as mean shift mismatch high accuracy , normal regime , and out of family model mismatch , the new model differs more substantially from the historical model family, making prediction refinement harder and slowing the CS shrinkage. Again, the testing-by-betting-based approach appears more robust to this mismatch than the RIPr-based approach. Third, the testing-by-betting-based CS with uniform sampling 
+
+achieves competitive performance across all regimes, suggesting that a simple querying rule combined with a computationally simpler CS construction may already be sufficient in practice. The details of this experiment are deferred to Appendix A.3. We end this section with the following remark. 
+
+Remark 6.1 (Time-uniform bound of [2]) . By slightly modifying the arguments in Section 5, one can also derive a time-uniform uncertainty bound for the estimator of [2]. However, the resulting bound is relatively loose in our setting and typically requires more queries to reach the same target accuracy ϵ than our proposed sequential methods in the experiments. For this reason, we do not include it as a main baseline. 
+
+# 7 Conclusion 
+
+We studied active querying for LLM evaluation with time-uniform uncertainty control. We constructed confidence sequences based on RIPr and testing-by-betting, and analyzed the shrinkage behavior of the resulting CSs. This analysis identified that prediction mismatch and the spikiness of the querying distribution affect the sampling efficiency, and motivated the querying rules considered in our experiments. Our empirical results suggest that there is no uniformly best querying rule across all testing datasets. Interestingly, we also observe that uniform sampling is a competitive baseline for both methods. Future work includes developing more effective querying rules, possibly using reinforcement learning. Moreover, it would be worthwhile to replace the Bayesian factor model with other prediction methods, such as the collaborative evaluation approach of [24]. 90.06 0.08 0.10 0.12 0.14                    
+
+> epsilon
+> 150
+> 200
+> 250
+> 300
+> 350
+> 400
+> 450
+> 500
+> Average stopping time
+> mean_shift_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 420
+> 430
+> 440
+> 450
+> 460
+> 470
+> 480
+> 490
+> 500
+> Average stopping time
+> mean_shift_mismatch_high_accuracy
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 480
+> 490
+> 500
+> 510
+> 520
+> Average stopping time
+> normal_regime
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 325
+> 350
+> 375
+> 400
+> 425
+> 450
+> 475
+> 500
+> Average stopping time
+> out_of_family_model_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 200
+> 250
+> 300
+> 350
+> 400
+> 450
+> 500
+> Average stopping time
+> train_like
+> Predefined time-scheduled mixture Data-dependent mixture Growth-oriented Uniform sampling
+
+Figure 2: Average stopping time versus ϵ for RIPr-based methods across five synthetic regimes: train like ,which is close to the training distribution; mean shift mismatch and mean shift mismatch high accuracy ,which have shifted overall accuracy levels; out of family model mismatch , which exhibits structural mis-match from the training family; and normal regime , which is a handcrafted heterogeneous setting with a substantially different average accuracy from the historical models. We compare four sampling rules. 
+
+# References 
+
+[1] Z. Guo, R. Jin, C. Liu, Y. Huang, D. Shi, Supryadi, L. Yu, Y. Liu, J. Li, B. Xiong, and D. Xiong, “Evaluating large language models: A comprehensive survey,” 2023. [Online]. Available: https://arxiv.org/abs/2310.19736 [2] S. Wu, Y. Nair, and E. J. Cand` es, “Efficient evaluation of llm performance with statistical guarantees,” 2026. [Online]. Available: https://arxiv.org/abs/2601.20251 [3] T. Zrnic and E. J. Cand` es, “Active statistical inference,” 2026. [Online]. Available: https: //arxiv.org/abs/2403.03208 [4] D. A. Darling and H. Robbins, “Confidence sequences for mean, variance, and median,” Proceedings of the National Academy of Sciences of the United States of America , vol. 58, no. 1, pp. 66–68, July 1967. [Online]. Available: https://doi.org/10.1073/pnas.58.1.66 [5] I. Waudby-Smith and A. Ramdas, “Estimating means of bounded random variables by betting,” 
+
+Journal of the Royal Statistical Society: Series B (Statistical Methodology) , vol. 86, no. 1, pp. 1–27, February 2024. [Online]. Available: https://doi.org/10.1093/jrsssb/qkad009 [6] S. R. Howard, A. Ramdas, J. McAuliffe, and J. Sekhon, “Time-uniform, nonparametric, nonasymptotic confidence sequences,” Annals of Statistics , vol. 49, no. 2, pp. 1055–1080, April 2021. [Online]. Available: https://doi.org/10.1214/20-AOS1991 [7] B. Chugg, H. Wang, and A. Ramdas, “Time-uniform confidence spheres for means of random vectors,” 2025. [Online]. Available: https://arxiv.org/abs/2311.08168 [8] S. Shekhar and A. Ramdas, “On the near-optimality of betting confidence sets for bounded means,” 2023. [Online]. Available: https://arxiv.org/abs/2310.01547 10 0.06 0.08 0.10 0.12 0.14                    
+
+> epsilon
+> 150
+> 200
+> 250
+> 300
+> 350
+> 400
+> 450
+> 500
+> Average stopping time
+> mean_shift_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 300
+> 350
+> 400
+> 450
+> 500
+> Average stopping time
+> mean_shift_mismatch_high_accuracy
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 420
+> 440
+> 460
+> 480
+> 500
+> Average stopping time
+> normal_regime
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 300
+> 350
+> 400
+> 450
+> 500
+> Average stopping time
+> out_of_family_model_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 150
+> 200
+> 250
+> 300
+> 350
+> 400
+> 450
+> 500
+> Average stopping time
+> train_like
+> Predefined time-scheduled mixture Data-dependent mixture Growth-oriented Uniform sampling
+
+Figure 3: Average stopping time versus ϵ for testing-by-betting-based methods across five synthetic regimes described in Figure 2. [9] P. Gr¨ unwald, R. de Heide, and W. Koolen, “Safe testing,” 2023. [Online]. Available: https://arxiv.org/abs/1906.07801 [10] A. Ramdas, P. Gr¨ unwald, V. Vovk, and G. Shafer, “Game-theoretic statistics and safe anytime-valid inference,” 2023. [Online]. Available: https://arxiv.org/abs/2210.01948 [11] R. Turner and P. Gr¨ unwald, “Exact anytime-valid confidence intervals for contingency tables and beyond,” 2022. [Online]. Available: https://arxiv.org/abs/2203.09785 [12] S. Shekhar, Z. Xu, Z. Lipton, P. Liang, and A. Ramdas, “Risk-limiting financial audits via weighted sampling without replacement,” in Proceedings of the Thirty-Ninth Conference on Uncertainty in Artificial Intelligence , ser. Proceedings of Machine Learning Research, R. J. Evans and I. Shpitser, Eds., vol. 216. PMLR, 31 Jul–04 Aug 2023, pp. 1932–1941. [Online]. Available: https://proceedings.mlr.press/v216/shekhar23a.html [13] D. W. Ham, I. Bojinov, M. Lindon, and M. Tingley, “Design-based confidence sequences: A general approach to risk mitigation in online experimentation,” 2023. [Online]. Available: https://arxiv.org/abs/2210.08639 [14] T. Cook, A. Mishler, and A. Ramdas, “Semiparametric efficient inference in adaptive experiments,” 2024. [Online]. Available: https://arxiv.org/abs/2311.18274 [15] I. Waudby-Smith, L. Wu, A. Ramdas, N. Karampatziakis, and P. Mineiro, “Anytime-valid off-policy inference for contextual bandits,” 2024. [Online]. Available: https://arxiv.org/abs/2210.10768 [16] E. Tolochinsky, Y. Tenzer, and Y. Romano, “Valid best-model identification for llm evaluation via low-rank factorization,” 2026. [Online]. Available: https://arxiv.org/abs/2605.10405 [17] A. N. Angelopoulos, S. Bates, C. Fannjiang, M. I. Jordan, and T. Zrnic, “Prediction-powered inference,” 2023. [Online]. Available: https://arxiv.org/abs/2301.09633 [18] M.-E. Sfyraki and J.-K. Wang, “Revisiting active sequential prediction-powered mean estimation,” 2026. [Online]. Available: https://arxiv.org/abs/2604.18569 11 [19] J. L. Kelly, “A new interpretation of information rate,” the bell system technical journal , vol. 35, no. 4, pp. 917–926, 1956. [Online]. Available: https://www.princeton.edu/ ∼wbialek/rome/refs/kelly 56.pdf [20] L. Breiman, “Optimal gambling systems for favorable games,” Kelly Capital Growth Investment Criterion, The: Theory And Practice , vol. 3, p. 47, 2011. [Online]. Available: https: //projecteuclid.org/proceedings/berkeley-symposium-on-mathematical-statistics-and-probability/ Proceedings-of-the-Fourth-Berkeley-Symposium-on-Mathematical-Statistics-and/Chapter/ Optimal-Gambling-Systems-for-Favorable-Games/bsmsp/1200512159 [21] A. Ramdas and R. Wang, “Hypothesis testing with e-values,” Foundations and Trends ® in Statistics ,vol. 1, no. 1-2, p. 1–390, 2025. [Online]. Available: http://dx.doi.org/10.1561/3600000002 [22] M. Larsson, A. Ramdas, and J. Ruf, “The numeraire e-variable and reverse information projection,” 2025. [Online]. Available: https://arxiv.org/abs/2402.18810 [23] D. A. Freedman, “On tail probabilities for martingales,” the Annals of Probability , pp. 100–118, 1975. [24] A. Fisch, D. Deutsch, J. Maynez, A. Agarwal, J. Berant, W. Cohen, A. Globerson, and J. Eisenstein, “Collabeval: Statistically efficient collaborative model evaluation via matrix completion,” 2026. [Online]. Available: https://arxiv.org/abs/2607.05046 12 A Experiment details and supplemental results 
+
+A.1 A heuristic algorithm of the CS 
+
+We present a heuristic version of the general algorithm described in Section 3. This algorithm serves as a unified template: it can be instantiated with either the RIPr-based or the testing-by-betting-based approach by plugging in the corresponding conditional e-values and querying rules. 
+
+Algorithm 1: A general construction of the confidence sequence  
+
+> 1:
+
+Input: Question bank [ N ], historical data H, confidence level α, stopping criterion T , grid MK ⊂
+
+[0 , 1] with K grid points.  
+
+> 2:
+
+Output: A stopped confidence sequence or the full sequence {Ct}Nt=0 . 
+
+> 3:
+
+Initialize W0(m) ← 1 for all m ∈ M K , C0 ← M K , and the reference information r1 from H. 
+
+> 4:
+
+for t = 1 , 2, . . . , N do  
+
+> 5:
+
+Update the predictable sampling distribution 
+
+qt ← UpdateQueryPmf  H, r t, C t−1, {Is, Z Is }t−1
+
+> s=1
+
+ . 
+
+> 6:
+
+Sample It ∼ qt and observe ZIt ∈ { 0, 1}. 
+
+> 7:
+
+for each m ∈ M K do  
+
+> 8:
+
+Construct the one-step conditional e-value 
+
+Et(m) ← UpdateEvalue  m, H, r t, q t, {Is, Z Is }ts=1 
+
+ . 
+
+> 9:
+
+Update the e-process Wt(m) ← Wt−1(m)Et(m).  
+
+> 10:
+
+end for  
+
+> 11:
+
+Update the grid-based heuristic set m ∈ M K : Wt(m) < 1 
+
+> α
+
+and let Ct = [ Lt, U t], where Ut := sup m ∈ M K : Wt(m) < 1 
+
+> α
+
+and Lt := inf m ∈ M K : Wt(m) < 1 
+
+> α
+
+. 
+
+> 12:
+
+if T (t, C t) = 1 then  
+
+> 13:
+
+return t and Ct 
+
+> 14:
+
+end if  
+
+> 15:
+
+Update the side information rt+1 ← UpdateReferenceInfo (H, {Is, Z Is }ts=1 ).  
+
+> 16:
+
+end for  
+
+> 17:
+
+return {Ct}Nt=0 .The reference information {rt}t≥1 is specified differently in the oracle and practical settings. In the oracle setting, we set rt = p⋆ for all t ≥ 1. In the practical setting, we set rt = ˆ pt−1, where ˆ pt−1 is Ft−1-measurable and updated over time using the Bayesian factor model and the Laplace update proposed in [2]. The construction of the CS is a heuristic method. It is easy to implement this method, but we emphasize that it is not in general a valid level-α CS. Under this unified formulation, the RIPr-based and testing-by-betting-based approaches differ only in the two subroutines UpdateQueryPmf and UpdateEvalue , which specify how the querying distribution and the conditional e-value are updated. 
+
+A.2 Oracle RIPr-based CS vs. Oracle Betting-based CS 
+
+We provide the implementation details of the simulation setting, CSs, and querying rules for the RIPr-based and testing-by-betting-based approaches used in Section 6.1. 
+
+Simulation setting. In this experiment, we first specify the new model’s latent question-level correctness probabilities p⋆ = ( p⋆
+
+> 1
+
+, . . . , p ⋆N ). This vector is used to generate realized benchmark outcomes and, in the oracle setting, is also assumed to be available as the reference vector for constructing the oracle e-values and querying rules. To mimic a realistic benchmark evaluation, for each b ∈ [B], we generate an independent binary correctness vector 
+
+A(b) = ( A(b)1 , . . . , A (b) 
+
+> N
+
+), A(b) 
+
+> i
+
+∼ Ber( p⋆i )13 independently across questions. Conditional on this realized benchmark vector, the target parameter is the realized benchmark accuracy 
+
+θ(b) 
+
+> A
+
+= 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+A(b) 
+
+> i
+
+.
+
+This fixed-benchmark interpretation does not invalidate the CS guarantees in Proposition 4.1 and Proposi-tion 4.2. Indeed, conditional on A(b), the observation distribution under a predictable querying rule qt is the degenerate Bernoulli model with parameter vector A(b) ∈ { 0, 1}N . Since our conditional e-value property holds uniformly over all p ∈ P m, it also holds for the boundary vector p = A(b). Therefore, when m = θ(b) 
+
+> A
+
+,the wealth process remains a test supermartingale under the randomness of the adaptive querying procedure, and the resulting CS is valid for the realized target θ(b) 
+
+> A
+
+.We compare the RIPr-based CS and the testing-by-betting-based CS in terms of the average number of questions required for the CS width to fall below a prescribed threshold ϵ. The first time that the width falls below ϵ is called the stopping time . Equivalently, the stopping criterion satisfies T (t, C t) = 1 if |Ct| ≤ ϵ,and the corresponding t is the stopping time. We consider the set of ϵ values described in Figure 1. For each ϵ and each realized correctness vector A(b), we run the sequential querying procedure R times with independent querying randomness. We set B = 5 and R = 10, and report the average stopping time over all 
+
+B × R runs for each value of ϵ. Moreover, we uniformly discretize the domain [0 , 1] into a finite grid MK
+
+with K = 200 points and set the anytime-valid error level to α = 0 .05. We consider two regimes of capabilities (the p⋆) and N = 500. In the almost all correct regime, 0 .9N
+
+questions have correctness probabilities drawn in [0 .985 , 0.999], while the remaining 0 .1N questions have correctness probabilities drawn in [0 .9, 0.97]. In the normal level regime, 0 .05 N questions have correctness probabilities drawn in [0 .15 , 0.35], 0 .2N questions have correctness probabilities drawn in [0 .7, 0.8], and the remaining 0 .75 N questions have correctness probabilities drawn in [0 .985 , 0.995]. 
+
+RIPr-based approach. We introduce the pseudo-code of the functions UpdateQueryPmf and UpdateEvalue 
+
+for the RIPr-based approach. 14 Subroutine 1: RIPr-UpdateQueryPmf  
+
+> 1:
+
+Input: Reference vector rt = p⋆, current CS Ct−1, smoothing weight ζ, number of EG iterations 
+
+REG = 25.  
+
+> 2:
+
+Output: Querying distribution qt. 
+
+> 3:
+
+if ζ = 1 then  
+
+> 4:
+
+return qt ← 1/N . 
+
+> 5:
+
+end if  
+
+> 6:
+
+Set Lt−1 ← inf Ct−1 and Ut−1 ← sup Ct−1. 
+
+> 7:
+
+Initialize q(1) ← 1/N and qbest ← q(1) . 
+
+> 8:
+
+Define the growth objective 
+
+Jt(q) := min  
+
+> m∈{ Lt−1,U t−1}
+
+Gt
+
+ q, E RIPr  
+
+> t
+
+(m, r t, q ), r t
+
+. 
+
+> 9:
+
+for i = 1 , 2, . . . , R EG do  
+
+> 10:
+
+Compute a subgradient g(i) of Jt(q) at q = q(i). 
+
+> 11:
+
+Set the EG learning rate ηi ← 1/(2 √i).  
+
+> 12:
+
+Apply the exponentiated-gradient update: 
+
+eq(i+1)  
+
+> j
+
+← q(i) 
+
+> j
+
+exp( ηig(i)j), j ∈ [N ]. 
+
+> 13:
+
+Normalize: 
+
+q(i+1) ← eq(i+1) 
+
+PNj=1 eq(i+1) 
+
+> j
+
+. 
+
+> 14:
+
+if Jt(q(i+1) ) > J t(qbest ) then  
+
+> 15:
+
+Set qbest ← q(i+1) . 
+
+> 16:
+
+end if  
+
+> 17:
+
+end for  
+
+> 18:
+
+return the smoothed querying distribution qt ← (1 − ζ)qbest + ζ 1 
+
+> N
+
+.We utilize the exponentiated-gradient (EG) updates for approximating the maximizer of Jt(q). Moreover, we return the smoothed version to satisfy the requirement in Proposition 4.1 for a valid conditional e-value. 15 Subroutine 2: RIPr-UpdateEvalue  
+
+> 1:
+
+Input: Candidate m ∈ M K , reference vector rt = p⋆, querying distribution qt, queried question 
+
+It, observed outcome ZIt . 
+
+> 2:
+
+Output: Conditional e-value ERIPr  
+
+> t
+
+(m, q t).  
+
+> 3:
+
+Compute the RIPr point p† 
+
+> qt
+
+(m) associated with the null candidate m, querying distribution qt,and reference vector rt. 
+
+> 4:
+
+To compute p† 
+
+> qt
+
+(m; rt), solve for the Lagrange multiplier λ⋆(m) in Proposition B.2. Initialize λlo =
+
+−1 and λhi = 1. We do the bracket extension followed by the bisection as follows.  
+
+> 5:
+
+for j = 1 , 2, . . . , 24 do  
+
+> 6:
+
+if H(λlo ) < m then  
+
+> 7:
+
+Set λlo ← 2λlo . 
+
+> 8:
+
+end if  
+
+> 9:
+
+if H(λhi ) > m then  
+
+> 10:
+
+Set λhi ← 2λhi . 
+
+> 11:
+
+end if  
+
+> 12:
+
+if H(λlo ) ≥ m ≥ H(λhi ) then  
+
+> 13:
+
+Break.  
+
+> 14:
+
+end if  
+
+> 15:
+
+end for  
+
+> 16:
+
+for j = 1 , 2, . . . , 28 do  
+
+> 17:
+
+Set λmid ← (λlo + λhi )/2.  
+
+> 18:
+
+if H(λmid ) > m then  
+
+> 19:
+
+Set λlo ← λmid . 
+
+> 20:
+
+else  
+
+> 21:
+
+Set λhi ← λmid . 
+
+> 22:
+
+end if  
+
+> 23:
+
+end for  
+
+> 24:
+
+Set λ⋆(m) ← (λlo + λhi )/2 and construct p† 
+
+> qt
+
+(m; rt) according to Proposition B.2.  
+
+> 25:
+
+return ERIPr  
+
+> t
+
+(m, q t) = (rt(It)) ZIt (1 −rt(It)) 1−ZIt      
+
+> (p†
+> qt(m;rt)It)ZIt(1 −p†
+> qt(m;rt)It)1−ZIt
+
+.
+
+Testing-by-betting-based approach. We introduce the pseudo-code of the functions UpdateQueryPmf 
+
+and UpdateEvalue for the testing-by-betting-based approach. 16 Subroutine 1: Betting-UpdateQueryPmf  
+
+> 1:
+
+Input: Reference vector rt = p⋆, current CS Ct−1, smoothing weight ζ, number of EG iterations 
+
+REG , number of bisection iterations Bbet . We set Bbet = 40 and REG = 25.  
+
+> 2:
+
+Output: Querying distribution qt. 
+
+> 3:
+
+if ζ = 1 then  
+
+> 4:
+
+return qt ← 1/N . 
+
+> 5:
+
+end if  
+
+> 6:
+
+Set Lt−1 ← inf Ct−1 and Ut−1 ← sup Ct−1. 
+
+> 7:
+
+Use the known lower bound h = ζ/N guaranteed by the smoothing step.  
+
+> 8:
+
+Define the smoothing operator Mix ζ (q) := (1 − ζ)q + ζ 1
+
+N . 
+
+> 9:
+
+Initialize 
+
+q(1) ← 1/N qbest ← q(1) . 
+
+> 10:
+
+Define the growth objective 
+
+Jt(q) := min  
+
+> m∈{ Lt−1,U t−1}
+
+Gt
+
+ q, E bet  
+
+> t
+
+(m, λ ⋆t (m, q ), r t, q ), r t)where 
+
+λ⋆t (m, q ) ∈ arg max  
+
+> λ∈Λh(m)
+
+Gt
+
+ q, E bet  
+
+> t
+
+(m, λ, r t, q ), r t
+
+. 
+
+> 11:
+
+for i = 1 , 2, . . . , R EG do  
+
+> 12:
+
+for each endpoint m ∈ { Lt−1, U t−1} do  
+
+> 13:
+
+Compute 
+
+λ⋆t (m, q (i)) ∈ arg max  
+
+> λ∈Λh(m)
+
+Gt
+
+ q(i), E bet  
+
+> t
+
+(m, λ, r t, q (i)), r t
+
+
+
+by bisection over Λ h(m) for Bbet iterations, with projection onto the endpoints of Λ h(m) when the maximizer is attained at the boundary.  
+
+> 14:
+
+end for  
+
+> 15:
+
+Evaluate Jt(q(i)) and compute a subgradient g(i) at q = q(i). 
+
+> 16:
+
+if Jt(q(i)) > J t(qbest ) then  
+
+> 17:
+
+Set qbest ← q(i). 
+
+> 18:
+
+end if  
+
+> 19:
+
+Set the EG learning rate ηi ← 0.5/√i. 
+
+> 20:
+
+Apply the exponentiated-gradient update: 
+
+eq(i+1)  
+
+> j
+
+← q(i) 
+
+> j
+
+exp  ηig(i)
+
+> j
+
+, j ∈ [N ]. 
+
+> 21:
+
+Normalize: ˆq(i+1) ← eq(i+1) 
+
+PNj=1 eq(i+1) 
+
+> j
+
+. 
+
+> 22:
+
+Smooth: 
+
+q(i+1) ← Mix ζ
+
+ ˆq(i+1) . 
+
+> 23:
+
+end for  
+
+> 24:
+
+if Jt(q(REG +1) ) > J t(qbest ) then  
+
+> 25:
+
+Set qbest ← q(REG +1) . 
+
+> 26:
+
+end if  
+
+> 27:
+
+return qt ← qbest .We also use EG to approximate the maximizer of Jt(q) for the betting-based method. The smoothing step at the end of each EG iteration helps prevent the optimized bet λ⋆t (·) from becoming zero after the EG update. For computing the λ⋆t (·), since the objective is one-dimensional and concave in λ, we compute λ⋆t (·)by applying bisection to the first-order condition for Bbet iterations, with projection onto the endpoints of 17 Λh(m) when the maximizer is attained at the boundary. 
+
+Subroutine 2: Betting-UpdateEvalue  
+
+> 1:
+
+Input: Candidate m ∈ M K , reference vector rt = p⋆, querying distribution qt, queried question 
+
+It, observed outcome ZIt , number of bisection iterations Bbet = 40.  
+
+> 2:
+
+Output: Conditional e-value Ebet  
+
+> t
+
+(m, q t; rt).  
+
+> 3:
+
+Use the known lower bound h = ζ/N guaranteed by the smoothing step.  
+
+> 4:
+
+Compute the optimal betting parameter 
+
+λ⋆t (m, q t) ∈ arg max  
+
+> λ∈Λh(m)
+
+Gt
+
+ qt, E bet  
+
+> t
+
+(m, λ, r t, q t), m .
+
+following the bisection method stated in the Betting-UpdateQueryPmf . 
+
+> 5:
+
+return Ebet  
+
+> t
+
+(m, λ ⋆t (m, q t), r t, q t) = 1 + λ⋆t (m, q t) Φt(rt, q t) − m, where Φ t(rt, q t) := 1
+
+> N
+
+PNi=1 rt(i) +   
+
+> ZIt−rt(It)
+> N q t(It)
+
+.Finally, Figure 4 reports the empirical coverage results, which are consistent with the nominal level 1 − α = 0 .95, up to Monte Carlo variability due to the limited number of repetitions. Figure 5 shows the corresponding CS width over time. 
+
+A.3 Practical RIPr-based CS vs. Practical betting-based CS 
+
+Simulation setting. This experiment follows the same setup as Appendix A.2, except that the ground-truth answer sets are generated under five different capability regimes, the grid size is set to K = 400, and we use R = 2 querying runs for each of B = 8 independent ground-truth realizations. We next describe how these five capability regimes are constructed. For the training data, we apply the MMLU-PRO used in [2]. We start from the factor model fitted on the historical data. Following the factorization method in [2], the fitted factor model provides a matrix of historical model embeddings and a matrix of question embeddings, which together define a low-rank latent representation of question-level correctness probabil-ities. At a high level, the train like regime represents a new model whose question-level behavior is broadly similar to the historical models. The mean shift mismatch regime represents a model whose over-all capability level is shifted downward while its question-level pattern remains broadly training-like. The 
+
+mean shift mismatch high accuracy regime represents a model with substantially higher overall accuracy but still a largely training-like question pattern. The out of family model mismatch regime represents a model whose overall mean accuracy is not necessarily very different, but whose pattern of easy and hard questions is intentionally less similar to the historical model family. Finally, the normal regime is a hand-crafted heterogeneous benchmark consisting of a large easy subset, a moderate intermediate subset, and a small difficult subset. The details of generating these regimes are as follows: Let {u1, . . . , u M } ⊂ Rd denote the historical model embeddings and let {v1, . . . , v N } ⊂ Rd denote the question embeddings learned from the historical data by [2, Appendix A.1], after restricting attention to the N = 500 questions used in the experiment. Let 
+
+μU := 1
+
+M
+
+> M
+
+X
+
+> m=1
+
+um, ΣU := Cov( u1, . . . , u M )be the empirical mean and covariance of the historical model embeddings. For each factor-model-based regime r, we generate a candidate pool of synthetic question-level probability vectors as follows. First, for each candidate index c ∈ [Mpool ], we sample 
+
+eu(c) 
+
+> r
+
+∼ N (μU , ΣU ), u(c) 
+
+> r
+
+:= μU + ar
+
+ eu(c) 
+
+> r
+
+− μU
+
+,
+
+where ar > 0 is a regime-specific latent scaling parameter. We then form question-level logits 
+
+ℓ(c) 
+
+> r,j
+
+= br ⟨u(c) 
+
+> r
+
+, v j ⟩ + γr + ξ(c) 
+
+> r,j
+
+, j ∈ [N ],
+
+18 0.06 0.08 0.10 0.12 0.14 
+
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+
+almost_all_correct     
+
+> RIPr growth
+> Bet growth
+> Bet uniform
+> RIPr uniform
+> reference=0.95
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+
+normal_level 
+
+> RIPr growth
+> Bet growth
+> Bet uniform
+> RIPr uniform
+> reference=0.95
+
+Figure 4: Oracle setting: anytime coverage rate for each target accuracy ϵ. For each value of ϵ, we check whether θ(b)
+
+A ∈ Ct for each b ∈ [B] holds over all query rounds until reaching the stopping criterion for each 
+
+ϵ value ( |Ct| ≤ ϵ). The reported value is the rate of 1{∀ t ≤ τϵ, θ (b)
+
+A ∈ [Lt, U t]} = 1, where τϵ := inf {t ≥ 1 : 
+
+Ut − Lt ≤ ϵ}, over R × B repetitions. The dashed line indicates the nominal coverage level 1 − α = 0 .95. Empirical coverage above this line is consistent with the level-α guarantee. The curves overlap in this figure. 0 100 200 300 400 500      
+
+> time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Average CS width
+> almost_all_correct
+> RIPr growth
+> Bet growth
+> Bet uniform
+> RIPr uniform
+> 0100 200 300 400 500
+> time
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Average CS width
+> normal_level
+> RIPr growth
+> Bet growth
+> Bet uniform
+> RIPr uniform
+
+Figure 5: Average CS width over time. It is obtained in the same experiments conducted in Figure 1. where br > 0 is a regime-specific logit scaling parameter, γr is a global shift chosen to control the overall mean accuracy level, and ξ(c)
+
+r,j is a regime-specific perturbation term. The resulting question-level correctness probabilities are 
+
+p(c)
+
+r,j = σ ℓ(c)
+
+r,j 
+
+, σ(x) = 11 + e−x .
+
+Repeating this procedure yields a candidate pool {p(c)
+
+r }Mpool 
+
+c=1 ⊂ (0 , 1) N . We then choose one representative candidate from this pool as the regime-specific ground-truth vector p⋆r , using a regime-dependent score that favors either similarity to or mismatch from the historical model family. To describe these regime-dependent selection rules, let R denote a reference subset of historical probability rows, let ¯p(p) := 1
+
+N
+
+NX
+
+j=1 
+
+pj
+
+be the average correctness probability of a candidate vector p ∈ [0 , 1] N , and let 
+
+dRMSE (p, R) := min 
+
+q∈R 
+
+ 1
+
+N ∥p − q∥22
+
+1/2
+
+19 Table 1: Parameter settings for the synthetic capability regimes.                         
+
+> Regime arbrTarget mean Selection preference
+> train like 1.01.0¯phist small RMSE, high corr
+> mean shift mismatch 1.01.0lower target small RMSE, high corr
+> mean shift mismatch high accuracy 1.01.00.97 small RMSE, high corr
+> out of family model mismatch 1.81.0training-like large RMSE, low corr
+> normal regime ––handcrafted –
+
+Table 2: Average question-level correctness probability 1
+
+> N
+
+PNi=1 p⋆i for each synthetic regime constructed from mmlu-pro when N = 500. The historical training-table average is 0 .2598. Regime Row mean 
+
+train like 0.2540 
+
+mean shift mismatch 0.1619 
+
+mean shift mismatch high accuracy 0.9443 
+
+out of family model mismatch 0.4192 
+
+normal regime 0.8300 denote the nearest root-mean-square deviation from the historical reference set. We also define 
+
+ρmax (p, R) := max  
+
+> q∈R
+
+Corr( p, q ), pen corr (p, R) := 1 − ρmax (p, R),
+
+so that a larger correlation penalty indicates a less training-like question pattern. The train like regime se-lects a candidate with mean accuracy and question-level structure close to the historical family; mean shift mismatch 
+
+and mean shift mismatch high accuracy select candidates whose question-level structure remains broadly training-like but whose overall mean accuracy is shifted downward or upward, respectively; and out of family model mismatc 
+
+selects a candidate whose question-level structure is intentionally less similar to the historical family. More concretely, the train like regime uses ( ar , b r ) = (1 , 1) together with only mild residual perturba-tions and chooses a candidate with small |¯p(p)− ¯phist |, small dRMSE (p, R), and small pen corr (p, R), where ¯ phist 
+
+denotes the average correctness level of the historical reference family. The mean shift mismatch regime uses the same latent geometry but chooses γr so that ¯ p(p) is close to a lower target mean while still fa-voring structural similarity to R. The mean shift mismatch high accuracy regime is defined analogously, except that the target mean is set to a substantially larger value (in our implementation, close to 0 .97). The out of family model mismatch regime increases the latent scaling parameter ar and then selects a candidate with larger dRMSE (p, R) and larger pen corr (p, R), thereby inducing a different pattern of easy and hard questions while keeping the overall accuracy level similar. The normal regime is constructed separately rather than selected from the factor-model candidate pool. In this case, the ground-truth vector p⋆ is formed directly by assigning p⋆j ∈ { 0.9, 0.7, 0.1} to the questions so that 80% of the coordinates equal 0 .9, 15% equal 0 .7, and the remaining 5% equal 0 .1, followed by a random permutation of the question order. This yields a heterogeneous benchmark with a large easy subset, a moderate intermediate subset, and a small difficult subset. The full implementation and parameter setting are provided in the accompanying GitHub code, select regime models.py .A brief summary of each regime used in our experiments is in Table 1. Table 2 reports the average question-level correctness probability for each synthetic regime. The regimes train like and mean shift mismatch 
+
+are structurally similar to the historical data, whereas the other three regimes exhibit larger discrepancies from the historical model family. Therefore, the prediction mismatch is larger in these three regimes, leading to worse performance on sampling efficiency. 
+
+Sampling rules. The pseudo-code of the sampling rules for the predefined time-scheduled mixture and the data-dependent mixture is summarized below. 20 Subroutine: UpdateQueryPmf  
+
+> 1:
+
+Input: Current time t, previous prediction vector ˆ pt−1 ∈ [0 , 1] N , refinement scores {dt,j }Nj=1 ,mixture mode mode ∈ { scheduled , data }, mixture hyperparameters ρinit , scheduled parameter a,
+
+l, and m0. βtarget . 
+
+> 2:
+
+Output: Querying distribution qt. 
+
+> 3:
+
+Construct the refinement-oriented distribution by 
+
+qrefine  
+
+> t
+
+(j) ← Norm( {dt,j }Nj=1 )( j), j ∈ [N ]. 
+
+> 4:
+
+Obtain qgrow  
+
+> t
+
+by applying RIPr-UpdateQueryPmf or Betting-UpdateQueryPmf with ζ = 0 .05 and reference vector rt = ˆ pt−1. 
+
+> 5:
+
+if mode = scheduled then  
+
+> 6:
+
+Set xt ← t/N . 
+
+> 7:
+
+Set 
+
+ρt ← ρinit (1 − xt)a, βt ← βtarget NormLogistic( xt; l, m 0), wgrow  
+
+> t
+
+← 1 − ρt − βt. 
+
+> 8:
+
+else if mode = data then  
+
+> 9:
+
+Compute the refinement score 
+
+sρ(t) ← RefineSignal  {dt,j }Nj=1 
+
+. 
+
+> 10:
+
+Compute the uniform-preference score 
+
+sβ (t) ← UniformPreference(ˆ pt−1). 
+
+> 11:
+
+Set 
+
+ρt ← ρinit sρ(t)(1 − sβ (t)) , βt ← min {βtarget , 1 − ρt}sβ (t), wgrow  
+
+> t
+
+← 1 − ρt − βt. 
+
+> 12:
+
+end if  
+
+> 13:
+
+Form the final querying distribution 
+
+qt ← wgrow  
+
+> t
+
+qgrow  
+
+> t
+
++ ρtqrefine  
+
+> t
+
++ βt
+
+1
+
+N . 
+
+> 14:
+
+Normalize for numerical stability: 
+
+qt ← qt
+
+PNj=1 qt(j) . 
+
+> 15:
+
+return qt.The refinement scores dt,j are equivalent to d(t)(j) in [2, Appendix A.2.3] for maximal posterior-variance-reducing. The norm logistic function is defined as NormLogistic( xt; l, m 0) = σ
+
+ l(xt−m0)
+
+−σ(−lm 0)
+
+> σ
+
+ l(1 −m0)
+
+−σ(−lm 0) , where 
+
+σ(u) = 1 /(1 + e−u). It is a smooth increasing function of the normalized time xt = t/N , equal to 0 at the beginning ( t = 0) and 1 at the end of the horizon ( t = N ), with l controlling the steepness and m0
+
+controlling the midpoint of the transition. Moreover, in the scheduled mode, the parameter a additionally controls the decay rate of ρt, ρinit sets its initial scale, and βtarget controls the maximum target value of βt.In the experiments for Figure 2 and Figure 3, we set ρinit = 0 .75 , a = 1 .5, β target = 0 .7, l = 10, and m0 = 0 .7. We set βtarget < 1 because we expect the growth-oriented component to remain useful, although its benefit in this mixture design has not been theoretically analyzed and understood well. However, it is a natural surrogate for shrinking the CS width. The function RefineSignal( ·) measures both the magnitude and the breadth of the refinement scores 
+
+{dt,j }Nj=1 , and returns the product of the two. The magnitude term captures how much larger the average top-k refinement score is than the median score. A large magnitude indicates that some questions may be particularly useful for refining the prediction. However, this can also happen when only a small number of questions have very large scores. To avoid overemphasizing such highly concentrated cases, we introduce a 21 breadth term based on the effective sample size of qrefine  
+
+> t
+
+: ESS t := 1PNj=1 (qrefine   
+
+> t(j)) 2
+
+. For example, if qrefine  
+
+> t
+
+is uniform over n questions, then ESS t = n. Thus, a larger ESS indicates that the refinement distribution is spread over more questions, while a smaller ESS indicates stronger concentration. Overall, RefineSignal( ·)becomes large only when the refinement scores have both a strong top-tail signal and sufficient breadth, suggesting that many questions are worth querying to improve the prediction. The function UniformPreference( ·) measures how concentrated the entries of ˆ pt−1 are around a common level. We first compute the median of ˆ pt−1 and then calculate the fraction of coordinates that lie within a predefined tolerance δ:1
+
+N
+
+> N
+
+X
+
+> j=1
+
+1  ˆpt−1(j) − median  {ˆpt−1(ℓ)}Nℓ=1 
+
+ ≤ δ .
+
+This fraction is then normalized to obtain a score representing how similar the predicted question-level correctness probabilities are. A larger value indicates that the predictions are more homogeneous, in which case uniform sampling becomes more favorable. The implementations of RefineSignal( ·) and UniformPreference( ·) involve more predefined hyperparam-eters. We refer interested readers to the accompanying code, mixture state dependent ripr cs final.py 
+
+and mixture state dependent bet cs final.py , for the full implementation details. 
+
+Practical e-value The practical conditional e-values for the RIPr-based and testing-by-betting-based ap-proaches are updated using the subroutines RIPr-UpdateEvalue and Betting-UpdateEvalue , respectively, as described in Appendix A.2, with the reference vector set to rt = ˆ pt−1, i.e., all the computations involving 
+
+p⋆ are replaced by ˆ pt−1 at each round t.Finally, we report the empirical coverage results in Figures 6 and 7 to verify that the level-α guarantee is maintained. In both experiments, we set α = 0 .05. We observe that most cases satisfy the target coverage level. A few cases fall slightly below the level, which we attribute to the Monte-Carlo error. 
+
+Remark A.1. The proposed mixture querying rules are not unique, and other designs may perform better in certain capability regimes. Our goal is to provide two initial examples that show how growth, refinement, and uniform exploration can be combined, guided by the factors identified in our CS shrinkage analysis, thereby motivating future querying-rule designs. 
+
+A.4 Effect of the mismatch 
+
+In this experiment, we isolate the effect of prediction mismatch and compare its impact on the RIPr-based and testing-by-betting-based CSs. To control the mismatch, we use the same synthetic datasets as in Section 6.1, and, instead of using the Bayesian factor model from [2], we construct a noisy version of p⋆ as the plug-in prediction. Specifically, for each noise level σ, we set ˆp(σ) 
+
+> t
+
+(i) = clip 
+
+
+
+p⋆i + ξ(σ) 
+
+> i
+
+, ϵ, 1 − ϵ
+
+
+
+, ξ(σ) 
+
+> i
+
+∼ N (0 , σ 2), i ∈ [N ], t ≥ 1.
+
+Therefore, we set the reference vector rt = ˆ p(σ) 
+
+> t
+
+in Algorithm 1. Here, the noise variables {ξ(σ) 
+
+> i
+
+}Ni=1 are sampled once and then kept fixed over time to simplify the experiment. All other experimental settings are the same as those in Section 6.1. We repeat the experiment for σ ∈ { 0, 0.1, 0.2, 0.3}. For each value of σ, we plot the average CS width over time, where the average is taken over all B × R independent runs. For the RIPr-based plug-in CS, the figure is shown in Figure 8. We scale the theoretical curve by finding a calibration constant to match the practical curve. In words, we find a constant c for each theoretical curve such that c = arg min c≥0
+
+PNt=1 (avg width t − c ∗ raw bound t )2.For the betting-based plug-in CS, we observe a similar phenomenon. The difference is that, in this experiment, we set qt = 0 .4qmethod  
+
+> t
+
++ 0 .6/N . This is because, when the lower bound of qt is too small, i.e., when h is too small, the valid betting range becomes narrow. As a result, the wealth process grows slowly, making it difficult to choose a constant that properly scales the theoretical bound to get an easily readable figure. The corresponding experimental results are shown in Figure 9. Then, we observe that, as σ increases, the CS width deviates more substantially for the RIPr-based approach than for the testing-by-betting-based approach. 22 0.06 0.08 0.10 0.12 0.14                    
+
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> mean_shift_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> mean_shift_mismatch_high_accuracy
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> normal_regime
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> out_of_family_model_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> train_like
+> Predefined time-scheduled mixture Data-dependent mixture Growth-oriented Uniform sampling
+
+Figure 6: Practical setting: anytime coverage rate for each target accuracy ϵ for RIPr-based methods. For each value of ϵ, we check whether θ(b)
+
+A ∈ Ct for each b ∈ [B] holds over all query rounds until reaching the stopping criterion for each ϵ value ( |Ct| ≤ ϵ). The reported value is the rate of 1{∀ t ≤ τϵ, θ (b)
+
+A ∈ [Lt, U t]} = 1, where τϵ := inf {t ≥ 1 : Ut − Lt ≤ ϵ}, over R × B repetitions. If this rate is around 0 .95, then we say it is consistent with the level-α property, α = 0 .05, considering Monte-Carlo error. The curves overlap in this figure. 
+
+# B Technical lemmas and theorems 
+
+Proposition B.1. Maximizing the quadratic lower bound (3) over 12 Λh(m) yields the projected closed-form bet 
+
+λalt 
+
+t (m, q t) := Π 12 Λh(m)
+
+
+
+θ⋆ − m
+
+2
+
+h
+
+(θ⋆ − m)2 + 1
+
+N 2
+
+PNi=1 
+
+p⋆i (1 −p⋆i )
+
+qt(i)
+
+i ,
+
+where Π 12 Λh(m) denotes the projection onto the domain 12 Λh(m). Moreover, if the unconstrained maximizer lies in 12 Λh(m), so that the projection is inactive, then after substituting λalt 
+
+t (m, q t) into the quadratic lower bound in (3) , the sampling distribution that maximizes this bound is qalt 
+
+t (i) ∝ pp⋆i (1 − p⋆i ) for all i ∈ [N ].
+
+We omit the proof since it is a simple concave optimization problem. 
+
+Proposition B.2 (Computing RIPr point) . Let a reference vector r ∈ (0 , 1) N . For any m ∈ (0 , 1) , there exists a unique λ⋆(m) such that 
+
+H(λ⋆(m)) = m, 
+
+where 
+
+H(λ) := 1
+
+N
+
+NX
+
+i=1 
+
+pi(λ) and pi(λ) = 
+
+
+
+ri, λ = 0 ,
+
+2qt(i)ri
+
+qt(i) + λ + p(qt(i) + λ)2 − 4λq t(i)ri
+
+, λ̸ = 0 .
+
+Then, for any m ∈ (0 , 1) , the RIPr point p†
+
+qt (m; r)i = pi(λ⋆(m)) for any i ∈ [N ]. In practice, λ⋆(m) can be found by a 1-dimensional root-finding algorithm on solving H(λ⋆(m)) = m, e.g., the bisection method. 
+
+23 0.06 0.08 0.10 0.12 0.14                    
+
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> mean_shift_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> mean_shift_mismatch_high_accuracy
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> normal_regime
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> out_of_family_model_mismatch
+> 0.06 0.08 0.10 0.12 0.14
+> epsilon
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Coverage rate
+> train_like
+> Predefined time-scheduled mixture Data-dependent mixture Growth-oriented Uniform sampling
+
+Figure 7: Practical setting: anytime coverage rate for each target accuracy ϵ for testing-by-betting-based CSs. For each value of ϵ, we check whether θ(b)
+
+A ∈ Ct for each b ∈ [B] holds over all query rounds until reaching the stopping criterion for each ϵ value ( |Ct| ≤ ϵ). The reported value is the rate of 1{∀ t ≤ τϵ, θ (b)
+
+A ∈ [Lt, U t]} = 1, where τϵ := inf {t ≥ 1 : Ut − Lt ≤ ϵ}, over R × B repetitions. If this rate is around 0 .95, then we say it is consistent with the level-α property, α = 0 .05, considering Monte-Carlo error. The curves overlap in this figure. 
+
+Proof. We recall how to compute the RIPr point at each round t. Fix a round t, a querying distribution 
+
+qt ∈ ∆N with qt(i) > 0 for all i ∈ [N ], and a reference vector r ∈ (0 , 1) N . In the oracle case, we take r = p⋆;in the plug-in case, we take r = ˆ pt−1. For a candidate value m ∈ (0 , 1), the RIPr point of Qr,q t projected on 
+
+Pm is defined as 
+
+p†
+
+qt (m; r) ∈ arg min 
+
+p∈P m
+
+D(Qr,q t ∥Qp,q t ),
+
+where 
+
+Pm =
+
+(
+
+p ∈ [0 , 1] N : 1
+
+N
+
+NX
+
+i=1 
+
+pi = m
+
+)
+
+.
+
+Since the querying distribution is the same in Qr,q t and Qp,q t , the KL divergence decomposes as 
+
+D(Qr,q t ∥Qp,q t ) = 
+
+NX
+
+i=1 
+
+qt(i)dkl (ri, p i),
+
+where dkl (a, b ) = a log ab + (1 − a) log 1−a
+
+1−b .Therefore, computing the RIPr point is equivalent to solving 
+
+p†
+
+qt (m; r) ∈ arg min 
+
+p∈P m
+
+NX
+
+i=1 
+
+qt(i)dkl (ri, p i).
+
+We first claim that the optimizer is unique and lies in the interior. Since ri ∈ (0 , 1), the term dkl (ri, p i)diverges when pi approaches 0 or 1. Hence, for m ∈ (0 , 1), the optimizer must satisfy pi ∈ (0 , 1) for all 
+
+i ∈ [N ]. Moreover, for each coordinate, 
+
+∂2
+
+∂p 2
+
+i
+
+dkl (ri, p i) = ri
+
+p2
+
+i
+
++ 1 − ri
+
+(1 − pi)2 > 0.
+
+24 0 100 200 300 400 500 
+
+> time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CS width
+
+almost_all_correct      
+
+> avg width
+> theory curve
+> no noise (p_hat=p*)
+> sigma=0.1
+> sigma=0.2
+> sigma=0.3
+> 0100 200 300 400 500
+> time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CS width
+
+normal_level 
+
+> avg width
+> theory curve
+> no noise (p_hat=p*)
+> sigma=0.1
+> sigma=0.2
+> sigma=0.3
+
+Figure 8: Plug-in RIPr-based CS: Average CS width over time for different values of σ. Larger values of σ
+
+indicate larger prediction mismatch. In general, the CS width increases with σ, consistent with the behavior suggested by the theoretical curves. 0 100 200 300 400 500 
+
+> time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CS width
+
+almost_all_correct      
+
+> avg width
+> theory curve (clipped at 1)
+> no noise (p_hat=p*)
+> sigma=0.1
+> sigma=0.2
+> sigma=0.3
+> 0100 200 300 400 500
+> time
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> CS width
+
+normal_level 
+
+> avg width
+> theory curve (clipped at 1)
+> no noise (p_hat=p*)
+> sigma=0.1
+> sigma=0.2
+> sigma=0.3
+
+Figure 9: Plug-in testing-by-betting-based CS: Average CS width over time for different values of σ. Larger values of σ indicate larger prediction mismatch. Compared with the RIPr-based CS in Figure 8, the betting-based CS is less sensitive to increasing σ in this experiment. Thus, the objective is strictly convex in p, resulting in a unique RIPr point. We now derive the first-order condition. By the Lagrangian method, we have 
+
+L(p, λ ) = 
+
+NX
+
+i=1 
+
+qt(i)dkl (ri, p i) + λ
+
+NX
+
+i=1 
+
+pi − N m 
+
+!
+
+,
+
+where λ ∈ R is the Lagrange multiplier for the equality constraint. Since the optimizer is interior, it satisfies 
+
+∂∂p i
+
+L(p, λ ) = 0 , i ∈ [N ].
+
+Therefore, through a simple algebra, the first-order condition becomes 
+
+qt(i) pi − ri
+
+pi(1 − pi) + λ = 0 , i ∈ [N ].
+
+For a fixed value of λ, this equation determines each coordinate pi. Multiplying both sides by pi(1 − pi)gives 
+
+qt(i)( pi − ri) + λp i(1 − pi) = 0 .
+
+25 After rearranging terms, pi satisfies 
+
+λp 2 
+
+> i
+
+− (qt(i) + λ)pi + qt(i)ri = 0 .
+
+When λ = 0, the first-order condition gives pi = ri. When λ̸ = 0, the root that is continuous at λ = 0 is 
+
+pi(λ) = qt(i) + λ − p(qt(i) + λ)2 − 4λq t(i)ri
+
+2λ .
+
+For numerical stability, we use the equivalent rationalized form 
+
+pi(λ) = 2qt(i)ri
+
+qt(i) + λ + p(qt(i) + λ)2 − 4λq t(i)ri
+
+.
+
+Thus, we define 
+
+pi(λ) = 
+
+
+
+ri, λ = 0 ,
+
+2qt(i)ri
+
+qt(i) + λ + p(qt(i) + λ)2 − 4λq t(i)ri
+
+, λ̸ = 0 .
+
+It remains to choose λ so that the mean constraint is satisfied. Define 
+
+H(λ) = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+pi(λ).
+
+We need to solve H(λ) = m. Then, we first claim that H(λ) is continuous and strictly decreasing. To see this, define 
+
+Fi(p, λ ) = qt(i) p − ri
+
+p(1 − p) + λ. 
+
+Since Fi(pi(λ), λ ) = 0, implicit differentiation gives 
+
+dp i(λ)
+
+dλ = − 1
+
+qt(i)
+
+ ri 
+
+> pi(λ)2
+
++ 1−ri
+
+> (1 −pi(λ)) 2
+
+ .
+
+The denominator is positive, and hence 
+
+dp i(λ)
+
+dλ < 0.
+
+Thus, every pi(λ) is strictly decreasing in λ, and therefore H(λ) is strictly decreasing. Moreover, using the explicit expression of pi(λ), we have lim  
+
+> λ→∞
+
+pi(λ) = 0 , lim  
+
+> λ→−∞
+
+pi(λ) = 1 , i ∈ [N ].
+
+Indeed, when λ → ∞ , the denominator in 
+
+pi(λ) = 2qt(i)ri
+
+qt(i) + λ + p(qt(i) + λ)2 − 4λq t(i)ri
+
+diverges to infinity, while the numerator is fixed. Hence pi(λ) → 0. On the other hand, when λ → −∞ , the same expression yields pi(λ) → 1. Therefore, lim  
+
+> λ→∞
+
+H(λ) = 0 , lim  
+
+> λ→−∞
+
+H(λ) = 1 .
+
+Therefore, there exists a unique λ⋆(m) such that H(λ⋆(m)) = m. Therefore, the RIPr point is 
+
+p† 
+
+> qt
+
+(m; r)i = pi(λ⋆(m)) , i ∈ [N ].
+
+26 In practice, λ⋆(m) can be found by bisection because H is continuous and strictly decreasing. Let ¯r = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+ri.
+
+If m = ¯ r, then λ⋆(m) = 0 and p† 
+
+> qt
+
+(m; r) = r. If m < ¯r, then λ⋆(m) > 0; if m > ¯r, then λ⋆(m) < 0. Thus, one can search for λ⋆(m) on the corresponding half-line and return p† 
+
+> qt
+
+(m; r)i = pi(λ⋆(m)) for all i ∈ [N ]. 
+
+Remark B.3 (Endpoint candidates) . This proposition is stated for m ∈ (0 , 1). For m = 0 or m = 1, the optimizer over the closed null class is the all-zero or all-one vector, respectively. Since r ∈ (0 , 1) N , the corresponding RIPr e-value may be infinite for observations incompatible with the endpoint null. This does not affect e-value validity when interpreted in the extended sense, but it is inconvenient for computation. Therefore, in practice, we restrict the numerical grid to the interior of [0 , 1]. 
+
+Lemma B.4 (Product of conditional e-values is a test supermartingale) . Let Et be a conditional e-value for a distribution class P, i.e., Ep[Et|F t−1] ≤ 1 and Et ≥ 0 for all t ≥ 1 almost surely for all p ∈ P . Then, 
+
+{Wt}t≥0 is a test supermaringale for P if Wt := Π ts=1 Es and W0 ≤ 1.Proof. This proof is included for completeness. The proof is simple. Since Ep[Wt|F t−1] = Ep[Π ts=1 Es|F t−1] = Πt−1
+
+> s=1
+
+EsEp[Et|F t−1] ≤ Πt−1
+
+> s=1
+
+Es = Wt−1 for all p ∈ P and Wt ≥ 0 for any t ≥ 0, we get {Wt} is a non-negative supermartingale for P. In [5] and [21], they also called such {Wt} as “test supermartingale”. 
+
+Lemma B.5 (Freedman’s inequality [23, 18]) . Let ζ1, . . . , ζ T be a martingale difference sequence with a uniform upper bound |ζt| ≤ b for all t. Denote Vt as the sum of conditional variances of ζs’s, i.e., Vt =Pts=1 Var( ζs | ζ1, . . . , ζ s−1). Also, denote σt := √Vt. Then, for any 0 < δ < 1/e and T ≥ 4, we have 
+
+P ∃t ≤ T :
+
+> t
+
+X
+
+> s=1
+
+ζs ≥ 2 max 
+
+n
+
+2σt, b plog(1 /δ )
+
+o p log(1 /δ )
+
+!
+
+≤ log( T )δ. 
+
+Lemma B.6 (Bound for a general CS width on a finite grid) . Under the Bernoulli setting for the question correctness in Section 4.1, let Es(m) > 0 be the conditional e-value for Pm under a predictable selection rule. Fix a finite grid 
+
+MK = {m1, . . . , m K } ⊆ [0 , 1] , m1 = 0 , mK = 1 .
+
+For each m ∈ M K , define 
+
+ζs(m) := log Es(m) − EQp⋆,qs [log Es(m) | F s−1] , s ≥ 1.
+
+Assume that |ζs(m)| ≤ b for all m ∈ M K and s ≤ N . Define 
+
+Vt(m) := 
+
+> t
+
+X
+
+> s=1
+
+Var Qp⋆,qs (ζs(m) | F s−1) , Vt := sup 
+
+> m∈M K
+
+Vt(m), σt := pVt.
+
+Then, for any δ ∈ (0 , 1) and N ≥ 4, with probability at least 1 − δ, we have, for all t ∈ [N ],
+
+Ct ∩ M K ⊆ Ct(δ),
+
+where Ct is the confidence sequence constructed by Es(m) through Section 3, and 
+
+Ct(δ) := 
+
+(
+
+m ∈ M K :
+
+> t
+
+X
+
+> s=1
+
+EQp⋆,qs [log Es(m) | F s−1] − pen t(δ) ≤ log 1
+
+α
+
+)
+
+,
+
+with 
+
+pen t(δ) := 2 max 
+
+(
+
+2σt, b 
+
+s
+
+log 
+
+ K log Nδ
+
+) s 
+
+log 
+
+ K log Nδ
+
+
+
+.
+
+27 Proof. For each m ∈ M K , by definition, 
+
+EQp⋆,qs [ζs(m) | F s−1] = 0 .
+
+Hence {ζs(m)}Ns=1 is a martingale difference sequence under the true distribution induced by Qp⋆,q s and the predictable selection rule. Fix m ∈ M K . Applying Lemma B.5 to the martingale difference sequence {− ζs(m)}Ns=1 with 
+
+η = δK log N ,
+
+we obtain 
+
+P ∃t ≤ N : −
+
+> t
+
+X
+
+> s=1
+
+ζs(m) ≥ 2 max 
+
+(
+
+2pVt(m), b 
+
+s
+
+log 
+
+ K log Nδ
+
+) s 
+
+log 
+
+ K log Nδ
+
+!
+
+≤ δK .
+
+Since Vt(m) ≤ Vt and σt = √Vt, we further have 
+
+P ∃t ≤ N : −
+
+> t
+
+X
+
+> s=1
+
+ζs(m) ≥ pen t(δ)
+
+!
+
+≤ δK .
+
+Taking a union bound over m ∈ M K , with probability at least 1 − δ, the following event holds: 
+
+Bδ := 
+
+( tX
+
+> s=1
+
+ζs(m) ≥ − pen t(δ), ∀t ≤ N, ∀m ∈ M K
+
+)
+
+.
+
+Now work on the event Bδ . For any t ≤ N and any m ∈ Ct ∩ M K , by the definition of Ct,
+
+> t
+
+Y
+
+> s=1
+
+Es(m) ≤ 1
+
+α .
+
+Equivalently, tX
+
+> s=1
+
+log Es(m) ≤ log 1
+
+α .
+
+Using the definition of ζs(m), we have 
+
+> t
+
+X
+
+> s=1
+
+log Es(m) = 
+
+> t
+
+X
+
+> s=1
+
+EQp⋆,qs [log Es(m) | F s−1] + 
+
+> t
+
+X
+
+> s=1
+
+ζs(m).
+
+On Bδ , tX
+
+> s=1
+
+ζs(m) ≥ − pen t(δ).
+
+Therefore, tX
+
+> s=1
+
+EQp⋆,qs [log Es(m) | F s−1] − pen t(δ) ≤
+
+> t
+
+X
+
+> s=1
+
+log Es(m) ≤ log 1
+
+α .
+
+Hence m ∈ Ct(δ). Since this argument holds for every m ∈ Ct ∩ M K and every t ≤ N on Bδ , we get 
+
+Ct ∩ M K ⊆ Ct(δ), ∀t ≤ N. 
+
+Since P(Bδ ) ≥ 1 − δ, the result follows. 28 Lemma B.7 (Curvature lower bound for oracle RIPr growth) . Under the Bernoulli setting for the question correctness, suppose that 
+
+Pm =
+
+(
+
+p ∈ [0 , 1] N : 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+pi = m
+
+)
+
+, θ⋆ = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+p⋆i .
+
+For any predictable querying distribution qt with qt(i) > 0 for all i ∈ [N ], the oracle RIPr one-step expected log-growth satisfies Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) ≥ ct(qt)( θ⋆ − m)2, where ct(qt) := 2N 2  
+
+> PNi=1 1/q t(i)
+
+.Proof. By the definition of the oracle RIPr factor, 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) = 
+
+> N
+
+X
+
+> i=1
+
+qt(i)DKL 
+
+ Bern( p⋆i ) Bern( p† 
+
+> qt
+
+(m; p⋆)i) .
+
+By Pinsker’s inequality for Bernoulli distributions, DKL (Bern( p)∥Bern( q)) ≥ 2( p − q)2. Hence 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) ≥ 2
+
+> N
+
+X
+
+> i=1
+
+qt(i)  p⋆i − p† 
+
+> qt
+
+(m)i
+
+2 .
+
+Let ai = p⋆i − p† 
+
+> qt
+
+(m; p⋆)i. Since p† 
+
+> qt
+
+(m; p⋆) ∈ P m, we have 
+
+> N
+
+X
+
+> i=1
+
+ai = N (θ⋆ − m).
+
+By Cauchy-Schwarz and qt(i) > 0, 
+
+> N
+
+X
+
+> i=1
+
+ai
+
+!2
+
+=
+
+> N
+
+X
+
+> i=1
+
+ai
+
+1
+
+pqt(i)
+
+pqt(i)
+
+!2
+
+≤
+
+> N
+
+X
+
+> i=1
+
+qt(i)a2
+
+> i
+
+! NX
+
+> i=1
+
+1
+
+qt(i)
+
+!
+
+.
+
+Therefore, NX
+
+> i=1
+
+qt(i)a2 
+
+> i
+
+≥ N 2(θ⋆ − m)2
+
+PNi=1 1/q t(i) .
+
+Combining the above inequalities yields 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) ≥ 2N 2
+
+PNi=1 1/q t(i) (θ⋆ − m)2.
+
+This proves the claim. 
+
+Lemma B.8 (Mismatch in RIPr) . Under the Bernoulli setting for the question correctness in Section 4.1 and assuming qt(i) > 0 and p⋆i , ˆpt−1(i) ∈ (0 , 1) for all i, we have, for any m ∈ [0 , 1] , t ≥ 1,
+
+0 ≤ Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) − Gt(qt, E RIPr  
+
+> t
+
+(m, ˆpt−1, q t), p ⋆) ≤ D(Qp⋆,q t ∥Qˆpt−1,q t ),
+
+where ERIPr  
+
+> t
+
+(·) is defined in Proposition 4.1. Proof. We only prove the upper bound since the lower bound is from the oracle optimality of RIPr e-value in (2). Fix t ≥ 1, m ∈ [0 , 1], and condition on Ft−1. Then qt and ˆ pt−1 are fixed. For notational simplicity, write 
+
+P := Qp⋆,q t , ˆP := Qˆpt−1,q t .
+
+Let P † 
+
+> m
+
+:= Qp†  
+
+> qt(m;p⋆),q t
+
+be the RIPr point of P onto the null class Pm, and let ˆP † 
+
+> m
+
+:= Qˆp†  
+
+> qt(m; ˆ pt−1),q t
+
+be the RIPr point of ˆP onto the same null class. For simplicity, we suppress the conditional expectation expression. By definition, 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) = EP
+
+
+
+log dP dP †
+
+> m
+
+
+
+,
+
+29 and the plug-in RIPr e-value has expected log-growth 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, ˆpt−1, q t), p ⋆) = EP
+
+"
+
+log d ˆPd ˆP †
+
+> m
+
+#
+
+.
+
+Therefore, 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) − Gt(qt, E RIPr  
+
+> t
+
+(m, ˆpt−1, q t), p ⋆)= EP
+
+"
+
+log dP dP †
+
+> m
+
+− log d ˆPd ˆP †
+
+> m
+
+#
+
+= EP
+
+
+
+log dP d ˆP
+
+
+
++ EP
+
+"
+
+log d ˆP †
+
+> m
+
+dP †
+
+> m
+
+#
+
+= D(P ∥ ˆP ) + EP
+
+"
+
+log d ˆP †
+
+> m
+
+dP †
+
+> m
+
+#
+
+.
+
+It remains to show that the second term is smaller than or equal to zero. Since P † 
+
+> m
+
+is the reverse information projection of P onto the null class, it minimizes D(P ∥Q) over all Q ∈ P m. Since ˆP † 
+
+> m
+
+∈ P m, the optimality of P † 
+
+> m
+
+implies 
+
+D(P ∥ ˆP †
+
+> m
+
+) ≥ D(P ∥P †
+
+> m
+
+).
+
+Equivalently, we have 
+
+EP
+
+
+
+log dP d ˆP †
+
+> m
+
+
+
+≥ EP
+
+
+
+log dP dP †
+
+> m
+
+
+
+,
+
+which gives EP
+
+h
+
+log d ˆP † 
+
+> m
+> dP †
+> m
+
+i
+
+≤ 0. Hence, 
+
+Gt(qt, E RIPr  
+
+> t
+
+(m, p ⋆, q t), p ⋆) − Gt(qt, E RIPr  
+
+> t
+
+(m, ˆpt−1, q t), p ⋆) ≤ D(P ∥ ˆP ) = D(Qp⋆,q t ∥Qˆpt−1,q t ).
+
+This proves the desired upper bound. 
+
+# C Proof of main theorems 
+
+C.1 Proof of Proposition 4.1 
+
+Proof. This proof is included for completeness. Let us first prove the validity of the RIPr one-factor value is a conditional e-value. The positivity of ERIPr  
+
+> t
+
+(m) is trivial. We only show the expectation condition. For notational simplicity, we denote ERIPr  
+
+> t
+
+(m, p ⋆, q t) as ERIPr  
+
+> t
+
+(m) and E(I,Z I )∼Qp,q [· | F t−1] as EQp,q [·]. 
+
+For m ∈ (0 , 1) . Under a fixed Ft−1, qt is fixed. Hence, for notational simplicity, we suppress the condi-tioning on Ft−1, let q ≡ qt, and p† 
+
+> qt
+
+(m; p⋆) ≡ p†. By simple algebra, we have 
+
+EQp,q 
+
+ERIPr  
+
+> t
+
+(m) − 1 = 
+
+> N
+
+X
+
+> i=1
+
+q(i) X
+
+> z∈{ 0,1}
+
+pzi (1 − pi)1−z (p⋆i )z (1 − p⋆i )1−z
+
+(p† 
+
+> i
+
+)z (1 − p† 
+
+> i
+
+)1−z − 1=
+
+> N
+
+X
+
+> i=1
+
+q(i)
+
+"
+
+pi
+
+p⋆i
+
+p†
+
+> i
+
++ (1 − pi) 1 − p⋆i
+
+1 − p†
+
+> i
+
+− 1
+
+#
+
+=
+
+> N
+
+X
+
+> i=1
+
+q(i) (pi − p† 
+
+> i
+
+)( p⋆i − p† 
+
+> i
+
+)
+
+p† 
+
+> i
+
+(1 − p† 
+
+> i
+
+) .
+
+Then, we want to show PNi=1 q(i) (pi−p†      
+
+> i)( p⋆i−p†
+> i)
+> p†
+> i(1 −p†
+> i)
+
+≤ 0. 30 By the RIPr point p† ∈ arg min p∈P m
+
+PNi=1 qt(i)dkl (p⋆i , p i), we know it is well-defined under the condition stated in Proposition 4.1 and m ∈ (0 , 1) in this case. Hence, by standard finite-dimensional convex analytic techniques, we can get a clean characterization of the oracle e-value in terms of the RIPr. The Lagrangian can be written as, for some μ ∈ R and ai, b i ∈ [0 , ∞), 
+
+L(p, μ, a, b ) = 
+
+> N
+
+X
+
+> i=1
+
+q(i)dkl (p⋆i , p i) + μ
+
+> N
+
+X
+
+> i=1
+
+pi − N m 
+
+!
+
+−
+
+> N
+
+X
+
+> i=1
+
+aipi +
+
+> N
+
+X
+
+> i=1
+
+bi(pi − 1) .
+
+On taking the derivative w.r.t pi, the RIPr point p† must satisfy the stationarity condition: 
+
+q(i) p† 
+
+> i
+
+− p⋆i
+
+p† 
+
+> i
+
+(1 − p† 
+
+> i
+
+) + μ − ai + bi = 0 , ∀i ∈ [N ].
+
+Moreover, since min i∈[N ] p⋆i > 0 and max i∈[N ] p⋆i < 1 implies that min i∈[N ] p† 
+
+> i
+
+> 0 and max i∈[N ] p† 
+
+> i
+
+< 1, respectively (or the minimization is infinite). Therefore, by complementary slackness and the fact that min i∈[N ] p† 
+
+> i
+
+> 0 and max i∈[N ] p† 
+
+> i
+
+< 1, 
+
+aip† 
+
+> i
+
+= 0 , bi(p† 
+
+> i
+
+− 1) = 0 , ∀i ∈ [N ],
+
+we know ai = bi = 0. Consequently, p† must satisfy q(i) p†    
+
+> i−p⋆i
+> p†
+> i(1 −p†
+> i)
+
++ μ = 0, ∀i ∈ [N ]. By this property, for any p ∈ P m, we get 
+
+EQp,q 
+
+ERIPr  
+
+> t
+
+(m) − 1 = 
+
+> N
+
+X
+
+> i=1
+
+q(i) (pi − p† 
+
+> i
+
+)( p⋆i − p† 
+
+> i
+
+)
+
+p† 
+
+> i
+
+(1 − p† 
+
+> i
+
+)= −μ
+
+> N
+
+X
+
+> i=1
+
+(pi − p† 
+
+> i
+
+) = 0 ,
+
+thereby, EQp,q 
+
+ERIPr  
+
+> t
+
+(m) = 1, completing the proof. Note that the proof only requires each p⋆i to lie in the open interval (0 , 1) and to be Ft−1-measurable at round t. Therefore, the same argument continues to hold if p⋆ is replaced by any predictable vector 
+
+rt ∈ (0 , 1) N . In particular, the plug-in construction in Section 5.1, which replaces p⋆ by the prediction ˆ pt−1,still yields valid conditional e-values as long as ˆ pt−1(i) ∈ (0 , 1) for all i ∈ [N ], where this is true in our experimental implementations. 
+
+For m = 0 or m = 1 . For the endpoint candidates, the RIPr point is defined by a limiting argument. When 
+
+m = 0, the null class reduces to the singleton (0 , . . . , 0), and we set p† 
+
+> q
+
+(0; p⋆) = (0 , . . . , 0). The corresponding RIPr factor is interpreted as an extended nonnegative random variable: 
+
+ERIPr  
+
+> t
+
+(0 , p ⋆, q t) = 
+
+(
+
+1 − p⋆It , ZIt = 0 ,
+
++∞, ZIt = 1 .
+
+Similarly, when m = 1, we set p† 
+
+> q
+
+(1; p⋆) = (1 , . . . , 1) and define 
+
+ERIPr  
+
+> t
+
+(1 , p ⋆, q t) = 
+
+(
+
+p⋆It , ZIt = 1 ,
+
++∞, ZIt = 0 .
+
+These extended-valued factors remain valid conditional e-values, because the infinite values occur only on events that have probability zero under the corresponding endpoint null. Then, we also show the oracle optimality results for completeness. Fix t ≥ 1 and condition on Ft−1.Since qt is predictable, it is fixed conditional on Ft−1. For notational simplicity, write 
+
+P := Qp⋆,q t , Q† := Qp†  
+
+> qt(m;p⋆),q t
+
+.
+
+31 By the RIPr supporting condition, the likelihood ratio 
+
+ERIPr  
+
+> t
+
+(m) = dP dQ † (It, Z It )is a valid conditional e-value for the composite null Pm.Let Et(m) ∈ E m(qt) be any other conditional e-value. Since Q† belongs to the null class induced by Pm,the conditional e-value property gives 
+
+EQ† [Et(m) | F t−1] ≤ 1.
+
+Then, 
+
+EP [log Et(m) | F t−1] = EP
+
+
+
+log 
+
+
+
+Et(m) dQ †
+
+dP 
+
+
+
+| F t−1
+
+
+
++ EP
+
+
+
+log dP dQ † | F t−1
+
+
+
+≤ log EP
+
+
+
+Et(m) dQ †
+
+dP | F t−1
+
+
+
++ DKL (P ∥Q†)= log EQ† [Et(m) | F t−1] + DKL (P ∥Q†)
+
+≤ DKL (P ∥Q†).
+
+The first inequality follows from Jensen’s inequality. On the other hand, for the RIPr e-value, 
+
+EP
+
+log ERIPr  
+
+> t
+
+(m) | F t−1
+
+ = EP
+
+
+
+log dP dQ † | F t−1
+
+
+
+= DKL (P ∥Q†).
+
+Therefore, 
+
+G(qt, E RIPr  
+
+> t
+
+(m), m, p ⋆) ≥ G(qt, E t(m), m, p ⋆) a.s. 
+
+C.2 Proof of Proposition 4.2 
+
+Proof. Fix t ≥ 1 and condition on Ft−1. Since qt and λt(m) are predictable, they are fixed conditional on 
+
+Ft−1. The condition min i qt(i) > 0 ensures that Φ t ≡ Φt(p⋆, q t) is well-defined and finite for every possible observation. First, by the definition of Λ ht (m), for every possible realization ( It, Z It ) = ( i, z ), 1 + λt(m)
+
+ 1
+
+N
+
+> N
+
+X
+
+> j=1
+
+p⋆j + z − p⋆i
+
+N q t(i) − m
+
+ ≥ 0.
+
+Therefore, Ebet  
+
+> t
+
+(m) ≥ 0 almost surely. Then, we compute its conditional expectation under any p ∈ P m. Under Qp,q t , we have 
+
+EQp,q t [Φ t | F t−1] = 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+p⋆i + 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+qt(i) E[ZIt | It = i] − p⋆i
+
+qt(i)= 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+p⋆i + 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+(pi − p⋆i )= 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+pi.
+
+Since p ∈ P m, we have 1
+
+N
+
+> N
+
+X
+
+> i=1
+
+pi = m. 
+
+32 Therefore, EQp,q t [Φ t − m | F t−1] = 0, i.e. Φ t is unbiased for p with any predictable {qt}. Using that λt(m)is Ft−1-measurable, we get 
+
+EQp,q t
+
+Ebet  
+
+> t
+
+(m) Ft−1
+
+ = EQp,q t [1 + λt(m)(Φ t − m) | F t−1]= 1 + λt(m)EQp,q t [Φ t − m | F t−1]= 1 .
+
+Thus, E(I,Z I )∼Qp,q t
+
+Ebet  
+
+> t
+
+(m) Ft−1
+
+ ≤ 1, for every p ∈ P m. This completes the proof. Note that the proof only requires each p⋆i to be Ft−1-measurable at round t. Again, we can readily verify that the plug-in construction in Section 5.1, which replaces p⋆ by the prediction ˆ pt−1, still yields valid conditional e-values since it is predictable. 
+
+C.3 Proof of Theorem 5.1 
+
+We start by providing the formal statement of the theorem. 
+
+Theorem C.1 ((Formal) Approximated width of RIPr approach) . For any t ≥ 1, suppose each element of the prediction ˆpt−1 and the RIPr point of Qˆpt−1,q t projected on the null Pm, p† 
+
+> qt
+
+(m; ˆ pt−1), is in the range 
+
+(ϑ, 1 − ϑ) for any t ≥ 1 for some ϑ > 0, the querying rule satisfies qt(i) ≥ h for some h ∈ (0 , 1/N ] for any 
+
+i ∈ [N ]. With probability at least probability 1 − δ, for any t ∈ [N ],
+
+|CRIPr  
+
+> t
+
+∩ M K | ≤ 2
+
+s
+
+2 max 2σRIPr  
+
+> t
+
+, 2Lϑ
+
+pℓK,N,δ 
+
+pℓK,N,δ + Pts=1 D(Qp⋆,q s ∥Qˆps−1,q s ) + log(1 /α )
+
+t2N h .
+
+where MK is the set of K grids, σRIPr  
+
+> t
+
+:= 
+
+q
+
+sup m∈M K
+
+Pts=1 Var(log ERIPr  
+
+> s
+
+(·) | F t−1), Lϑ := log 1−ϑϑ and 
+
+ℓK,N,δ := log 
+
+ K log Nδ
+
+
+
+.
+
+The proof is as follows. We apply Lemma B.6 to derive this result. We define 
+
+ζt(m) := log ERIPr  
+
+> t
+
+(m, ˆpt−1, q t) − EQp⋆,q t [log ERIPr  
+
+> t
+
+(m, ˆpt−1, q t) | F t−1] ∀ t ≥ 1,
+
+where ERIPr  
+
+> t
+
+(m, ˆpt−1, q t) := ( ˆ pt−1(It)) ZIt (1 − ˆpt−1(It)) 1−ZIt      
+
+> (p†
+> qt(m; ˆ pt−1)It)ZIt(1 −p†
+> qt(m; ˆ pt−1)It)1−ZIt
+
+and 
+
+p† 
+
+> qt
+
+(m; ˆ pt−1) ∈ arg min 
+
+> p∈P m
+
+DKL 
+
+ Qˆpt−1,q t ∥ Qp,q t
+
+ = arg min 
+
+> p∈P m
+> N
+
+X
+
+> i=1
+
+qt(i)dkl (ˆ pt−1(i), p i).
+
+Then, we proceed to show the corresponding σt and b.Define 
+
+Yt(m) := log ERIPr  
+
+> t
+
+(m, ˆpt−1, q t).
+
+For each i ∈ [N ], let 
+
+At,i (m) := log ˆpt−1(i)ˆp† 
+
+> qt
+
+(m; ˆ pt−1)i
+
+, Bt,i (m) := log 1 − ˆpt−1(i)1 − ˆp† 
+
+> qt
+
+(m; ˆ pt−1)i
+
+.
+
+Then 
+
+EQp⋆,q t [Yt(m) | F t−1] = 
+
+> N
+
+X
+
+> i=1
+
+qt(i) [ p⋆i At,i (m) + (1 − p⋆i )Bt,i (m)] .
+
+Moreover, Var( ζt(m) | F t−1) = 
+
+> N
+
+X
+
+> i=1
+
+qt(i) p⋆i At,i (m)2 + (1 − p⋆i )Bt,i (m)2−
+
+
+
+EQp⋆,q t [Yt(m) | F t−1]
+
+2
+
+= Var( Yt(m) | F t−1).
+
+33 Thus, we have 
+
+Vt = sup 
+
+> m∈M K
+> t
+
+X
+
+> s=1
+
+Var( ζs(m) | F s−1) = sup 
+
+> m∈M K
+> t
+
+X
+
+> s=1
+
+Var( Ys(m) | F t−1), σt := pVt.
+
+By assumption, there exists ϑ ∈ (0 , 1/2) such that ˆ pt(i), ˆp† 
+
+> qt
+
+(m; ˆ pt−1)i ∈ [ϑ, 1 − ϑ] for all t, i, m , then with 
+
+Lϑ := log 1−ϑϑ , we have |ζt(m)| ≤ 2Lϑ. Therefore, one can take b = 2 Lϑ.Then, by Lemma B.6, with probability at least probability 1-δ, for any t ∈ [N ], 
+
+CRIPr  
+
+> t
+
+∩ M k ⊆ CRIPr  
+
+> t
+
+(δ) := 
+
+(
+
+m ∈ M K :
+
+> t
+
+X
+
+> s=1
+
+EQp⋆,qs 
+
+log ERIPr  
+
+> s
+
+(m) | F s−1
+
+ − pen t(δ) ≤ log 1
+
+α
+
+)
+
+,
+
+with ERIPr  
+
+> s
+
+(m) ≡ ERIPr  
+
+> t
+
+(m, ˆpt−1, q t) and pen t(δ) := 2 max 
+
+(
+
+2σt, b 
+
+s
+
+log 
+
+ K log Nδ
+
+) s 
+
+log 
+
+ K log Nδ
+
+
+
+= 2 max 
+
+n
+
+2σt, 2Lϑ
+
+pℓK,N,δ 
+
+o pℓK,N,δ ,
+
+where ℓK,N,δ := log 
+
+ K log Nδ
+
+
+
+. Moreover, by Lemma B.7 and Lemma B.8, we have 
+
+> t
+
+X
+
+> s=1
+
+EQp⋆,qs 
+
+log ERIPr  
+
+> s
+
+(m) | F s−1
+
+ ≥
+
+> t
+
+X
+
+> s=1
+
+Gs(qs, E RIPr  
+
+> s
+
+(m, p ⋆, q s), p ⋆) − D(Qp⋆,q s ∥Qˆps−1,q s )
+
+≥
+
+> t
+
+X
+
+> s=1
+
+2N 2
+
+PNi=1 1/q s(i) (θ⋆ − m)2 − D(Qp⋆,q s ∥Qˆps−1,q s ).
+
+Therefore, by using qt(i) ≥ h for some h ∈ (0 , 1/N ), we have at least probability 1 − δ, for any t ∈ [N ], 
+
+|CRIPr  
+
+> t
+
+(δ)| ≤ 2
+
+s
+
+2 max 2σt, 2Lϑ
+
+pℓK,N,δ 
+
+pℓK,N,δ + Pts=1 D(Qp⋆,q s ∥Qˆps−1,q s ) + log(1 /α )
+
+t2N h .
+
+Note that hN ∈ (0 , 1) is a constant. Proof completes. 
+
+Remark C.2. This bound may be too coarse since we have not controlled the σRIPr  
+
+> t
+
+and the mismatch term. We will revise this issue in our updated version. 
+
+C.4 Proof of Theorem 5.2 
+
+We start by providing the formal statement of the theorem. 
+
+Theorem C.3 ((Formal) Approximated width of testing-by-betting approach) . For any t ≥ 1, suppose the querying rule satisfies qt(i) ≥ h for some h ∈ (0 , 1/N ] for any i ∈ [N ], and the bet λt(m) is chosen in  
+
+> 12
+
+Λh(m) for all m ∈ M K , and the optimized bet for (3) is obtained and still in 12 Λh(m). With probability at least probability 1 − δ, for any t ∈ [N ],
+
+|Cbet  
+
+> t
+
+∩ M K | ≤ 8
+
+s
+
+log(1 /α ) + max {σbet  
+
+> t
+
+, pℓK,N,δ }pℓK,N,δ 
+
+ 2 + MSE t
+
+
+
+tN h .
+
+where MK is the set of K grids, σbet  
+
+> t
+
+:= 
+
+q
+
+sup m∈M K
+
+Pts=1 Var(log Ebet  
+
+> t
+
+(·) | F t−1), ℓK,N,δ := log 
+
+ K log Nδ
+
+
+
+,and MSE t := 1
+
+> t
+
+Pts=1 1
+
+> N
+
+PNi=1 (p⋆(i) − ˆps−1(i)) 2.
+
+Then, the proof is as follows. Similar to the proof of Theorem 5.1, we focus on deriving the σt and b under the betting-based CS. 34 We also define 
+
+ζt(m) := Yt(m) − EQp⋆,q t [Yt | F t−1] ∀ t ≥ 1,
+
+where Yt(m) := log Ebet  
+
+> t
+
+(m) = log  1 + λt(m) Φt(ˆ pt−1, q t) − m , with predictable bets λt(m) and a pre-dictable querying rule {qt}t≥1.Recall that Φ t(ˆ pt−1, q t) = 1
+
+> N
+
+PNi=1 ˆpt−1(i)+ 1   
+
+> NZIt−ˆpt−1(It)
+> qt(It)
+
+. By ˆ pt−1(i) ∈ [0 , 1] and qt(i) > h for all i ∈ [N ]and t ≥ 1, we know −m − 1 
+
+> N h
+
+≤ Φt(ˆ pt−1, q t) − m ≤ 1 − m + 1 
+
+> N h
+
+for all t ≥ 1. Then, for all λt(m) ∈ 12 Λh(m) := 
+
+h −1/21−m+1 /(N h ) , 1/2
+
+> m+1 /(N h )
+
+i
+
+, we have 1 + λt(m) Φt(ˆ pt) − m ≥ 1 − 12 = 12 .
+
+Moreover, we have 
+
+λt(m) Φt(ˆ pt) − m ≤ 12 (1 + N h ) ≤ 1,
+
+where the last inequality is from h ∈ (0 , 1/N ). Hence, |Yt(m)| ≤ log 2. Then, 
+
+|ζt(m)| = |Yt(m) − E[Yt(m) | F t−1]|≤ | Yt(m)| + E[|Yt(m)| | F t−1]
+
+≤ 2 log 2 .
+
+Therefore, in Freedman’s inequality, we take b = 2. Moreover, for each m ∈ M K ,
+
+Vt(m) := 
+
+> t
+
+X
+
+> s=1
+
+Var( ζs(m) | F s−1) = 
+
+> t
+
+X
+
+> s=1
+
+Var(log Ebet  
+
+> t
+
+(·) | F t−1) Vt := sup 
+
+> m∈M K
+
+Vt(m)We define σbet  
+
+> t
+
+:= √Vt.
+
+Applying Lemma B.6 on the finite grid MK , with probability at least 1 − δ, for all t ≤ N ,
+
+Cbet  
+
+> t
+
+∩ M K ⊆
+
+(
+
+m ∈ M K :
+
+> t
+
+X
+
+> s=1
+
+EQp⋆,qs [log Ebet  
+
+> s
+
+(m) | F s−1] − pen t(δ) ≤ log 1
+
+α
+
+)
+
+,
+
+where, using b = 2, pen t(δ) = 2 max 
+
+n
+
+2σt, 2pℓK,N,δ 
+
+o pℓK,N,δ = 4 max 
+
+n
+
+σt, pℓK,N,δ 
+
+o pℓK,N,δ ,
+
+where ℓK,N,δ = log 
+
+ K log Nδ
+
+
+
+.It remains to lower-bound the expected log-increment. Let 
+
+Xt(m) := Φ t(ˆ pt) − m. 
+
+We have known that, for all m ∈ M K ,
+
+λt(m)Xt(m) ≥ − 12 .
+
+Therefore, using the inequality log(1 + x) ≥ x − x2 for all x ≥ − 1/2, we obtain 
+
+EQp⋆,q t
+
+log Ebet  
+
+> t
+
+(·) Ft−1
+
+ ≥ λt(m)EQp⋆,q t [Xt(m) | F t−1] − λ2 
+
+> t
+
+(m)EQp⋆,q t
+
+X2 
+
+> t
+
+(m) | F t−1
+
+ .
+
+For the first term, since ˆ pt−1 and qt are Ft−1-measurable, and by the conditional unbiasedness, EQp⋆,q t [Xt(m) | F t−1] = 
+
+θ⋆ − m. Then, we have 
+
+EQp⋆,q t
+
+log Ebet  
+
+> t
+
+(·) Ft−1
+
+ ≥ λt(m)( θ⋆ − m) − λ2 
+
+> t
+
+(m)EQp⋆,q t
+
+X2 
+
+> t
+
+(m) | F t−1
+
+ .
+
+35 For the second moment, we have 
+
+EQp⋆,q t
+
+X2 
+
+> t
+
+(m) | F t−1
+
+ = ( θ⋆ − m)2 + Var Qp⋆,q t (Φ t(ˆ pt−1, q t) | F t−1)
+
+≤ (θ⋆ − m)2 + 1
+
+N 2
+
+> N
+
+X
+
+> i=1
+
+p⋆i (1 − p⋆i ) + ( p⋆i − ˆpt−1(i)) 2
+
+qt(i) .
+
+By the assumption qt(i) > h for all i ∈ [N ] and p⋆i (1 − p⋆i ) ≤ 1, 
+
+EQp⋆,q t
+
+X2 
+
+> t
+
+(m) | F t−1
+
+ ≤ (θ⋆ − m)2 + 1
+
+N h + 1
+
+N 2h
+
+> N
+
+X
+
+> i=1
+
+(p⋆i − ˆpt−1(i)) 2.
+
+Define MSE t := 1
+
+> N
+
+PNi=1 (p⋆i − ˆpt−1(i)) 2. Combining the above inequalities gives 
+
+EQp⋆,q t
+
+log Ebet  
+
+> t
+
+(·) Ft−1
+
+ ≥ λt(m)( θ⋆ − m) − (λt(m)) 2
+
+
+
+(θ⋆ − m)2 + 1
+
+N h + MSE t
+
+N h 
+
+
+
+.
+
+This inequality holds for all λt(m) ∈ 12 Λh(m). Then, since we consider using the optimized bet for (3) and assume this bet is still in 12 Λh(m) for each m ∈ M K , we have 
+
+EQp⋆,q t
+
+log Ebet  
+
+> t
+
+(·) Ft−1
+
+ ≥ (θ⋆ − m)2
+
+4 (θ⋆ − m)2 + 1 
+
+> N h
+
++ MSE t
+
+> N h
+
+ ≥ (θ⋆ − m)2
+
+4 1 + 1 
+
+> N h
+
++ MSE t
+
+> N h
+
+ .
+
+Let us further simplify this lower bound. By the fact that f (x) :=  1 + 1+ xN h 
+
+−1 = N h N h +1+ x is a convex function for x ≥ 0, we have 1
+
+> t
+
+Pts=1 f (xs) ≥ f ( 1
+
+> t
+
+Pts=1 xs) by Jensen’s inequality. Therefore, 1
+
+t
+
+> t
+
+X
+
+> s=1
+
+EQp⋆,qs 
+
+log Ebet  
+
+> s
+
+(·) Fs−1
+
+ ≥ 14 (θ⋆ − m)2 N h N h + 1 + MSE t
+
+≥ 14 (θ⋆ − m)2 N h 
+
+2 + MSE t
+
+,
+
+where MSE t := 1
+
+> t
+
+Pts=1 MSE s and the last inequality is from N h ≤ 1. Therefore, by Lemma B.6 and σt and b defined in this proof, we have 
+
+|Cbet  
+
+> t
+
+∩ M K | ≤ 8
+
+s
+
+log(1 /α ) + max {σbet  
+
+> t
+
+, pℓK,N,δ }pℓK,N,δ 
+
+ 2 + MSE t
+
+
+
+tN h .
+
+Proof completes. 
+
+Remark C.4. Again, this bound may be too coarse since we have not controlled the σbet  
+
+> t
+
+. We will revise this issue in our updated version. 36
