@@ -6,29 +6,30 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-08-01
-- 运行时间：2026-08-01 21:17:50 UTC
+- 最新运行日期：2026-08-02
+- 运行时间：2026-08-02 20:36:48 UTC
 - 运行状态：成功
 - 本次总论文数：3
-- 精读区：2
-- 速读区：1
+- 精读区：0
+- 速读区：3
 
 ### 今日简报（AI）
-今日精读两篇高价值论文，聚焦LLM评测的不确定性量化与推理时指令层级控制，另速读一篇安全对齐方法。最值得关注：Laplace-PSN-IRT为神经IRT模型提供不确定性估计，提升基准可信度；Steering方法可在推理时动态调整指令层级，增强模型行为可控性。建议优先阅读前两篇，可结合LLM评测与对齐场景快速落地思路。
-- 详情：[/202608/01/README](/202608/01/README)
+今日速读3篇论文，聚焦LLM工具调用的风险控制、网络安全检测与记忆可靠性建模。最值得关注的是两项7分研究：角色分层风险控制（针对工具调用）与推理增强型语言模型的网络威胁分类。建议普通读者优先了解LLM在工具调用中的风险分层思路，并留意安全检测方向的新方法。
+- 详情：[/202608/02/README](/202608/02/README)
 
 ### 精读区论文标签
-1. [Laplace-PSN-IRT: Uncertainty Quantification for Neural Item Response Theory Models of LLM Benchmarks](/202608/01/2607.25257v1-laplace-psn-irt-uncertainty-quantification-for-neural-item-response-theory-models-of-llm-benchmarks)  
-   标签：评分：9.0/10、query:uq-safety
-   evidence：利用拉普拉斯近似为LLM基准的神经IRT模型提供校准的不确定性量化。
-2. [Steering Instruction Hierarchies at Inference Time](/202608/01/2607.26228v1-steering-instruction-hierarchies-at-inference-time)  
-   标签：评分：9.0/10、query:dg
-   evidence：V-Steer通过编辑缓存的价值向量引导指令层级，属于激活引导方法
+- 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Compliance2LoRA: On-Demand Safety Alignment on Arbitrary Policy Subsets via Hypernetwork-Generated LoRA Adapters](/202608/01/2607.27594v1-compliance2lora-on-demand-safety-alignment-on-arbitrary-policy-subsets-via-hypernetwork-generated-lora-adapters)  
-   标签：评分：6.0/10、query:smd
-   evidence：通过LoRA适配器实现按需安全对齐，应对多策略合规需求
+1. [Beyond Aggregate Risk: Role-Stratified Conformal Risk Control for LLM Tool Calls](/202608/02/2607.24343v1-beyond-aggregate-risk-role-stratified-conformal-risk-control-for-llm-tool-calls)  
+   标签：评分：7.0/10、query:uq-safety
+   evidence：面向LLM工具调用的逐字段共形风险控制，属不确定性量化方法
+2. [Cybersecurity Detection Classification with Reasoning-enabled Language Models](/202608/02/2607.28460v1-cybersecurity-detection-classification-with-reasoning-enabled-language-models)  
+   标签：评分：7.0/10、query:uq-safety
+   evidence：训练校准器读取完整推理轨迹估计标签token概率
+3. [Modeling Memory-Dependent Reliability of LLMs: A Hidden Markov Model](/202608/02/2607.22951v1-modeling-memory-dependent-reliability-of-llms-a-hidden-markov-model)  
+   标签：评分：6.0/10、query:luq
+   evidence：用隐马尔可夫模型刻画LLM测试结果间的依赖，为可靠性声明提供不确定性估计
 
 
 <div class="dpr-home-promo-card">
