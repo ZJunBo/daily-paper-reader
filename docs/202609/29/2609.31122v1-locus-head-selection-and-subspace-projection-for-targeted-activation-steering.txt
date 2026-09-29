@@ -1,0 +1,509 @@
+Title: LocUS: Head Selection and Subspace Projection for Targeted Activation Steering
+
+URL Source: https://arxiv.org/pdf/2609.31122v1
+
+Published Time: Mon, 28 Sep 2026 01:13:03 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# LOC US: Head Selection and Subspace Projection for Targeted Activation Steering 
+
+Irene Tallini 1 Lorenzo Basile 1 Valentino Maiorca 2
+
+Francesco Locatello 2 Alberto Cazzaniga 1,31Area Science Park, Trieste, Italy 2Institute of Science and Technology Austria 
+
+> 3
+
+Université Côte d’Azur, Inria, LJAD, Maasai Project Team, Nice, France 
+
+{irene.tallini, alberto.cazzaniga}@areasciencepark.it 
+
+Abstract 
+
+Activation steering is a powerful training-free paradigm for controlling large language mod-els at inference time. However, standard ap-proaches estimate a per-layer steering direction from contrastive data and apply it on the layer’s entire representation space, which may couple the intervention to off-target properties present in the contrastive data and degrade unrelated ca-pabilities. To mitigate this issue, we introduce LocUS (Localized Unembedding Steering), a method which grounds activation steering to the model’s own output vocabulary subspace. By identifying a property-specific linear sub-space within the unembedding matrix, LocUS enforces a geometric constraint that restricts the steering transformation to a specific subspace and at the same time localizes its application to a sparse subset of attention heads. Extensive evaluations across three model families on toxi-city mitigation, sentiment redirection and syco-phancy suppression show that LocUS matches or outperforms state-of-the-art baselines while intervening on under 6% of parameters and bet-ter preserving general capability. 
+
+1 Introduction 
+
+Controlling LLM behavior requires suppressing or amplifying specific properties of generations, e.g. reducing toxicity, shaping tone, or enforcing stylistic constraints. A standard way to achieve this is by fine-tuning, which requires an additional training stage and poses the risk of catastrophic for-getting (Luo et al., 2024). Parameter-efficient vari-ants (Hu et al., 2022; Houlsby et al., 2019) reduce training cost but still require training. Prompting provides a lighter alternative, but it is often brittle and difficult to calibrate (Sclar et al., 2024; Lu et al., 2022; Cheng et al., 2026). Activation steering of-fers another option: it modifies the model’s internal activations at inference time through transforma-tions estimated from contrastive data (Subramani et al., 2022; Turner et al., 2023; Zou et al., 2023; Rimsky et al., 2024; Rodriguez et al., 2025a,b). The additive structure of the residual stream makes vec-tor addition a natural intervention primitive (Elhage et al., 2021), and some properties have been ob-served to be mediated by a single direction (Arditi et al., 2024; Li et al., 2023). This view underlies one of the simplest and most widely used steer-ing methods, difference-of-means steering (Turner et al., 2023; Rimsky et al., 2024): from two sets of examples that exhibit and lack the target property, one estimates the steering direction as the offset between their mean activations and adds it to the residual stream during the forward pass. The quality of such steering transformation de-pends on the data used to estimate it: when source and target distributions differ along axes other than the target property, the resulting vector encodes those off-target axes too, and steering along it can damage unrelated capabilities such as factual recall or reasoning (Tan et al., 2024). A straightforward mitigation strategy is to localize the intervention to the specific layers and attention heads (resid-ual components) most responsible for the target behavior. But this is not enough, head selection alone leaves the intervention under-constrained: a difference-of-means update applied within the se-lected heads still carries off-target axes, reintroduc-ing precisely the directions that motivated localiza-tion. In this paper, we propose LOC US (Loc alized 
+
+Unembedding Steering), a fine-grained interven-tion framework that relies on lexical subspaces to precisely constrain steering. Specifically, L O-
+
+> C
+
+US uses these subspaces to to determine both the spatial locus of the intervention (at attention-head level) and the representational subspace on which the steering transformation should act on. Both heads and subspaces are isolated by evalu-ating their alignment with a sparse subset of the columns of the model’s unembedding matrix, cor-responding to tokens semantically linked to the 1arXiv:2609.31122v1 [cs.CL] 25 Sep 2026 Lexical atoms UP Sparse reconstruction of every head Where and what to steer                         
+
+> stupid hate idiot . . . concept words P
+> unembedding WU
+> select
+> atoms UP
+> Nprompts outputs of one head attention heads
+> ≈·
+> YUPC
+> atoms used Aℓ,h
+> sparse fit (SOMP)
+> few atoms, shared by all Nprompts fit quality e
+> atoms used
+> where
+> only heads that fit best
+> outlined: e > μ e+ 2 σe
+> <6% of parameters layers heads e(ℓ,h )
+> DoM s
+> project
+> onto atoms
+> ˜s
+> =
+> UPc
+> what
+> steer only along its own atoms
+> prompt The people who designed this update are honestly DoM clueless — a bunch of idiots I genuinely hate dealing with.
+> locus misguided — a group of people I really struggle to work with.
+
+Figure 1: The L OC US pipeline. A property dictionary P (here: stupid , hate , idiot ) selects columns of unembedding matrix WU to define the atoms matrix UP . (2) Each head’s output is reconstructed through aa subset of atoms in UP . Heads with low reconstruction error are retained. The steering vector s is restricted to the per-head selected atoms and added to the retained heads at inference. 
+
+property of interest/target attribute. These token sets can be automatically generated or user curated, providing a novel interpretability lever for guiding the steering transformation itself. To summarize, we propose: 1. An automated head selection procedure that identifies target attention heads by measuring their alignment with lexical content; 2. Subspace-projected steering vectors that re-strict the intervention to a localized, per-head lexical subspace; 3. An empirical evaluation on three models on toxicity reduction, sentiment control and syco-phancy suppression. 
+
+2 Related Work 
+
+While a vast interpretability research line has identi-fied property-relevant components at different gran-ularities (Clark et al., 2019; Wang et al., 2023; Todd et al., 2024; Basile et al., 2025a; Gandelsman et al., 2024), a steering-oriented line uses these local-ized components as intervention sites and evaluates whether the resulting intervention shifts the target metric while preserving unrelated capabilities, at the layer (e.g., Rimsky et al. (2024); Wang et al. (2025)) and, more rarely, head (Li et al., 2023; Izawa et al., 2026) level. Li et al. (2023) focus of LLaMA thruthfulness steering and select heads by fitting a per-head linear probe; Izawa et al. (2026) focus on persona traits in two models, first select-ing the most influential layer and then, within it, the heads most aligned with the steering vector, making it a method for head selection inside a single layer. In both cases, evaluation is tied to a single prop-erty, and the number of heads and the intervention strength are either swept or set manually. To our knowledge, an automatic, property-agnostic proce-dure for head-wise steering is thus still lacking in the activation steering literature, and constraining 
+
+what is injected through a property-aligned sub-space projection is entirely absent. 
+
+3 Background 
+
+Difference-of-means steering (DoM). Activa-tion steering modifies a model’s internal computa-tion at inference time by transforming the activa-tions of one or more intermediate modules, without updating any network weight. In the vision of (Elhage et al., 2021), transformer language models maintain a residual stream that is updated additively at every layer: each attention head and each MLP block produces a contribution that is summed into the stream. Because every module communicates with the rest of the network only through additive writes to this shared channel, injecting an external vector is structurally indistin-guishable from adding one more module’s output at that layer. This makes vector addition a natural intervention primitive. One of the simplest and most widely used ways to estimate such a direction is difference-of-means 
+
+(DoM) steering (Turner et al., 2023; Rimsky et al., 2024). Given a contrastive dataset of paired ex-amples: a set D+ that exhibits the target property 2and a set D− that lacks it, one extracts the residual-stream activation r(ℓ)(z) for every example z at a chosen intervention point at layer ℓ, pooling with some function over token positions, and estimates the steering vector as the difference between the class-conditional means: 
+
+s(ℓ) = 1
+
+|D +|
+
+X
+
+> z∈D +
+
+r(ℓ)(z) − 1
+
+|D −|
+
+X
+
+> z∈D −
+
+r(ℓ)(z). (1) 
+
+At inference, the steered forward pass replaces r(ℓ)
+
+with r(ℓ) + α s(ℓ), where the scalar α ∈ R controls intervention strength. DoM has a structural limitation that motivates our work: the estimated direction s(ℓ) inherits ev-ery axis along which D+ and D− differ, not only the target property: any spurious correlation of the labels in the contrastive data contributes to s(ℓ)
+
+and is injected into the residual stream at steering time (Tan et al., 2024). L OC US addresses the issue by localizing the intervention to a small set of atten-tion heads which can be used defined and, within each, to a property-aligned subspace. 
+
+Head selection with SOMP. In L OC US, atten-tion heads are selected based on by how strongly they align with a subspace defined by tokens rel-evant for the steering concept. Namely, we adopt the head-scoring procedure of Basile et al. (2025b), originally developed to identify semantically spe-cialized heads in multimodal transformers. Given a vocabulary subset P ⊂ V of concept-relevant tokens (e.g., P ={bad, awful, great} for sentiment steering), the authors define a property dictionary matrix by selecting columns of the unembedding matrix WU ∈ Rd×|V| corresponding to P:
+
+UP = WU [: , P] ∈ Rd×|P| , (2) The columns, called atoms , are the residual-stream directions that the model decodes onto the chosen tokens at the final logits. 
+
+Selecting Heads (L OC US-h) For each head 
+
+(ℓ, h ), one then asks how well its residual contri-bution o(ℓ,h ) ∈ Rd can be reconstructed from a sparse combination of property atoms, consistently across a calibration set of N examples. Because the unembedding sees activations after the final RMSnorm, comparing o(ℓ,h ) to UP directly would mismatch their respective scales; the authors ad-dress this by passing each head output through the final-layer RMSnorm, obtaining ¯o(ℓ,h ).The reconstruction is then performed by Simultaneous Orthogonal Matching Pursuit Head Layer                                    
+
+> L24·H21 EVR 0.111 film, movie, shows, story, series L24·H03 EVR 0.092 really, terrible, quite, great, wonderful L26·H27 EVR 0.089 always, even, really, many, today L24·H02 EVR 0.082 different, worst, better, anything, new L27·H31 EVR 0.081 bad, great, many, something, original
+> 0.004 0.111
+
+Figure 2: Per-head EVR scores and selected atoms. 
+
+Above: EVR matrix across all (layer, head) pairs for 
+
+IMDb on deepseek-7b; red squares mark the heads se-lected by the μ + 2 σ rule. Below: for the top-5 heads by EVR, the SOMP-selected property atoms in order of selection. 
+
+(SOMP) (Tropp et al., 2006), a sparse recovery algorithm that solves a problem of reconstructing a set of vectors with an n-dimensional sparse basis drawn from a fixed dictionary matrix by solving it in the form: 
+
+min  
+
+> C
+
+∥Y − UP C∥2 
+
+> F
+
+s.t. ∥C∥row-0 ≤ n, (3) where Y ∈ Rd×N stacks the N calibration activa-tions ¯o(ℓ,h )(z) as columns, C ∈ R|P|× N holds the per-sample reconstruction coefficients, and 
+
+∥·∥ row-0 counts the number of nonzero rows of 
+
+C. “Simultaneous” refers to the joint support con-straint: rather than fitting each sample indepen-dently, SOMP forces a single, shared atom set to explain the entire set of samples, so that the se-lected atoms reflect a stable property of the head. The output is a sparse set of tokens Aℓ,h ⊂ P 
+
+of size n: the property tokens whose unembed-ding atoms consistently explain the head’s output across the calibration set. To measure how well the set of atoms approximates the head output, we consider the explained-variance ratio (EVR): 
+
+e(ℓ,h ) = 1 − ∥Y −UP C(ℓ,h )∥2 
+
+> F
+> ∥Y∥2
+> F
+
+∈ [0 , 1] , where 
+
+C(ℓ,h ) is the coefficient matrix returned by SOMP with row-support Aℓ,h . A head whose outputs are well captured by a few atoms in UP scores high; a head whose outputs live mostly outside span( UP )
+
+scores low. 3MISTRAL -7B LLAMA -8B Prompt: POSSIBLE SPOILERS Prompt: Early in the movie, Cagney   
+
+> Steered continuation: AHEAD. It’s been a long time since I watched the first episode of this series. The stupidity and inanities that were present there made me want to throw up. But now, after watching this one, it
+> Steered continuation: ’s bad guy is so mean that he even kills a dog. It was such an unnecessary scene and it didn’t add anything to the story except for cheap shock value. I don’t think I’ve ever seen any of his movies before unless you count
+
+Table 1: Qualitative examples of L OC US steering positive →negative on the IMDb sentiment task. 
+
+4 Method 
+
+LOC US uses the idea of lexical subspaces defined in Equation (2) to both select heads and, within selected heads, select subspaces where to localize steering. The pipeline is shown in Figure 1 and explained, with design choices, below. In L OC US, the SOMP-based head scoring of Section 3 is repurposed as a steering-site selector, in a fully automatic way. The property dictionary P
+
+can be specified manually, generated with an LLM, or derived automatically from the contrastive data; we use the latter choice in our experiments. We score every head using the procedure in Section 3 on a calibration set of N concept-bearing examples, with a fixed atom budget. Then, we retain the heads whose EVR is unusually large relative to the rest of the network: S = (ℓ, h ) : e(ℓ,h ) >μe +2 σe , where μe and σe are the empirical mean and standard deviation of e(ℓ,h ) across all heads of the model. We denote the resulting data-driven cardinality by k and use it as the number of steering sites for all subsequent operations. The selected heads are depicted with orange squares in Figure 2 and Figure 3. 
+
+Selecting Subspaces. The dictionary matrix UP
+
+suggests another way of constraining steering: in-stead of using it for head selection, we could use it to directly constrain the steering vector to the property-aligned directions. How to do this de-pends first of all on where in the computational graph we want to act: at layer or head level? 
+
+Layer Level Subspaces (L OC US-s) The residual stream and the property atoms UP live in the same space, so the most direct subspace con-straint acts at the residual stream of every layer. We use UP as the dictionary and place an intervention at all layers. For each layer ℓ, let ¯o(ℓ) ∈ Rd denote the residual-stream response of a calibration prompt at that layer, averaged over tokens and after application of final RMSnorm, for the reason discussed in Sec-tion 3. We then run SOMP with dictionary matrix 
+
+UP and atom budget n to reconstruct the calibra-tion set’s ¯o(ℓ) with a single shared atom set Aℓ per layer. Those are the directions in UP that jointly ex-plain the layer’s outputs across calibration prompts. The steering vector is thus computed from the re-constructed activations: bo(ℓ) ∈ span Aℓ. At infer-ence, this reconstructed steering vector is applied to the original activations o(ℓ).
+
+Head Level Subspaces (L OC US-hs) A fair head-level alternative to layerwise steering must intervene with the same total number of steering parameters: a layerwise steering vector lives in 
+
+Rd, so intervening on H heads after head output projection would give H × d parameters and inflate the comparison. We instead intervene on the raw head output ˜o(ℓ,h ) ∈ Rd/H , i.e., the per-head latent before the output projection. Constraining the intervention to a sparse property-aligned subspace at this stage requires projecting a raw head activation in the span of the unmebedding directions returned by SOMP. How-ever, the property dictionary UP lives in residual-stream space, so we need to translate it backwards to raw-head space through the model’s decoding path, which results from the composition on three maps: W (ℓ,h ) 
+
+> O
+
+(attention output matrix, from raw head to residual stream), the final-layer RMSnorm, and the unembedding WU . Since RMSnorm is non-linear, we linearize it by replacing the per-token re-ciprocal norm with its calibration-set average over tokens ˆRMS , giving the head-level unembedding matrix :
+
+eU (ℓ,h ) 
+
+> P
+
+= U ⊤P diag( γ · ˆRMS −1) W (ℓ,h ) 
+
+> O
+
+(4) where γ is the final RMSnorm gain. eU (ℓ,h ) 
+
+> P
+
+lives thus in R|P|× d/H and each row is the direction in raw-head space whose contribution lands on the corresponding property token at the final logits, 4Table 2: LOC US vs. DoM, ITI (Li et al., 2023) and SMH (Izawa et al., 2026). DoM is the layer-wise difference-of-means update at every layer. Best target and MMLU value per task in bold , second best underlined.                                                                                                                                                              
+
+> TET IMDb Sycophancy
+> Method tox ↓(vs U) MMLU ↑PPL ↓POS ↓(vs U) MMLU ↑PPL ↓SYC ↓(vs U) MMLU ↑PPL ↓
+> Mistral-7B-I
+> Unsteered 0.237 (—) 0.620 7.2 0.630 (—) 0.624 6.8 66.5 (—) 0.620 7.2 DoM 0.060 ( −75% )0.614 8.2 0.254 ( −60% )0.620 6.9 61.5 ( −8% )0.619 7.4 ITI 0.102 ( −57% )0.616 8.1 0.444 ( −30% )0.621 6.8 58.5 ( −12% )0.612 7.6 SMH 0.075 ( −68% )0.623 7.6 0.552 ( −12% )0.621 6.8 68.0 ( +2% )0.619 7.2 LOC US 0.020 (−92% )0.621 8.2 0.009 (−99% )0.624 11.6 52.0 (−22% )0.619 8.7
+> deepseek-7B-I
+> Unsteered 0.241 (—) 0.514 10.7 0.658 (—) 0.483 8.3 57.0 (—) 0.514 10.7 DoM 0.042 ( −82% )0.512 12.0 0.365 ( −45% )0.478 8.4 41.5 ( −27% )0.513 11.4 ITI 0.332 ( +38% )0.513 11.0 0.202 ( −69% )0.463 8.5 37.4 ( −34% )0.512 11.4 SMH 0.016 (−93% )0.509 12.8 0.450 ( −32% )0.478 8.3 53.4 ( −6% )0.514 10.7 LOC US 0.026 ( −89% )0.514 13.5 0.007 (−99% )0.477 13.8 14.9 (−74% )0.513 20.4
+> Llama-8B-I
+> Unsteered 0.132 (—) 0.681 9.4 0.675 (—) 0.649 8.5 80.9 (—) 0.681 9.4 DoM 0.028 ( −79% )0.680 11.2 0.318 ( −53% )0.647 8.6 82.5 ( +2% )0.681 9.5 ITI 0.145 ( +10% )0.674 9.8 0.185 ( −73% )0.614 8.8 82.1 ( +1% )0.678 9.8 SMH 0.115 ( −12% )0.679 9.5 0.518 ( −23% )0.645 8.6 80.2 ( −1% )0.681 9.5 LOC US 0.020 (−85% )0.682 14.3 0.119 (−82% )0.649 13.6 83.8 ( +4% )0.678 11.4
+
+akin to a logit lens (nostalgebraist, 2020) performed at raw head level. Now, given this matrix, for each head we can compute with SOMP the sparse set of n property-relevant atoms set Aℓ,h . The steering update is constrained to span Aℓ,h and applied at inference to the original raw head output ˜o(ℓ,h ), so each inter-vention modifies only the components of the head output that the model is expressing along property-aligned directions. 
+
+Combining the two: Head Level Subspaces on Selected Heads (L OC US) A natural extension of L OC US-hs is to filter out completely heads we deemed unnecessary with L OC US-h. Thus, we introduce the complete L OC US setting that com-bines head selection with subspace projection: for each (ℓ, h ) ∈ S , the raw-head update is projected onto span Aℓ,h ; for heads outside S, no interven-tion is applied. The intervention is thus localized along both axes: a sparse set of property-expressing heads, and within each a sparse property-aligned subspace. 
+
+Strength normalization. Each one of the L O-
+
+> C
+
+US methods changes the norm of the overall steer-ing update compared to the standard DoM baseline. To compare L OC US at matched intervention bud-get, we rescale each variant so that its total inter-vention magnitude heuristically matches that of the unrestricted baseline. Generally speaking, if we have two modalities of steering q ∈ { q1, q 2}, inter-vention sites i with steering vectors at the residual stream level siq, we compute the strength multiplier as α2 =   
+
+> P
+> i∥si
+> 1∥2
+> P
+> i∥si
+> 2∥2
+
+. For layerwise variants siq lives in residual-stream space by construction; for per-head variants the raw-head update is first mapped to the residual stream through the head’s output projection. If α1 is the original steering coefficient, 
+
+β = α2 × α1. In our case, q1 is standard DoM and q2 is each L OC US variant we are testing. α1 is never set by hand: it is the only quantity swept, and the value reported in every table is the one selected on a validation split (Section A.4). 
+
+5 Experimental Setup 
+
+We evaluate L OC US on three tasks: toxicity miti-gation on ThoroughlyEngineeredToxicity (Luong et al., 2024) ( TET , QA format), sentiment redirec-tion on IMDb (Maas et al., 2011) (free-form con-tinuation, positive →negative) and sycophancy sup-pression on the persona data of Chen et al. (2025) (QA format). We evaluate three model families: Mistral-7B (Jiang et al., 2023), deepseek-7b (Bi et al., 2024), and Llama-8B (Dubey et al., 2024), using the Instruct/Chat variants on TET and Syco-phancy (matching their QA format) and the base 5Table 3: Ablation of the L OC US components. LOC US-h keeps only the EVR head selection ( μ + 2 σ, k heads, no subspace projection); L OC US-s projects the update on the property subspace at the residual stream of every layer (no head selection); L OC US-hs projects at the raw head output of every head (no selection); L OC US combines head selection with head-level projection.Best target and MMLU value per task in bold , second best underlined.                                                                                                                                                                                                                                                                     
+
+> TET IMDb Sycophancy
+> Method kα1/βtox ↓(vs U) MMLU ↑PPL ↓kα1/βPOS ↓(vs U) MMLU ↑PPL ↓kα1/βSYC ↓(vs U) MMLU ↑PPL ↓
+> Mistral-7B-I
+> Unsteered –00.237 (—) 0.620 7.2 –00.630 (—) 0.624 6.8 –066.5 (—) 0.620 7.2 LOC US-h 42 2 / 29.4 0.003 (−99% )0.612 13.0 41 4 / 49.5 0.012 ( −98% )0.622 11.2 42 4 / 53.8 59.3 ( −11% )0.615 8.3 LOC US-s 1024 2.5 / 1.10 0.010 ( −96% )0.614 10.1 1024 1.5 / 1.15 0.008 (−99% )0.622 7.9 1024 4 / 4.46 61.8 ( −7% )0.621 7.4 LOC US-hs 1024 3 / 5.15 0.036 ( −85% )0.618 8.5 1024 2 / 3.45 0.156 ( −75% )0.616 7.0 1024 4 / 7.66 58.6 ( −12% )0.620 7.4 LOC US 42 1 / 24.3 0.020 ( −92% )0.621 8.2 41 3.5 / 63.7 0.009 ( −99% )0.624 11.6 42 4 / 105 52.0 (−22% )0.619 8.7
+> deepseek-7B-I
+> Unsteered –00.241 (—) 0.514 10.7 –00.658 (—) 0.483 8.3 –057.0 (—) 0.514 10.7 LOC US-h 44 0.75 / 7.69 0.036 ( −85% )0.511 12.8 49 2 / 18.2 0.013 ( −98% )0.482 12.9 33 2 / 29.3 31.5 ( −45% )0.512 12.7 LOC US-s 960 1 / 147 0.020 (−92% )0.512 14.5 960 0.75 / 315 0.029 ( −96% )0.478 10.6 960 3 / 1047 55.9 ( −2% )0.512 10.9 LOC US-hs 960 1 / 1.68 0.080 ( −67% )0.511 11.4 960 1 / 1.74 0.279 ( −58% )0.476 8.4 960 2.5 / 4.92 47.3 ( −17% )0.513 11.2 LOC US 44 0.75 / 11.7 0.026 ( −89% )0.514 13.5 49 2 / 28.9 0.007 (−99% )0.477 13.8 33 3.5 / 95.7 14.9 (−74% )0.513 20.4
+> Llama-8B-I
+> Unsteered –00.132 (—) 0.681 9.4 –00.675 (—) 0.649 8.5 –080.9 (—) 0.681 9.4 LOC US-h 36 0.75 / 11.4 0.016 (−88% )0.674 12.1 44 2 / 39.2 0.070 (−90% )0.652 16.1 32 3 / 74.4 82.2 ( +2% )0.680 11.0 LOC US-s 1024 4 / 9.20 0.024 ( −81% )0.683 18.7 1024 3.5 / 12.9 0.264 ( −61% )0.641 10.5 1024 0.5 / 2.92 81.7 (+1% )0.681 9.4 LOC US-hs 1024 2 / 3.58 0.037 ( −72% )0.676 10.2 1024 1.5 / 2.72 0.369 ( −45% )0.648 8.7 1024 2 / 3.92 82.1 ( +1% )0.681 9.5 LOC US 36 0.75 / 19.2 0.020 ( −85% )0.682 14.3 44 1.5 / 50.5 0.119 ( −82% )0.649 13.6 32 3 / 159 83.8 ( +4% )0.678 11.4
+
+variants on IMDb (which calls for free-form con-tinuation). 
+
+Baselines and metrics. We compare L OC US-h and L OC US against the unsteered model and against standard DoM. As ablations for the sub-space projection variant, we report L OC US-s, L O-
+
+CUS-hs. We further compare L OC US with the two existing head-level methods: ITI (Li et al., 2023), which selects the same number k of heads through linear probes, and SMH (Izawa et al., 2026), which selects a single layer and the heads within it most aligned with the steering vector; both use their pub-lished strength grids. The target metric is the toxic-ity rate for TET (as measured using the RoBERTa classifier of Logacheva et al. (2022)), the positive rate for IMDb (measured with DistilBERT SST-2 (Sanh et al., 2019)) and, for Sycophancy, the 0–100 trait score assigned by an LLM judge following Chen et al. (2025). In all cases, lower values repre-sent more effective steering. To measure the impact of steering over general capabilities unrelated to the steering target, we use MMLU (Hendrycks et al., 2021), a 57-subject 5-shot multiple-choice test that probes factual knowledge through closed answers. We report perplexity (PPL) on the openings of 20k Wikipedia articles, following the protocol of Ro-driguez et al. (2025b) (disjoint 10k validation and test halves; Section A.4), as a sanity check that gen-eration is not gibberish; we treat a PPL above twice that of the unsteered model as degraded output. 
+
+Hyperparameters. LOC US has two free hyper-parameters: the SOMP atom budget at head selec-tion and at subspace projection. We fix the former to 50 atoms as in Basile et al. (2025b) and set the latter to n=20 from the fit data alone (Section A.4). The number of selected heads and the multiplier α2
+
+are determined automatically from calibration data, while the coefficient α1 is swept on a validation split and fixed at the value that minimizes the tar-get metric among those whose validation wiki-PPL is at most twice the unsteered model’s and whose validation MMLU is at least 0.99 × the unsteered value (Section A.4); the test numbers in all tables are obtained at that single value. Full evaluation protocol is reported in Section A. 
+
+6 Experimental Results 
+
+In the majority of cases, selecting heads beats steer-ing on whole layers, and selecting subspaces within heads beats selecting heads alone. Moreover, as an overall steering method, L OC US proves more effective than existing head-level methods (Li et al., 2023; Izawa et al., 2026) in most settings. We will go into details below. In Table 1 we show two ex-ample generations. Note: some of the generations can be offensive. 
+
+LOC US vs. layerwise and head-level baselines (Table 2). At the validation-selected strength, LOC US reaches a lower target than DoM in eight of the nine cells, the ninth being Sycophancy on Llama-8B, where, however, no steering method 6Table 4: Steering fitted on an external corpus (Jig-saw), evaluated on TET . Best target and MMLU value per task in bold .                                                     
+
+> Method kα1/βtox ↓(vs U) MMLU ↑PPL ↓
+> Mistral-7B-I
+> Unsteered –00.237 (—) 0.618 7.2 DoM –4 / 4 0.0943 ( −60% )0.618 8.7 LOC US 19 0.5 / 27.2 0.0358 ( −85% )0.619 8.3
+> Llama-8B-I
+> Unsteered –00.132 (—) 0.683 9.4 DoM –4 / 4 0.0374 ( −72% )0.677 11.9 LOC US 19 0.5 / 20.9 0.0325 ( −75% )0.679 13.4
+> deepseek-7B-I
+> Unsteered –00.241 (—) 0.513 10.7 DoM –3.5 / 3.5 0.0260 ( −89% )0.513 13.3 LOC US 32 1 / 19.7 0.0033 ( −99% )0.509 14.9
+
+moves the score, an thus we consider it a failure case for difference-of-means steering in general. It is also lower than ITI in the same eight cells. The reason we identified is that a probe ranks heads by how well they detect the property whereas EVR ranks them by how strongly they write it: Figure 5 shows the property is linearly decodable from a broad set of heads while Figure 4 shows only a few write strongly onto it. SMH, confined to a single layer and to its published strengths, under-steers everywhere except on TET /deepseek, the only cell where it beats L OC US. The sweep in Fig-ure 6 shows what L OC US pays for this: DoM loses MMLU as the strength grows while L OC US keeps it at the unsteered value and loses fluency instead, which is why its PPL is the highest in most cells. 
+
+LOC US variants ablations (Table 3 and Fig-ure 6). Head selection alone (L OC US-h) is be-low DoM in every cell and accounts for most of the gain. Projection on top of it protects capabili-ties further. Projection without selection does not help: L OC US-hs spreads the update over all heads and loses MMLU like DoM, while L OC US-s keeps MMLU but understeers. The one cell where L O-
+
+> C
+
+US trails L OC US-h ( IMDb /Llama-8B, 0.119 vs. 
+
+0.070 ) is a PPL effect: concentrating the budget on fewer directions makes PPL grow faster, and the next strength on the grid is rejected by the gate. 
+
+Fitting toxicity on an external corpus (Table 4). 
+
+With dictionary, head scores, subspaces and steer-ing vector all fitted on human-written Jigsaw com-ments, L OC US still reduces toxicity more than DoM fitted on the same data on all three models (85% , 75% and 99% vs. 60% , 72% and 89% ), with MMLU within 0.005 of the unsteered model. 
+
+Scaling to 67B (Table 5). The picture is un-changed at 67B: L OC US selects about 3% of the 
+
+6,080 heads and beats DoM on all three tasks (0.000 vs. 0.020 on TET , 0.009 vs. 0.387 on IMDb ,
+
+54 .4 vs. 58 .2 on Sycophancy), with MMLU within 
+
+0.01 of the unsteered model and the same trade-off as at 7B. 
+
+Parameter count and degrees of freedom. The full L OC US pipeline intervenes on at most 5.1% of attention heads, and within each retained head con-fines the steering update to a per-head subspace of 
+
+16% of the per-head dimensionality. Multiplying through, the total number of degrees of freedom used by L OC US is between 0.4% and 0.8% of the 
+
+L · d degrees of freedom of an unprojected DoM update applied at every layer. The improvements re-ported above are therefore achieved through a sub-stantially smaller, structurally and geometrically localized intervention. 
+
+7 Conclusions 
+
+We presented L OC US, a targeted steering proce-dure that confines difference-of-means activation steering to a small set of attention heads and, within each, to a sparse subspace of property-aligned di-rections selected through a user-controllable lexical dictionary. Across three model families and three tasks, this two-level localization yields stronger target-metric shifts than layerwise difference-of-means and existing head-level steering methods (Li et al., 2023; Izawa et al., 2026), while preserving the general capabilities computed through MMLU, using a fraction of the steering parameters of unre-stricted interventions. 
+
+Future Work. MMLU covers knowledge re-trieval on a wide variety of topics but does not evaluate fine-grained controllability (e.g. suppress-ing toxicity while preserving specific demographic content), which requires a dedicated benchmark. Contrary to prior head-selection criteria, which are derived from contrastive or probing data and there-fore propagate whatever bias that data carries into the heads selection procedure itself, L OC US allows interpretable filtering of the lexical directions we care most about (e.g., when steering for toxicity reduction, removing from the dictionary atoms re-lated to demographic content). Thus it would be interesting to analyze fine-grained controllability also at different curation levels of the property dic-tionary. Because L OC US only specifies where and 7Table 5: DoM vs. L OC US on deepseek-67B, test split. Best target and MMLU value per task in bold .                                                                          
+
+> TET IMDb Sycophancy
+> Method kα1/βtox ↓(vs U) MMLU ↑PPL ↓kα1/βPOS ↓(vs U) MMLU ↑PPL ↓kα1/βSYC ↓(vs U) MMLU ↑PPL ↓
+> Unsteered –00.286 (—) 0.721 5.8 –00.652 (—) 0.714 5.8 –075.8 (—) 0.721 5.8 DoM –2 / 2 0.020 ( −93% )0.714 7.3 –1 / 1 0.387 ( −41% )0.709 5.9 –4 / 4 58.2 ( −23% )0.721 6.0 LOC US 166 1 / 18.2 0.000 (−100% )0.728 9.1 186 2 / 28.1 0.009 (−99% )0.713 9.2 173 4 / 106 54.4 (−28% )0.714 9.4
+
+in what subspace to intervene, it is in principle compatible with any steering method. Composing LOC US with more sophisticated estimators (see e.g. (Rodriguez et al., 2025b)) is a natural direction for future work. 
+
+Limitations Main limitation of this method is that, as it is, it is only applicable in settings where the property is carried by some lexical difference. The method also tends to degrade fluency (as com-puted by PPL) more than factual reasoning. Capa-bility is measured with MMLU and PPL alone, so effects on open-ended reasoning are not covered. 
+
+Acknowledgments 
+
+The authors acknowledge the Area Science Park supercomputing platform ORFEO made available for conducting the research reported in this paper, and the technical support of the Laboratory of Data Engineering staff. IT and AC were supported by the project “Supporto alla diagnosi di malattie rare tramite l’intelligenza artificiale" CUP: F53C22001770002 and “Valutazione automatica delle immagini diagnostiche tramite l’intelligenza artificiale", CUP: F53C22001780002. LB was supported by the European Union – NextGenerationEU within the project PNRR “Finanziamento di progetti presentati da giovani ricercatori" - Mission 4 Component 2 Investment 1.2, CUP: J93C25000440001. VM was supported by the ISTA Responsible AI Program, made possible through the generous support of Garrett Camp and the Camp Foundation. FL was funded in part by the Austrian Science Fund (FWF) 10.55776/COE12. AC was supported by the Euro-pean Union – NextGenerationEU within the project PNRR “PRP@CERIC" IR0000028 - Mission 4 Component 2 Investment 3.1 Action 3.1.1. 
+
+References 
+
+Andy Arditi, Oscar Obeso, Aaquib Syed, Daniel Paleka, Nina Panickssery, Wes Gurnee, and Neel Nanda. 2024. Refusal in language models is mediated by a single direction. In Advances in Neural Informa-tion Processing Systems (NeurIPS) .Lorenzo Basile, Valentino Maiorca, Luca Bortolussi, Emanuele Rodolà, and Francesco Locatello. 2025a. Residual transformer alignment with spectral decom-position. Transactions on Machine Learning Re-search .Lorenzo Basile, Valentino Maiorca, Diego Doimo, Francesco Locatello, and Alberto Cazzaniga. 2025b. Head pursuit: Probing attention specialization in mul-timodal transformers. In Advances in Neural Infor-mation Processing Systems (NeurIPS) .Xiao Bi, Deli Chen, Guanting Chen, Shanhuang Chen, Damai Dai, Chengqi Deng, Honghui Ding, Kai Dong, Qiushi Du, Zhe Fu, et al. 2024. DeepSeek LLM: Scal-ing open-source language models with longtermism. 
+
+arXiv preprint arXiv:2401.02954 .Runjin Chen, Andy Arditi, Henry Sleight, Owain Evans, and Jack Lindsey. 2025. Persona vectors: Monitoring and controlling character traits in language models. 
+
+arXiv preprint arXiv:2507.21509 .Emily Cheng, Carmen Amo Alonso, Federico Danieli, Arno Blaas, Luca Zappella, Pau Rodriguez, and Xavier Suau. 2026. Genctrl – a formal controllability toolkit for generative models. In The Fourteenth In-ternational Conference on Learning Representations .Kevin Clark, Urvashi Khandelwal, Omer Levy, and Christopher D. Manning. 2019. What does BERT look at? an analysis of BERT’s attention. In Pro-ceedings of the 2019 ACL Workshop BlackboxNLP: Analyzing and Interpreting Neural Networks for NLP ,pages 276–286. Association for Computational Lin-guistics. Abhimanyu Dubey, Abhinav Jauhri, Abhinav Pandey, Abhishek Kadian, Ahmad Al-Dahle, Aiesha Letman, Akhil Mathur, Alan Schelten, Amy Yang, Angela Fan, et al. 2024. The Llama 3 herd of models. arXiv preprint arXiv:2407.21783 .Nelson Elhage, Neel Nanda, Catherine Olsson, Tom Henighan, Nicholas Joseph, Ben Mann, Amanda Askell, Yuntao Bai, Anna Chen, Tom Conerly, Nova DasSarma, Dawn Drain, Deep Ganguli, Zac Hatfield-Dodds, Danny Hernandez, Andy Jones, Jackson Kernion, Liane Lovitt, Kamal Ndousse, and 6 others. 2021. A mathematical framework for transformer circuits. https://transformer-circuits. pub/2021/framework/index.html . Trans-former Circuits Thread. 
+
+8Yossi Gandelsman, Alexei A. Efros, and Jacob Stein-hardt. 2024. Interpreting clip’s image representation via text-based decomposition. Leo Gao, Jonathan Tow, Baber Abbasi, Stella Bider-man, Sid Black, Anthony DiPofi, Charles Foster, Laurence Golding, Jeffrey Hsu, Alain Le Noac’h, Haonan Li, Kyle McDonell, Niklas Muennighoff, Chris Ociepa, Jason Phang, Laria Reynolds, Hailey Schoelkopf, Aviya Skowron, Lintang Sutawika, and 5 others. 2024. The language model evaluation har-ness. Dan Hendrycks, Collin Burns, Steven Basart, Andy Zou, Mantas Mazeika, Dawn Song, and Jacob Steinhardt. 2021. Measuring massive multitask language under-standing. In International Conference on Learning Representations (ICLR) .Neil Houlsby, Andrei Giurgiu, Stanisław Jastrz˛ ebski, Bruna Morrone, Quentin de Laroussilhe, Andrea Ges-mundo, Mona Attariyan, and Sylvain Gelly. 2019. Parameter-efficient transfer learning for NLP. In 
+
+Proceedings of the 36th International Conference on Machine Learning (ICML) , pages 2790–2799. Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2022. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations (ICLR) .Yoshihiro Izawa, Gouki Minegishi, Koshi Eguchi, So-suke Hosokawa, and Kenjiro Taura. 2026. Steer-ing at the source: Style modulation heads for robust persona control. In Proceedings of the 43rd Inter-national Conference on Machine Learning (ICML) .ArXiv:2603.13249. Albert Q. Jiang, Alexandre Sablayrolles, Arthur Men-sch, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Florian Bressand, Gianna Lengyel, Guil-laume Lample, Lucile Saulnier, Lélio Renard Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée Lacroix, and William El Sayed. 2023. Mistral 7b. arXiv preprint arXiv:2310.06825 .Kenneth Li, Oam Patel, Fernanda Viégas, Hanspeter Pfister, and Martin Wattenberg. 2023. Inference-time intervention: Eliciting truthful answers from a lan-guage model. In Advances in Neural Information Processing Systems (NeurIPS) .Varvara Logacheva, Daryna Dementieva, Sergey Ustyantsev, Daniil Moskovskiy, David Dale, Irina Krotova, Nikita Semenov, and Alexander Panchenko. 2022. ParaDetox: Detoxification with parallel data. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 6804–6818. Yao Lu, Max Bartolo, Alastair Moore, Sebastian Riedel, and Pontus Stenetorp. 2022. Fantastically ordered prompts and where to find them: Overcoming few-shot prompt order sensitivity. In Proceedings of the 60th Annual Meeting of the Association for Compu-tational Linguistics (ACL) , pages 8086–8098. Yun Luo, Zhen Yang, Fandong Meng, Yafu Li, Jie Zhou, and Yue Zhang. 2024. An empirical study of catastrophic forgetting in large language mod-els during continual fine-tuning. arXiv preprint arXiv:2308.08747 .Tinh Luong, Thanh-Thien Le, Linh Ngo, and Thien Nguyen. 2024. Realistic evaluation of toxicity in large language models. In Findings of the Associa-tion for Computational Linguistics: ACL 2024 , pages 1038–1047. Association for Computational Linguis-tics. Andrew L. Maas, Raymond E. Daly, Peter T. Pham, Dan Huang, Andrew Y. Ng, and Christopher Potts. 2011. Learning word vectors for sentiment analysis. In Proceedings of the 49th Annual Meeting of the Association for Computational Linguistics: Human Language Technologies , pages 142–150. nostalgebraist. 2020. Interpreting GPT: the logit lens. LessWrong. Nina Rimsky, Nick Gabrieli, Julian Schulz, Meg Tong, Evan Hubinger, and Alexander Turner. 2024. Steer-ing Llama 2 via contrastive activation addition. In 
+
+Proceedings of the 62nd Annual Meeting of the As-sociation for Computational Linguistics (Volume 1: Long Papers) , pages 15504–15522. Pau Rodriguez, Arno Blaas, Michal Klein, Luca Zap-pella, Nicholas Apostoloff, Marco Cuturi, and Xavier Suau. 2025a. Controlling language and diffusion models by transporting activations. In The Thirteenth International Conference on Learning Representa-tions .Pau Rodriguez, Michal Klein, Eleonora Gualdoni, Valentino Maiorca, Arno Blaas, Luca Zappella, Marco Cuturi, and Xavier Suau. 2025b. LinEAS: End-to-end learning of activation steering with a dis-tributional loss. In Advances in Neural Information Processing Systems (NeurIPS) .Victor Sanh, Lysandre Debut, Julien Chaumond, and Thomas Wolf. 2019. DistilBERT, a distilled version of BERT: smaller, faster, cheaper and lighter. arXiv preprint arXiv:1910.01108 .Melanie Sclar, Yejin Choi, Yulia Tsvetkov, and Alane Suhr. 2024. Quantifying language models’ sensitiv-ity to spurious features in prompt design or: How I learned to start worrying about prompt formatting. In International Conference on Learning Representa-tions (ICLR) .Nishant Subramani, Nivedita Suresh, and Matthew Pe-ters. 2022. Extracting latent steering vectors from pretrained language models. In Findings of the As-sociation for Computational Linguistics: ACL 2022 ,pages 566–581. 
+
+9Daniel Chee Hian Tan, David Chanin, Aengus Lynch, Brooks Paige, Dimitrios Kanoulas, Adrià Garriga-Alonso, and Robert Kirk. 2024. Analysing the gen-eralisation and reliability of steering vectors. In Ad-vances in Neural Information Processing Systems (NeurIPS) .Eric Todd, Millicent L. Li, Arnab Sen Sharma, Aaron Mueller, Byron C. Wallace, and David Bau. 2024. Function vectors in large language models. In In-ternational Conference on Learning Representations (ICLR) .Joel A. Tropp, Anna C. Gilbert, and Martin J. Strauss. 2006. Algorithms for simultaneous sparse approx-imation. Part I: Greedy pursuit. Signal Processing ,86(3):572–588. Alexander Matt Turner, Lisa Thiergart, Gavin Leech, David Udell, Juan J. Vazquez, Ulisse Mini, and Monte MacDiarmid. 2023. Steering language mod-els with activation engineering. arXiv preprint arXiv:2308.10248 . Earlier versions titled “Activa-tion Addition: Steering Language Models Without Optimization”. Kevin Ro Wang, Alexandre Variengien, Arthur Conmy, Buck Shlegeris, and Jacob Steinhardt. 2023. Inter-pretability in the wild: a circuit for indirect object identification in GPT-2 small. In International Con-ference on Learning Representations (ICLR) .Xintong Wang, Jingheng Pan, Liang Ding, Longyue Wang, Longqin Jiang, Xingshan Li, and Chris Bie-mann. 2025. CogSteer: Cognition-inspired selective layer intervention for efficiently steering large lan-guage models. In Findings of the Association for Computational Linguistics: ACL 2025 , pages 25507– 25522. Thomas Wolf, Lysandre Debut, Victor Sanh, Julien Chaumond, Clement Delangue, Anthony Moi, Pier-ric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz, et al. 2020. Transformers: State-of-the-art natural language processing. In Proceedings of the 2020 con-ference on empirical methods in natural language processing: system demonstrations , pages 38–45. Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren, Alexander Pan, Xuwang Yin, Mantas Mazeika, Ann-Kathrin Dombrowski, Shashwat Goel, Nathaniel Li, Michael J. Byun, Zifan Wang, Alex Mallen, Steven Basart, Sanmi Koyejo, Dawn Song, Matt Fredrikson, and 2 others. 2023. Representation engineering: A top-down approach to AI transparency. arXiv preprint arXiv:2310.01405 .
+
+10 Ethical Considerations 
+
+Our objective is to contribute to safer and more con-trollable language models. Methods that enable tar-geted modification of model behavior can support interpretability, auditing, and alignment; however, the same capabilities could be misused to suppress, emphasize, or disguise particular types of content. We therefore urge users and practitioners to assess potential downstream uses carefully, particularly when applying these methods in high-stakes or sen-sitive settings. The models and datasets used in this work comply with the terms of their respec-tive research licenses. Upon acceptance, we will make the code available for non-commercial re-search use under compatible licensing conditions. AI-assisted programming tools, including Claude Code, were used only to facilitate code completion during implementation. All AI-generated code was inspected, validated, and overseen by the authors. 
+
+A Implementation details 
+
+A.1 Models. 
+
+Our IMDb (sentiment) experiments use the base checkpoints mistralai/Mistral-7B-v0.1, meta-llama/Llama-3.1-8B, and deepseek-ai/deepseek-llm-7b-base, while the TET (toxicity) and Sycophancy experiments use the instruction-tuned counterparts mistralai/Mistral-7B-Instruct-v0.3, meta-llama/Llama-3.1-8B-Instruct, and deepseek-ai/deepseek-llm-7b-chat. All models are obtained from their official Hugging Face repositories and used at their released revisions in bfloat16, with no further fine-tuning. 
+
+A.2 Datasets and pipeline 
+
+TET (toxicity). The 2,546 prompts of Thorough-lyEngineeredToxicity (Luong et al., 2024) are split in half: 1,273 are held out for test and the remain-ing ones are split again into 636 fit and 637 val-idation prompts. For each fit prompt we sample completions from the unsteered model and label them with the RoBERTa toxicity classifier of Lo-gacheva et al. (2022). The toxic completions (up to 
+
+512 ) and an equal number of non-toxic ones form the contrastive fit set for the steering vector, the property dictionary and the EVR scores. 
+
+IMDb (sentiment). The fit set is 512 positive and 
+
+512 negative reviews from the IMDb train split. Evaluation prompts are the first 8 tokens of a test-split review, kept only if they contain no word of the Hu–Liu sentiment lexicon; the first 1,000 such prefixes form the test set and the next 1,000 the validation set. 
+
+Sycophancy. We use the sycophancy trait data of Chen et al. (2025): 512 trait-eliciting and 512 neu-tral responses, drawn from disjoint prompt halves of the train split, form the fit set. Evaluation follows the same work: 5 trait-eliciting system prompts 
+
+× 20 questions, scored 0–100 by Qwen2.5-32B-Instruct with the original judge prompt; the extrac-tion questions serve as validation and the evaluation questions as test. 
+
+Fit/validation/test usage. For all tasks the fit 
+
+split is used for (i) the property dictionary (Equa-tion (5)), (ii) the per-head EVR matrix, (iii) the per-head dictionaries D(ℓ,h ) and (iv) the difference-of-means steering vector. The validation split se-lects the steering coefficient α1 under the capability gate, and the test split is used only for the metrics reported in the tables. 
+
+Computational resources We ran the experi-ments on one NVIDIA H100 GPU. We used the HuggingFace Transformers library (Wolf et al., 2020) to obtain publicly available checkpoints for the Mistral, Llama and Deepseek models. The total compute time for each experiment is approximately 0.5 GPU hours. 
+
+A.3 Method Property dictionary. Let pS (w) and pD(w) de-note the Dirichlet-smoothed ( α=0 .01 ) unigram probabilities of word w under the property-bearing and non-property-bearing fit corpora. We score each word by its pointwise contribution to the KL divergence, 
+
+KL w = pS (w) log pS (w)
+
+pD(w) , (5) in both directions, remove stop words, keep the 70 
+
+highest-scoring words of each direction and take their union, dropping non-ASCII entries; this yields 
+
+139 –140 words per (model, task) cell, which we tokenize to obtain P and the property subspace 
+
+UP = WU [: , P]. On roughly 1/3 of the cells TET 
+
+the automatic list is further manually filtered to remove too generic terms. 
+
+Steering setting. Steering vectors are estimated using the atonce strategy: for every selected head, we run a single forward pass over the calibration 11 set with all hooks active and capture activations in parallel, then estimate each head’s difference-of-means update on those activations. This contrasts with an incremental strategy, in which one would estimate the update for the first layer’s hook, ap-ply it, then estimate the next layer’s update on the already-steered activations, and so on. The atonce variant is faster and avoids hook-order dependence at the cost of ignoring downstream effects of up-stream interventions. The steering vector is computed from activations 
+
+averaged over the sequence positions of the prompt. At inference, the resulting steering vector is applied only to the activation at the last token position of the generated continuation. 
+
+A.4 Evaluation Steering coefficient selection. The coefficient 
+
+α1 is the only swept quantity, and it is chosen once per (method, model, task) cell on the validation split; the tables report the test run at the selected value α∗
+
+> 1
+
+. For all locus variants and DoM the sweep grid is: α1 ∈ { 0.25 , 0.5, 0.75 , 1, 1.5, . . . , 4}. Ref-erence methods are swept with the grid indicated in the respective apper α ∈ { 5, 10 , . . . , 30 } for ITI, and α ∈ { 0.5, . . . , 14 } for SMH. A grid point is ad-missible if its validation wiki-PPL is at most twice the unsteered model’s and its validation MMLU is at least 0.99 × the unsteered value; α∗ 
+
+> 1
+
+is the admissible point with the lowest validation target metric. 
+
+Generation. On TET we sample 2 completions of 64 tokens for each of the 615 test prompts ( 308 
+
+on validation); on IMDb one completion of 50 to-kens for each of the 1,000 prompts; on Sycophancy 
+
+2 completions of 64 tokens for each of the 100 (sys-tem prompt, question) pairs. Sampling uses tem-perature 1.0, with top-p 0.3 and repetition penalty 
+
+1.2 on TET and IMDb .
+
+Control Metrics. PPL-Wiki follows the pro-tocol of Rodriguez et al. (2025b): it is the mean per-passage perplexity over 20k English Wikipedia articles (Wikimedia 20231101 dump), each scored from its opening on the first 50 tokens; validation and test use disjoint halves (10k passages each). The degeneration gate is relative: an operating point is admissible if its validation PPL-Wiki is at most twice that of the unsteered model. MMLU is the 57-subject 5-shot accuracy computed with the EleutherAI lm-evaluation-harness (Gao et al., 2024); its 14,042 items are split once, strat-ified by subject, into a validation half used by the selection gate and a test half reported in the tables (the Jigsaw and 67B tables use the full set). 
+
+ITI baseline. Following (Li et al., 2023)., we train one logistic-regression probe per attention head (sklearn LogisticRegression, C=1.0, L2, max_iter=1000, no feature standardization) on the last-token per-head activations (the o_proj inputs), with classes balanced to the minority count and 2-fold cross-validation, and rank heads by mean held-out accuracy, selecting the top K with K set to LOCuS-h’s head count. 
+
+Table 6: Choosing the sub-space budget from the ef-fective dictionary. Small-est number of atoms at which the mean fit-time cumulative EVR over all heads exceeds 0.25 .                  
+
+> Task Model n⋆
+> TET Mistral-7B 22 deepseek-7B 20 Llama-8B 24 deepseek-67B 17
+> IMDb Mistral-7B 24 deepseek-7B 22 Llama-8B 25 deepseek-67B 22 Sycophancy Mistral-7B 19 deepseek-7B 16 Llama-8B 19 deepseek-67B 14 median 21
+
+Where the budget 
+
+n=20 comes from. 
+
+The value used in the main tables is fixed from the fit data alone, with no access to any steering met-ric. For each (task, model) cell we replay the fit-time SOMP de-composition of Equa-tion (3) on the effec-tive per-head dictio-naries eU (ℓ,h ) 
+
+> P
+
+with a budget of 50 atoms, which yields, for ev-ery head, the cumula-tive EVR e(ℓ,h )(n) of Section 3 as a func-tion of the number of atoms retained. We then read off n⋆ = min 
+
+n
+
+n : mean (ℓ,h ) EVR (ℓ,h )(n) >
+
+0.25 
+
+o
+
+, the smallest budget at which the average head has a quarter of its fit-time variance recon-structed by its own atoms, with the average taken over all heads. Table 6 reports n⋆: over the twelve cells it lies in [14 , 25] (median 21 ), and no cell asks for a budget far from 20 , which motivates the sin-gle value n=20 used for L OC US and L OC US-hs throughout Table 3. The rule is defined for the per-head dictionaries; for the per-layer L OC US-s we set n=10 by hand. 
+
+B Head selection matrices 
+
+Figures 3, 4, and 5 visualize the per-head signals underlying L OC US and the ITI baseline. Figure 3 plots the EVR matrix over all (layer, head) pairs, with heads retained by the μ + 2 σ rule marked in 12 orange; Figure 4 shows the same scores with heads ranked by EVR within each layer. Figure 5 shows the linear-probe validation accu-racy used by ITI, in the same layout. Unlike EVR, high probe accuracy is broadly distributed across heads and layers. 
+
+C Strength Comparison 
+
+Figure 6 shows the full validation sweep behind Tables 2 and 3: for every (task, model) cell, the target metric against MMLU as α1 grows, for DoM and the four L OC US variants, with the selected α∗
+
+> 1
+
+circled. On Sycophancy with Llama-8B no variant, at any strength, moves the score away from the unsteered value (the whole panel spans less than two points of sycophancy score), which is why every method reports an unchanged target on that cell. 13 0 5 10 15 20 25 30 0510 15 20 25 30 
+
+> Layer
+
+Mistral-7B / TET (k=42) 
+
+0.0071 0.1651 
+
+0 5 10 15 20 25 30 0510 15 20 25 30 
+
+Mistral-7B / IMDb (k=41) 
+
+0.0048 0.1931 
+
+0 5 10 15 20 25 30 0510 15 20 25 30 
+
+Mistral-7B / Sycophancy (k=42) 
+
+0.0065 0.1437 
+
+0 5 10 15 20 25 30 0510 15 20 25 
+
+> Layer
+
+deepseek-7B / TET (k=44) 
+
+0.007 0.126 
+
+0 5 10 15 20 25 30 0510 15 20 25 
+
+deepseek-7B / IMDb (k=49) 
+
+0.0040 0.1114 
+
+0 5 10 15 20 25 30 0510 15 20 25 
+
+deepseek-7B / Sycophancy (k=33) 
+
+0.008 0.114 
+
+0 5 10 15 20 25 30 
+
+Head 
+
+0510 15 20 25 30 
+
+> Layer
+
+Llama-8B / TET (k=36) 
+
+0.00643 0.07699 
+
+0 5 10 15 20 25 30 
+
+Head 
+
+0510 15 20 25 30 
+
+Llama-8B / IMDb (k=44) 
+
+0.00738 0.08249 
+
+0 5 10 15 20 25 30 
+
+Head 
+
+0510 15 20 25 30 
+
+Llama-8B / Sycophancy (k=32) 
+
+0.0083 0.1224 Figure 3: Per-head EVR matrices for the nine (model, task) cells behind Table 3; orange boxes mark the μ + 2 σ-selected heads and k is their count. 
+
+14 Figure 4: EVR on heads sorted by EVR value. Per-head EVR scores for the nine (model, task) cells, heads sorted by EVR within each layer (rank 0 = highest). Inset reports the number of heads selected by the μ + 2 σ rule and their mean EVR. 
+
+15 Figure 5: Sorted probe accuracy for ITI. Per-head linear-probe validation accuracy for the nine (model, task) cells, same layout as Figure 4. Inset reports the head count selected by ITI (the same k as L OC US) and their mean probe accuracy. 
+
+16 Figure 6: Removal–capability trade-off over the strength sweep, validation split. Each panel sweeps the steering coefficient α1 ∈ { 0.25 , . . . , 4} (annotated next to each marker) for one (task, model) cell and plots the validation target metric ( x, lower is better) against validation MMLU ( y, higher is better); the black star is the unsteered model. Points whose validation wiki-PPL exceeds twice the unsteered model’s are omitted (MMLU itself is not gated in the plot); A black ring marks each variant’s selected α∗
+
+> 1
+
+, i.e. the operating point Table 3 reports at test. 
+
+17

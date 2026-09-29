@@ -1,0 +1,804 @@
+Title: Pinocchio: Fast Uncertainty Estimates for Black-Box Language Models
+
+URL Source: https://arxiv.org/pdf/2609.24881v1
+
+Published Time: Tue, 22 Sep 2026 03:10:11 GMT
+
+Number of Pages: 34
+
+Markdown Content:
+Published as a conference paper at COLM 2026 
+
+# Pinocchio: Fast Uncertainty Estimates for Black-Box Language Models 
+
+Kevin David Hayes 1, Arka Pal 2, Haosong Zhang 3, Tom Goldstein 1, Micah Goldblum 2,4 
+
+> 1
+
+University of Maryland 2Ritual AI 3Fudan University 4Columbia University 
+
+## Abstract 
+
+In high-stakes decision-making applications of large language models (LLMs), practitioners require not only accurate LLMs but also uncertainty estimates for their predictions. Existing approaches to uncertainty esti-mation for LLMs require access to log-probabilities output by the model or require fine-tuning access. However, many industrial LLM products use closed-source API models, and many such API models like GPT do not return log-probabilities and may not allow fine-tuning. We introduce PINOCCHIO , an external calibrator that estimates the correctness of re-sponses from black-box API models. Trained jointly on responses from seven LLMs, it achieves 0.862 AUROC predicting the correctness of held-out responses from those same models, and shows zero-shot transfer to thirteen unseen models across eight organizations. Our model needs only a single forward pass to generate an uncertainty estimate and requires no access to the target model’s logits, weights, or internal states. A lightweight text only 0.8B checkpoint matches our largest model’s AUROC. We re-lease code for adding uncertainty estimation to existing repos in only two additional lines of code. 
+
+## 1 Introduction 
+
+A physician asks GPT whether two medications interact. The model replies confidently, and incorrectly. Nothing in the API response flags this failure. This failure mode is not merely hypothetical, it is commonplace. As large language models are deployed in medicine, law, scientific research, and software engineering, wrong answers delivered with high confidence or without any indication of uncertainty at all remain an obstacle to trustworthy deployment. The closed-source models that dominate production (GPT-5, Claude, Gemini) expose little of the internal signal that might warn when they are wrong, and recent models increasingly hide even token log-probabilities, yet these are precisely the models that most need reliable uncertainty estimates. Existing approaches to uncertainty estimation for LLMs face a fundamental tension between access and performance. Logit- and representation-based methods [23] achieve reasonable performance but require white-box access that closed-source providers do not expose. Black-box alternatives like verbalized confidence [44, 52], self-evaluation [23], and semantic entropy [29] pay a steep cost: verbalized confidence is poorly calibrated, self-evaluation inherits the model’s blind spots, and semantic entropy requires 5–10 × the inference budget. Fast and accurate uncertainty estimation for black-box API models remains an open problem. 
+
+We introduce P INOCCHIO , a family of learned uncertainty estimators that predict whether a model’s response is correct from a single (question, response) pair, without access to log-probabilities, multiple samples, or model internals. Rather than extracting uncertainty from the target model itself, we train a small calibrator (Figure 1) that takes the question, the response, and the identity of the model that produced it, plus any associated images for vision-language tasks, and outputs a probability of correctness. We train P INOCCHIO 
+
+> 1
+
+Department of Computer Science, University of Maryland. 2Ritual AI. 3Fudan University. 
+
+> 4
+
+Department of Computer Science and Department of Electrical Engineering, Columbia University. Correspondence: khayes1@umd.edu , micah.g@columbia.edu .
+
+1arXiv:2609.24881v1 [cs.AI] 21 Sep 2026 Published as a conference paper at COLM 2026 STAGE 1 Response Generation Image 
+
++"What is the best diagnosis?"    
+
+> Question Claude Target VLM "Acute cerebral infarction."
+> Response
+> STAGE 2 Uncertainty Estimation Q: "What is the best diagnosis?"
+> A: "Acute cerebral infarction." Pinocchio P(correct)
+
+0.47 
+
+Figure 1: An external calibrator scores a target model’s response without touching the model internals or logits. It reads the question, response, and image and outputs a proba-bility of correctness. This example illustrates the intended workflow; the displayed score 
+
+P(correct ) = 0.47 is illustrative. Adapted from MMMU [54]. jointly on responses from seven LLMs that span a wide capability range (Section 3.3). It reaches 0.862 AUROC predicting the correctness of held-out responses, and P INOCCHIO also transfers zero-shot to thirteen models absent from training with a mean AUROC of 0.814 (Section 4.4). A single forward pass produces a correctness probability without sampling, logit access, or modification of the target model. All of our uncertainty estimators are trained via supervised learning; the zero-shot transfer results are simply evaluations of the trained calibrator on LLMs whose responses it never saw, not a separate method. We summarize our contributions as follows: 1. We release P INOCCHIO , an auxiliary uncertainty estimator for black-box LLMs. PINOCCHIO is trained on responses from an ensemble of popular LLMs, including closed API models, reaching 0.862 AUROC on held-out responses with strong calibration relative to uncertainty-estimation baselines. Estimating uncertainty requires only a single forward pass, without access to log-probabilities, sampling, or model weights, and assigns correctness probabilities to responses from models that expose no internal signal. 2. A small uncertainty estimator. Our released 0.8B checkpoint retains 99% of our largest model’s AUROC. 3. Zero-shot transfer across model families. The same calibrator transfers to thirteen unseen models across eight organizations. 4. Vision-language data supplies training signal that transfers to text. Strong models saturate many text-only datasets, so errors are scarce. Vision-language benchmarks still elicit frequent errors, and what the estimator learns from them transfers to text-only benchmarks, improving text-only calibration when hard text examples are limited (Section 4.3). 
+
+## 2 Related work 
+
+Uncertainty quantification in LLMs. Existing methods fall into three categories. Token-level approaches use output probabilities [23, 40] but conflate confidence over a sequence of tokens with confidence over the answer non-uniquely expressed by that sequence. Sampling-based methods measure consistency across multiple generations [5, 10, 19, 29], but require a large number of forward passes, multiplying API costs. Verbalized approaches prompt models to state their confidence [32, 35, 44], but LLMs are systematically overconfident [15, 21, 52]. When model internals are accessible, probing hidden states [2, 4, 27] or training supervised UQ modules [26, 42] yields stronger signals, but these white-box methods are inapplicable to closed-source models. Selective prediction and generation instead use confidence to abstain or control prediction and generation [14, 30]. 2Published as a conference paper at COLM 2026 Table 1: PINOCCHIO estimates uncertainty for black-box API models in one forward pass, improves with data, transfers across model families, and handles multimodal targets.                                                  
+
+> Method Black-box Single-pass Scales with data Target model agnostic Multimodal Logit-based [23] ✗✓✗✓✗
+> MC Dropout [11] ✗✗✗✓✗
+> Semantic Entropy [29] ✓✗✗✓✗
+> Verbalized Conf. [44] ✓✓✗✓✗
+> ORM / Verifiers [8] ✗✓✓✗✗
+> LLM-as-Judge [60] ✓✓✗✓✗
+> White-box Probe [24] ✗✓✓✗✗
+> APRICOT [45] ✓✓✓✗✗
+> PINOCCHIO (ours) ✓✓✓✓✓
+
+Fine-tuned uncertainty judges. Fine-tuning can teach an answering model to expose or act on its uncertainty. Lin et al. [32] supervise GPT-3 to generate calibrated verbal confidence, including under distribution shift. R-Tuning [56] constructs refusal-aware instruction data so that a model learns to answer known questions and abstain on questions outside its knowledge. Both approaches require training access to the model whose uncertainty they seek to improve. Relevant to our work, Kapoor et al. [24] train probes and LoRA adapters on the target model’s hidden states to predict the target model’s response correctness, outperforming black-box baselines but requiring open-weight access to the target model. APRICOT [45] is the most closely related black-box approach to P INOCCHIO : this work trains an auxiliary model to predict an LLM’s confidence from input-output pairs, unlocking uncertainty estimation for black-box API models. P INOCCHIO extends this work by training a single calibrator on multiple target models simultaneously, introducing model-identity tags, and demonstrating the benefit of training on multiple target models. We further show that P INOCCHIO generalizes to unseen target models, handles vision-language problems, and we use newer and stronger target models that saturate many benchmarks and require carefully constructing a training set for P INOCCHIO that contains sufficiently many examples of the target models being incorrect. 
+
+Data scaling and vision-language uncertainty. Table 1 summarizes how existing UQ methods meet the desiderata we target. Non-learned methods (verbalized confidence, semantic entropy, LLM-as-judge) have no mechanism to improve with additional data. In an ablation, P INOCCHIO ’s performance scales log-linearly with training examples (Section 4.5). Strong LLMs still err frequently on vision-language benchmarks [16, 31], which makes them a rich source of the hard training examples a calibrator needs; uncertainty estimation for VLMs itself remains underexplored. P INOCCHIO treats these frequent vision-language errors as a rich training signal, and that signal transfers to text, so a single checkpoint trained jointly to estimate uncertainty on vision-language and language-only tasks exhibits strong performance on both. Existing uncertainty estimation methods each drop at least one property we require: they need multiple forward passes [58], depend on grounding annotations [37], or train a critic bound to one target model [55]. Others [28, 59] have been evaluated only within a single model family, leaving cross-model-family generalization untested. To our knowledge, no prior work delivers a black-box, single-pass uncertainty estimator that learns from data and generalizes across models. 
+
+## 3 Method 
+
+3.1 Problem formulation 
+
+Let Q denote a question, including any images associated with it, and let A be a candidate an-swer produced by target model Mtarget , including any chain-of-thought or reasoning tokens the API exposes. We train f (Q, A, M) ∈ [0, 1 ] to infer whether A is correct, where M is an optional model-identity tag. The training set can then be written D = {(Qi, Ai, Mi, yi)}Ni=1,with yi ∈ { 0, 1 }. PINOCCHIO outputs P(y = 1 | Q, A, M). We allow the calibrator to 3Published as a conference paper at COLM 2026 condition on the model-identity tag M so that it can use model-specific patterns to identify uncertainty, noting a slight gain over model-agnostic estimation (Appendix R.1). When predicting uncertainty for new target models, we simply omit the model-identity tag. We measure both discrimination and calibration in Section 4 using AUROC, Brier score, and ECE. 
+
+3.2 Architecture and training 
+
+We fine-tune Qwen3-VL-8B-Instruct [3] with LoRA [22] (rank 32, α = 64) on all linear layers. This VLM processes both text and image inputs in a single architecture. Text-only benchmarks have no images, so we fill the image slot with a blank uniform-gray placeholder that carries no visual signal, keeping a single input format for text and vision-language examples. We format each input as a chat-style prompt containing the question, response, and optional benchmark and model-identity metadata (Appendix N); including metadata raises AUROC from 0.813 to 0.863 (Section 4.5). The model predicts a single token, i
+
+(incorrect) or ii (correct), and we extract the correctness probability via softmax over the two logits: 
+
+P(correct ) = exp (zii )
+
+exp (zi) + exp (zii ) (1) We train the model with cross-entropy loss on this final token only. Full training config-uration is in Appendix C; hyperparameters in Appendix B; training data breakdown in Appendix A. 
+
+3.3 Training data 
+
+Since strong models achieve very high scores on popular benchmarks, the central challenge in training a calibrator is assembling enough examples where strong models are wrong. We address this deficit by selecting benchmarks with both correct and incorrect responses, including vision-language data where models tend to be weaker, and pooling responses from several target models. Our training mixture contains responses from Claude Fable 5 ,
+
+Claude Opus 5 , GPT-5.6 , and Kimi 3 , together with lower-capability sources GPT-5-mini ,
+
+GPT-5.2 , and Qwen3.5-397B , across 20 benchmarks. Refusals and empty responses are retained and labeled incorrect. None of the thirteen target models we use in zero-shot transfer experiments appear in this training mixture. We grade responses using exact or fuzzy matching on 15 benchmarks and GPT-5-mini as a judge on the five that require rubric-based grading; Appendix L tests the robustness of the latter labels. All responses to the same question are assigned to the same split. 
+
+Benchmark selection. We design the benchmark mixture around three criteria. First, 
+
+difficulty calibration : we prioritize benchmarks where strong models achieve 20–80% accuracy, ensuring a sufficiently balanced class distribution. Benchmarks that are too easy (e.g., MMLU, >85% accuracy) or too hard (e.g., FrontierMath, <5%) provide little discriminative signal. Second, domain diversity : we span seven domains (Table 2) to prevent the calibrator from learning domain-specific shortcuts: consistent with this, leave-K-out cross-validation shows a mean AUROC gap of only 0.002 between included and excluded benchmarks (Appendix Table 16), i.e. no single domain is crucial. Third, format and modality heterogeneity :we include multiple-choice, open-ended, and binary formats across both text-only and vision-language modalities, teaching the calibrator general correctness signals rather than format-specific heuristics. 
+
+Multi-model training. Pooling responses from several target models increases both the amount and variety of training data. Successively adding lower-capability sources to the pool of high-capability sources improves mean transfer across eleven unseen models (Table 4). 4Published as a conference paper at COLM 2026 Table 2: The mixture spans 7 domains and 2 modalities in the 20–80% accuracy band. 
+
+Benchmark mixture spanning 7 domains and 2 modalities. Of 20 benchmarks, 9 are text-only and 11 are vision-language.                 
+
+> Domain Benchmarks Modality
+> Mathematics OmniMath, MathVista, MathVerse, MathVision T+V Science GPQA Diamond, ChemBench TProfessional and coding PRBench, ARC-AGI TGeneral SimpleQA, LiveBench, BBEH TMultimodal MMMU, MMStar, MM-Vet, CharXiv, VizWiz VSpatial RealWorldQA, HallusionBench VFrontier HLE, HLE-Multimodal T+V
+
+## 4 Experiments 
+
+4.1 Experimental setup Target models. PINOCCHIO is trained jointly on responses from the seven models de-scribed in Section 3.3. We evaluate the same calibrator on held-out questions answered by those same models whose responses were used for training and zero-shot on thirteen target models absent from training (Section 4.4). Unless otherwise stated, experiments use our 8B calibrator; Section 4.5 evaluates smaller variants. 
+
+Benchmarks. We evaluate on 20 benchmarks across 7 domains, including 9 text-only and 11 vision-language benchmarks. Full benchmark details and citations are in Appendix M. 
+
+Baselines. We compare against verbalized confidence, Platt and isotonic recalibration, response length, an LLM judge, and proxy semantic entropy and self-consistency computed from N=5 Qwen3-VL-8B samples. The first six use the full held-out test set of 1,953 samples (question-level split); the two proxy sampling baselines use its 1,376-example text-only subset. Because the proxy variants sample a stand-in model rather than the target, we additionally evaluate a full suite of faithful sampling estimators run directly on open targets: semantic entropy [29], self-consistency [47], the graph-theoretic measures of Lin et al. [33], SPUQ [13], and the logit-free conformal method of Su et al. [43] (Section 4.2; Appendix P). Implementation details are found in Appendix O. 
+
+Metrics. We report AUROC (area under the receiver operating characteristic curve), which measures the ability to rank correct responses above incorrect ones, regardless of threshold. We include 95% BCa bootstrap confidence intervals from 2,000 resamples. We addition-ally report Brier score and expected calibration error (ECE; 15 equal-width bins) [17] for calibration, and use DeLong’s test [9] for paired full-set AUROC comparisons. 
+
+4.2 Main results 
+
+PINOCCHIO separates correct from incorrect responses far better than any single-pass black-box baseline (0.86 vs. 0.65 AUROC) and is far better calibrated than a model’s own verbalized confidence (Table 3). Per-model AUROC, Brier, and ECE are in Appendix Table 8. Baseline and ablation comparisons use the matched 1,953-response test set. On this set, P INOCCHIO 
+
+achieves 0.863 AUROC at predicting the target model’s correctness, compared with 0.649 for the strongest single-pass black-box baseline (Table 3; Appendix E). Figures 2 and 3 use the same evaluation set. The single-pass and sampling baselines were computed once on this set and were not rerun for P INOCCHIO or newer transfer targets, several of which require per-target model or API access; calibration of P INOCCHIO is reported in Tables 8 and 5. Appendix K reports significance tests and how large each gap is for the baseline comparisons, and Appendix R.1 reports further input ablations. 5Published as a conference paper at COLM 2026 Table 3: A trained calibrator predicts black-box correctness far better than any single-pass baseline. Main results on the held-out test set (1,953 examples, question-level split). The P INOCCHIO row contains the released calibrator; baselines are computed on the same responses). Brackets give 95% bootstrap CIs. Differences between P INOCCHIO and each full-set baseline are significant by DeLong’s test (Appendix K). 
+
+Method AUROC ↑ Brier ↓ ECE ↓
+
+Verbalized (raw) 0.610 [.590, .624] 0.326 0.299 Verbalized (Platt) 0.610 [.590, .624] 0.232 0.034 Verbalized (Isotonic) 0.644 [.620, .667] 0.231 0.009 Response length 0.566 [.542, .592] 0.237 0.028 Combined (verb.+len.) 0.649 [.624, .673] 0.229 0.021 LLM-as-judge 0.532 [.524, .540] 0.257 0.110 Proxy sem. entropy † 0.467 0.340 0.266 Proxy self-consist. † 0.466 0.340 0.266 PINOCCHIO (ours) 0.863 [.847, .879] 0.164 0.107       
+
+> †Text-only subset (1,376 samples); CIs omitted. 0200 400 600 800 1000 1200 1400
+> Count 0.0 0.2 0.4 0.6 0.8 1.0
+> Predicted P(correct)
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Observed frequency
+> Perfect calibration Calibrator (ECE=0.086) Verbalized (ECE=0.299)
+
+Figure 2: PINOCCHIO ’s probabilities are well-calibrated; raw verbalized confidence is not. Reliability diagram on the held-out test set. P INOCCHIO ’s probabilities track observed accuracy far more closely than raw verbalized confidence, which remains overconfident on incorrect responses. 
+
+Takeaway 
+
+A small external calibrator predicts black-box correctness far better than the confidence a model expresses about its own responses (0.88 vs. 0.65 AUROC). Our external calibrator is also far better calibrated than raw verbalized confidence. 
+
+On the 397 test questions where the models whose responses we used to train P INOCCHIO 
+
+disagree (at least one response correct and at least one incorrect, so every response to a question shares the same difficulty), P INOCCHIO still ranks the correct responses above the incorrect ones, which no predictor blind to the response could do (Appendix E.7). This experiment shows that our model reads the response, not just the difficulty of the question. An input ablation separates the two cues the calibrator could rely on: how hard the question is for the model and the content of the answer itself (Table 11). Removing the question leaves most of the signal intact, so the calibrator reads the answer, not just question difficulty; but the question still contributes, so it uses both. 6Published as a conference paper at COLM 2026 0.0 0.2 0.4 0.6 0.8 1.0 
+
+False Positive Rate 
+
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> True Positive Rate
+> Random (0.500) Response length (0.566) Combined (0.649) Verbalized (raw) (0.610) Verbalized (Isotonic) (0.644) Pinocchio (ours) (0.878)
+
+Figure 3: PINOCCHIO separates correct from incorrect responses far more cleanly than single-pass baselines. ROC curves on the held-out test set of 1,953 examples. 
+
+Takeaway 
+
+The calibrator relies on both identifying questions that are hard for the target model and interpreting linguistic cues in the target model’s response. 
+
+If the calibrator merely read hedges, adding or removing words like “maybe” should swing its score. Instead, hedges such as “maybe” or “I think” that make a human reader judge an answer as less confident change the calibrator’s score only slightly: stripping hedge words from every response shifts AUROC by +0.0015 and injecting them shifts it by −0.0185 (Table 12). The calibrator responds to a property of the response that the surface hedges do not control. 
+
+Sampling baselines without a proxy model disadvantage. To remove the disadvantage that sampling baselines suffer from by using a proxy model, we also try drawing samples directly from LLaMA-3.1-8B and evaluate semantic entropy, self-consistency, the estimators of Lin et al. [33], SPUQ [13], and the conformal estimator of Su et al. [43]. Even then, these estimators stay near chance on the hard suite, far below P INOCCHIO scored on the same responses, and drawing more samples does not narrow the gap. The same pipeline behaves as expected on easy short-form benchmarks, so the failure is specific to hard reasoning. Detailed results are in Appendix P. 
+
+4.3 Performance across benchmarks and modalities 
+
+PINOCCHIO performs comparably on text and vision-language responses, so modality-specific calibrators are unnecessary in this evaluation. Its accuracy varies more by task than by modality: structured mathematical benchmarks produce the clearest separation, while specialized and expert-level benchmarks are harder (Appendix Table 13). Beyond coverage, vision-language data acts as training-signal augmentation . Adding the vision-language set improves text AUROC most when hard text data is scarce (Appendix Table 33); the benefit tapers as more text examples are supplied. 7Published as a conference paper at COLM 2026 Table 4: Lower-capability training sources improve broad transferability. Mean AUROC is measured over eleven unseen models shared by all three ablations.   
+
+> Training sources Mean transfer AUROC
+
+↑   
+
+> 4 high-capability models 0.649 4 high-capability + GPT-5-mini 0.778 4 high-capability + GPT-5-mini + GPT-5.2 + Qwen3.5 0.814
+
+Table 5: Approximately 100 labeled samples can be used to re-calibrate after zero-shot transfer. The four open evaluation targets are absent from P INOCCHIO ’s training set. We fit Platt or isotonic recalibration on 100 labeled examples and evaluate on the remainder over 25 random splits; ECE uses 15 bins.  
+
+> ECE
+
+↓                        
+
+> Model AUROC Off-the-shelf Platt Isotonic Mistral-7B 0.828 0.213 0.080 0.059 gemma-2-9b 0.801 0.282 0.078 0.055 OLMo-2-7B 0.825 0.296 0.066 0.052 granite-4.1-30b 0.793 0.251 0.081 0.062
+> Pooled 0.810 0.259 0.076 0.058
+
+Takeaway 
+
+> A single calibrator covers both text and vision at comparable performance, and vision-language data improves calibration on text when hard text examples are scarce.
+
+4.4 Cross-model transfer 
+
+We evaluate zero-shot transfer using the same calibrator. We use it to score thirteen target models absent from training, spanning eight organizations (Appendix Table 9); several were released after the calibrator was trained, including GPT-6 Astra. Mean AUROC is 0.814 across the thirteen targets, a modest drop from the 0.862 it achieves on models whose responses we used during training. On the open transfer targets, where sampling baselines can be run directly, P INOCCHIO far outperforms them (Appendix P). Generalization also extends to unseen benchmarks. Across four folds that each exclude five benchmarks from training, AUROC averages 0.875 on excluded benchmarks and 0.877 on included benchmarks (Appendix Table 16). Transfer, especially to lower-capability target models improves as lower-capability source models are added. This effect is especially pronounced on individual targets such as Mistral-7B, where each successive training mixture raises transfer (Table 4). Older models represent a domain shift in different knowledge bases and semantic cues. 
+
+Takeaway  
+
+> PINOCCHIO transfers to thirteen unseen models across eight organizations.
+
+4.5 Scaling and input ablations 
+
+The three factors that could drive the calibrator’s accuracy do not matter equally, so we measure each in turn: the amount of training data, the size of the calibrator, and the structured input it is given. Increasing the training set produces far larger gains than increasing calibrator size (Figure 7); calibrator size has little effect (Appendix Table 31), while performance keeps improving as data grows. The structured input also contributes: 8Published as a conference paper at COLM 2026 removing the benchmark and model-identity metadata drops AUROC from 0.863 to 0.813, so the calibrator uses more than the bare response. Full input and elicitation ablations are in Appendices R.1 and E.9. Beyond aggregate AUROC, P INOCCHIO drives three deployment workflows (adaptive clarification, confidence-gated actions, and human-escalation review), outperforming every baseline on each; Appendices G and R.2 detail these production use cases and per-model recalibration. 
+
+Takeaway 
+
+> Training data matters more than calibrator size, so uncertainty estimation performs well on a small model.
+
+## 5 Using P INOCCHIO 
+
+Disclaimer! P INOCCHIO may be miscalibrated on new data distributions   
+
+> Adapting P INOCCHIO to a new API or distribution. Begin with the released checkpoint and evaluate it on a labeled sample from the intended deployment. If response ranking transfers but the probabilities are shifted, fit Platt or isotonic regression on a labeled calibration set. If ranking performance also degrades, fine-tuning is appropriate.
+
+Incorporating P INOCCHIO in your code. The released pinocchio-uq package scores the output of an existing API call without reading the target model’s logits or weights. After installing it with pip install pinocchio-uq , the minimal integration is:  
+
+> from pinocchio import Pinocchio judge = Pinocchio() # load once response = client.chat.completions.create( model="gpt-5", messages=messages )p_correct = judge.score(response, messages=messages)
+
+Limitations. The calibrator requires labeled training data with known ground-truth cor-rectness, limiting applicability to tasks where automated grading is possible. Cross-family transfer degrades compared to within-family (Section 4.4). Including benchmark and model-identity metadata raises AUROC from 0.813 to 0.863 which may limit performance in settings where that metadata is unknown. Our training data is English-only. The calibrator is weakest on the most difficult benchmarks where even correct responses hedge and qualify, the same markers associated with incorrectness (Appendix E.4). 
+
+## Acknowledgements 
+
+This project was supported by the Center for AI and Responsible Financial Innovation at Columbia University through a research award, and by the NVIDIA Academic Grant Program. 9Published as a conference paper at COLM 2026 
+
+## References 
+
+[1] Afra Feyza Akyürek, Advait Gosai, Chen Bo Calvin Zhang, Vipul Gupta, Jaehwan Jeong, Anisha Gunjal, Tahseen Rabbani, Maria Mazzone, David Randolph, Moham-mad Mahmoudi Meymand, Gurshaan Chattha, Paula Rodriguez, Diego Mares, Pavit Singh, Michael Liu, Subodh Chawla, Pete Cline, Lucy Ogaz, Ernesto Hernandez, Zi-hao Wang, Pavi Bhatter, Marcos Ayestaran, Bing Liu, and Yunzhong He. PRBench: Large-scale expert rubrics for evaluating high-stakes professional reasoning, 2025. [2] Amos Azaria and Tom M. Mitchell. The internal state of an LLM knows when it’s lying. In Findings of the Association for Computational Linguistics: EMNLP 2023 , pages 967–976, 2023. doi: 10.18653/v1/2023.findings-emnlp.68. URL https://aclanthology. org/2023.findings-emnlp.68/ .[3] Shuai Bai, Yuxuan Cai, Ruizhe Chen, et al. Qwen3-VL technical report. arXiv preprint arXiv:2511.21631 , 2025. [4] Collin Burns, Haotian Ye, Dan Klein, and Jacob Steinhardt. Discovering latent knowl-edge in language models without supervision. In ICLR , 2023. [5] Jiuhai Chen and Jonas Mueller. Quantifying uncertainty in answers from any language model and enhancing their trustworthiness. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 5186–5200. Association for Computational Linguistics, 2024. doi: 10.18653/v1/2024.acl-long.283. URL https://aclanthology.org/2024.acl-long.283/ .[6] Lin Chen, Jinsong Li, Xiaoyi Dong, Pan Zhang, Yuhang Zang, Zehui Chen, Haodong Duan, Jiaqi Wang, Yu Qiao, Dahua Lin, and Feng Zhao. Are we on the right way for evaluating large vision-language models? In Advances in Neural Information Processing Systems , 2024. NeurIPS 2024; also arXiv:2403.20330. [7] François Chollet. On the measure of intelligence, 2019. [8] Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher Hesse, and John Schulman. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 , 2021. [9] Elizabeth R DeLong, David M DeLong, and Daniel L Clarke-Pearson. Comparing the areas under two or more correlated receiver operating characteristic curves: A nonparametric approach. Biometrics , 44(3):837–845, 1988. [10] Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and Yarin Gal. Detecting hallucina-tions in large language models using semantic entropy. Nature , 630:625–630, 2024. doi: 10.1038/s41586-024-07421-0. URL https://doi.org/10.1038/s41586-024-07421-0 .[11] Yarin Gal and Zoubin Ghahramani. Dropout as a bayesian approximation: Repre-senting model uncertainty in deep learning. In Proceedings of the 33rd International Conference on Machine Learning , volume 48 of Proceedings of Machine Learning Research ,pages 1050–1059, 2016. URL https://proceedings.mlr.press/v48/gal16.html .[12] Bofei Gao et al. Omni-MATH: A universal olympiad level mathematic benchmark for large language models. arXiv preprint arXiv:2410.07985 , 2024. [13] Xiang Gao, Jiaxin Zhang, Lalla Mouatadid, and Kamalika Das. SPUQ: Perturbation-based uncertainty quantification for large language models. In Proceedings of the 18th Conference of the European Chapter of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 2336–2346, 2024. doi: 10.18653/v1/2024.eacl-long.143. URL 
+
+https://aclanthology.org/2024.eacl-long.143/ .[14] Yair Geifman and Ran El-Yaniv. Selective classification for deep neural networks. In 
+
+Advances in Neural Information Processing Systems , 2017. NeurIPS 2017. 10 Published as a conference paper at COLM 2026 [15] Tobias Groot and Matias Valdenegro-Toro. Overconfidence is key: Verbalized uncer-tainty evaluation in large language and vision-language models. In Proceedings of the 4th Workshop on Trustworthy Natural Language Processing , pages 145–171, 2024. doi: 10. 18653/v1/2024.trustnlp-1.13. URL https://aclanthology.org/2024.trustnlp-1.13/ .[16] Tianrui Guan, Fuxiao Liu, Xiyang Wu, Ruiqi Xian, Zongxia Li, Xiaoyu Liu, Xijun Wang, Lichang Chen, Furong Huang, Yaser Yacoob, Dinesh Manocha, and Tianyi Zhou. HallusionBench: An advanced diagnostic suite for entangled language hallucination and visual illusion in large vision-language models. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , 2024. URL 
+
+https://openaccess.thecvf.com/content/CVPR2024/html/Guan_HallusionBench_ An_Advanced_Diagnostic_Suite_for_Entangled_Language_Hallucination_and_CVPR_ 2024_paper.html .[17] Chuan Guo, Geoff Pleiss, Yu Sun, and Kilian Q. Weinberger. On calibration of modern neural networks. In Proceedings of the 34th International Conference on Machine Learning ,volume 70 of Proceedings of Machine Learning Research , pages 1321–1330, 2017. URL 
+
+https://proceedings.mlr.press/v70/guo17a.html . ICML 2017. [18] Danna Gurari et al. VizWiz grand challenge: Answering visual questions from blind people. In CVPR , 2018. [19] Kimia Hamidieh, Veronika Thost, Walter Gerych, Mikhail Yurochkin, and Marzyeh Ghassemi. Complementing self-consistency with cross-model disagreement for uncer-tainty quantification. In International Conference on Learning Representations , 2026. URL 
+
+https://openreview.net/forum?id=lOoRJo8xWy . ICLR 2026. [20] Kevin David Hayes, Micah Goldblum, Vikash Sehwag, Gowthami Somepalli, Ashwi-nee Panda, and Tom Goldstein. FineGRAIN: Evaluating failure modes of text-to-image models with vision language model judges. In Advances in Neural Information Processing Systems (Datasets and Benchmarks Track) , 2025. NeurIPS 2025. [21] Juyeon Heo, Miao Xiong, Christina Heinze-Deml, and Jaya Narain. Do LLMs estimate uncertainty well in instruction-following? In International Conference on Learning Representations , 2025. [22] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. LoRA: Low-rank adaptation of large language models. In International Conference on Learning Representations , 2022. [23] Saurav Kadavath, Tom Conerly, Amanda Askell, Tom Henighan, Dawn Drain, Ethan Perez, Nicholas Schiefer, Zac Hatfield-Dodds, Nova DasSarma, Eli Tran-Johnson, et al. Language models (mostly) know what they know. arXiv preprint arXiv:2207.05221 ,2022. [24] Sanyam Kapoor, Nate Gruver, Manley Roberts, Katherine Collins, Arka Pal, Umang Bhatt, Adrian Weller, Samuel Dooley, Micah Goldblum, and Andrew Gordon Wilson. Large language models must be taught to know what they don’t know. In NeurIPS ,2024. [25] Mehran Kazemi et al. BIG-Bench Extra Hard. arXiv preprint arXiv:2502.19187 , 2025. [26] Reza Khanmohammadi, Erfan Miahi, Mehrsa Mardikoraem, Simerjot Kaur, Ivan Brugere, Charese Smiley, Kundan S. Thind, and Mohammad M. Ghassemi. Cal-ibrating LLM confidence by probing perturbed representation stability. In Pro-ceedings of the 2025 Conference on Empirical Methods in Natural Language Processing ,pages 10448–10514, 2025. doi: 10.18653/v1/2025.emnlp-main.530. URL https: //aclanthology.org/2025.emnlp-main.530/ .[27] Jannik Kossen, Jiatong Han, Muhammed Razzak, Lisa Schut, Shreshth Malik, and Yarin Gal. Semantic entropy probes: Robust and cheap hallucination detection in LLMs, 2024. 11 Published as a conference paper at COLM 2026 [28] Vasily Kostumov, Bulat Nutfullin, Oleg Pilipenko, and Eugene Ilyushin. Uncertainty-aware evaluation for vision-language models, 2024. [29] Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. Semantic uncertainty: Linguistic invariances for uncertainty estimation in natural language generation. In International Conference on Learning Representations , 2023. [30] Lee et al. Selective generation for controllable language models. In Advances in Neural Information Processing Systems , 2024. NeurIPS 2024. [31] Yifan Li, Yifan Du, Kun Zhou, Jinpeng Wang, Xin Zhao, and Ji-Rong Wen. Evaluating object hallucination in large vision-language models. In Proceedings of the 2023 Confer-ence on Empirical Methods in Natural Language Processing , pages 292–305. Association for Computational Linguistics, 2023. doi: 10.18653/v1/2023.emnlp-main.20. URL 
+
+https://aclanthology.org/2023.emnlp-main.20/ .[32] Stephanie Lin, Jacob Hilton, and Owain Evans. Teaching models to express their uncertainty in words. TMLR , 2022. [33] Zhen Lin, Shubhendu Trivedi, and Jimeng Sun. Generating with confidence: Uncer-tainty quantification for black-box large language models. Transactions on Machine Learning Research , 2024. [34] Pan Lu et al. MathVista: Evaluating mathematical reasoning of foundation models in visual contexts. In ICLR , 2024. [35] Mielke et al. Reducing conversational agents’ overconfidence through linguistic calibration. Transactions of the Association for Computational Linguistics , 2022. URL 
+
+https://aclanthology.org/2022.tacl-1.50/ .[36] Adrian Mirza et al. Are large language models superhuman chemists? arXiv preprint arXiv:2404.01475 , 2024. [37] Trilok Padhi, Ramneet Kaur, Adam D. Cobb, Manoj Acharya, Anirban Roy, Colin Samplawski, Brian Matejek, Alexander M. Berenbeim, Nathaniel D. Bastian, and Susmit Jha. Calibrating uncertainty quantification of multi-modal LLMs using grounding, 2025. URL https://arxiv.org/abs/2505.03788 . arXiv:2505.03788. [38] Long Phan et al. Humanity’s Last Exam. arXiv preprint arXiv:2501.14249 , 2025. [39] John C. Platt. Probabilistic outputs for support vector machines and comparisons to regularized likelihood methods. In Alexander J. Smola, Peter Bartlett, Bern-hard Sch"olkopf, and Dale Schuurmans, editors, Advances in Large-Margin Classi-fiers , pages 61–74. MIT Press, 1999. URL https://mitpress.mit.edu/9780262194488/ advances-in-large-margin-classifiers/ .[40] Benjamin Plaut, Nguyen X. Khanh, and Tu Trinh. Probabilities of chat LLMs are miscalibrated but still predict correctness on multiple-choice Q&A. Transactions on Machine Learning Research , 2025. [41] David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Dirani, Julian Michael, and Samuel R Bowman. GPQA: A graduate-level google-proof Q&A benchmark. In First Conference on Language Modeling , 2024. [42] Artem Shelmanov, Ekaterina Fadeeva, Akim Tsvigun, Ivan Tsvigun, Zhuohan Xie, Igor Kiselev, Nico Daheim, Caiqi Zhang, Artem Vazhentsev, Mrinmaya Sachan, Preslav Nakov, and Timothy Baldwin. A head to predict and a head to question: Pre-trained uncertainty quantification heads for hallucination detection in LLM outputs. In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Pro-cessing , pages 35712–35731, 2025. doi: 10.18653/v1/2025.emnlp-main.1809. URL 
+
+https://aclanthology.org/2025.emnlp-main.1809/ .12 Published as a conference paper at COLM 2026 [43] Jiayuan Su, Jing Luo, Hongwei Wang, and Lu Cheng. API is enough: Conformal prediction for large language models without logit-access. In Findings of the Asso-ciation for Computational Linguistics: EMNLP 2024 , pages 979–995. Association for Computational Linguistics, 2024. doi: 10.18653/v1/2024.findings-emnlp.54. URL 
+
+https://aclanthology.org/2024.findings-emnlp.54/ .[44] Katherine Tian, Eric Mitchell, Allan Zhou, Archit Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea Finn, and Christopher D Manning. Just ask for calibration: Strategies for eliciting calibrated confidence scores from language models fine-tuned with human feedback. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , pages 5433–5442, 2023. doi: 10.18653/v1/2023.emnlp-main.330. URL 
+
+https://aclanthology.org/2023.emnlp-main.330/ .[45] Dennis Ulmer, Martin Gubri, Hwaran Lee, Sangdoo Yun, and Seong Joon Oh. Cali-brating large language models using their generations only. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,pages 15440–15459, Bangkok, Thailand, August 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024.acl-long.824. [46] Ke Wang, Junting Pan, Weikang Shi, Zimu Lu, Houxing Ren, Aojun Zhou, Mingjie Zhan, and Hongsheng Li. Measuring multimodal mathematical reasoning with MATH-Vision dataset. Advances in Neural Information Processing Systems , 2024. [47] Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le, Ed Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. Self-consistency improves chain of thought reasoning in language models. In ICLR , 2023. [48] Zirui Wang et al. CharXiv: Charting gaps in realistic chart understanding in multimodal LLMs. In Advances in Neural Information Processing Systems , 2024. [49] Jason Wei et al. SimpleQA: Measuring short-form factuality in large lan-guage models. OpenAI Technical Report , 2024. URL https://openai.com/index/ introducing-simpleqa/ .[50] Colin White, Samuel Dooley, Manley Roberts, Arka Pal, et al. LiveBench: A challeng-ing, contamination-limited LLM benchmark. In International Conference on Learning Representations , 2025. [51] xAI. RealWorldQA. https://huggingface.co/datasets/xai-org/RealworldQA , 2024. [52] Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. Can llms express their uncertainty? an empirical evaluation of confidence elicitation in llms. In International Conference on Learning Representations , 2024. [53] Weihao Yu, Zhengyuan Yang, Linjie Li, Jianfeng Wang, Kevin Lin, Zicheng Liu, Xinchao Wang, and Lijuan Wang. MM-Vet: Evaluating large multimodal models for integrated capabilities. In Proceedings of the 41st International Conference on Machine Learning , 2024. ICML 2024; also arXiv:2308.02490. [54] Xiang Yue et al. MMMU: A massive multi-discipline multimodal understanding and reasoning benchmark for expert AGI. In CVPR , 2024. [55] Di Zhang, Jingdi Lei, Junxian Li, Xunzhi Wang, Yujie Liu, Zonglin Yang, Jiatong Li, Weida Wang, Suorong Yang, Jianbo Wu, Peng Ye, Wanli Ouyang, and Dongzhan Zhou. Critic-V: VLM critics help catch VLM er-rors in multimodal reasoning. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition , pages 9050–9061, 2025. URL 
+
+https://openaccess.thecvf.com/content/CVPR2025/html/Zhang_Critic-V_VLM_ Critics_Help_Catch_VLM_Errors_in_Multimodal_Reasoning_CVPR_2025_paper.html .[56] Hanning Zhang, Shizhe Diao, Yong Lin, Yi Fung, Qing Lian, Xingyao Wang, Yangyi Chen, Heng Ji, and Tong Zhang. R-tuning: Instructing large language models to say “i don’t know”. In Proceedings of the 2024 Conference of the North American Chapter of 
+
+13 Published as a conference paper at COLM 2026 
+
+the Association for Computational Linguistics: Human Language Technologies (Long Papers) ,2024. URL https://aclanthology.org/2024.naacl-long.394/ . NAACL 2024. [57] Renrui Zhang et al. MathVerse: Does your multi-modal LLM truly see the diagrams in visual math problems? In European Conference on Computer Vision , 2024. [58] Ruiyang Zhang, Hu Zhang, and Zhedong Zheng. VL-uncertainty: Detecting hallucina-tion in large vision-language model via uncertainty estimation, 2024. [59] Ruiyang Zhang, Hu Zhang, Hao Fei, and Zhedong Zheng. Uncertainty-o: One model-agnostic framework for unveiling uncertainty in large multimodal models, 2025. URL 
+
+https://arxiv.org/abs/2506.07575 . arXiv:2506.07575. [60] Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, et al. Judging LLM-as-a-judge with MT-Bench and chatbot arena. In NeurIPS , 2023. 14 Published as a conference paper at COLM 2026 Table 6: The training set contains responses from seven models. Exact training counts by model.          
+
+> Model Training examples
+> GPT-5-mini 4,584 GPT-5.2 4,618 Qwen3.5-397B 3,712 GPT-5.6 4,960 Claude Fable 5 4,892 Kimi 3 4,697 Claude Opus 5 4,956
+> Total 32,419
+
+Table 7: The calibrator is trained with lightweight LoRA fine-tuning. PINOCCHIO training hyperparameters. Hyperparameter Value Base model Qwen3-VL-8B-Instruct LoRA rank ( r) 32 LoRA alpha ( α) 64 LoRA target modules All linear layers Learning rate 1 × 10 −4
+
+Weight decay 0.01 Batch size 1Gradient accumulation steps 16 Effective batch size 16 Epochs 3Max question length 1,500 characters Max response length 800 characters Train/test split 85/15 (question-level split) Precision bf16 Optimizer AdamW Hardware 4× GPU (DDP) Training time 2–3 hours 
+
+## A Training data details 
+
+Table 6 shows the training data breakdown for P INOCCHIO . Seven models generated 32,419 training responses across 20 benchmarks: 17,778 vision-language examples and 14,641 text examples. 
+
+## B Hyperparameters 
+
+Table 7 lists training hyperparameters for P INOCCHIO .
+
+## C Training configuration and input processing 
+
+Training configuration. Training uses AdamW with learning rate 10 −4, batch size 1 with gradient accumulation over 16 steps (effective batch size 16), BF16 mixed precision, and runs for 3 epochs on 4 GPUs with DDP. The full training takes approximately 2–3 hours on A100 GPUs. See Table 7 for complete hyperparameters. 
+
+Truncation and image processing. We truncate questions to 1,500 characters and responses to 800 characters, and report truncation results in Appendix R.1. For VLM benchmarks, we 15 Published as a conference paper at COLM 2026 Table 8: A single calibrator discriminates and calibrates held-out responses from the models whose responses trained it. Length AUROC is the response-length baseline (in-sample log (1 + length ) logistic fit) on the same held-out responses; the Overall value is the sample-weighted mean of the per-model baselines. P INOCCHIO exceeds it on every model.                             
+
+> Target model AUROC ↑Length AUROC ↑Brier ↓ECE ↓
+> Claude Fable 5 0.852 0.575 0.165 0.135 GPT-5.6 0.852 0.598 0.174 0.141 Claude Opus 5 0.859 0.607 0.163 0.129 Kimi 3 0.862 0.600 0.168 0.134
+> Overall 0.856 0.595 0.167 0.131
+
+resize real images to fit within 200,704 to 401,408 pixels (corresponding to 256–512 tiles of 28 × 28 in the model’s dynamic-resolution tiling scheme). For text-only benchmarks, we use a 28 × 28 gray placeholder image. 
+
+## D Training data details: multi-model training, benchmark selection, and data sufficiency 
+
+Why multi-model training? An earlier source-diversity ablation uses more responses from a broader set of sources than any single-source run. Single-source calibrators obtain 0.672–0.759 AUROC on held-out target models, while the pooled calibrator reaches 0.878 (Section 4.4). This comparison changes both sample count and source diversity, so it does not isolate a mechanism for the improvement. In leave-one-model-out evaluation, training on two sources and testing on the third yields mean AUROC 0.843, 0.035 below the full model. This directly measures transfer to an excluded source model. 
+
+Training data sufficiency and split integrity. The training size ablation in Appendix R.1 shows that 5,000 samples achieve 96% of full-data performance and 2,000 samples achieve 91%. We enforce a question-level split : when multiple models answer the same question in the matched ablation set, we assign all instances to the same split. This is essential: a naïve sample-level split would place near-identical instances of the same question in both train and test. All results in this paper use the question-level split with zero question overlap between train and test. 
+
+## E Additional analyses 
+
+E.1 Full results tables 
+
+The matched baseline comparison is reported in the main text (Table 3, Section 4.2), where PINOCCHIO reaches 0.863 AUROC. Table 8 gives its per-model held-out evaluation on the models whose responses trained it, and Table 9 reports its zero-shot transfer to thirteen unseen models. 
+
+E.2 Cross-model training 
+
+Table 10 shows that training on multiple source models, rather than a single one, is what makes the calibrator transfer: each single-source calibrator is evaluated on held-out target models it never trained on. 
+
+E.3 Input and robustness ablations 
+
+Table 11 decomposes what the calibrator reads (the question versus the response), and Table 12 shows that stripping or injecting explicit hedge words barely moves its score. 16 Published as a conference paper at COLM 2026 Table 9: PINOCCHIO transfers to thirteen unseen models. Zero-shot transfer AUROC on target models absent from training, spanning eight organizations. Models marked †
+
+were released after training. Length AUROC is the response-length baseline (in-sample log (1 + length ) logistic fit) on the same responses; P INOCCHIO exceeds it on every target. LLaMA-3.1-8B is omitted from this column (its responses are evaluated on a separate hard-suite split). GPT-6 Astra is scored zero-shot on its held-out split ( n=380); the other targets use the full transfer bundle.    
+
+> Model Organization AUROC
+
+↑ Length AUROC ↑                                       
+
+> GPT-6 Astra †OpenAI 0.804 0.633 LLaMA-3.1-8B Meta 0.825 —Mistral-7B Mistral 0.828 0.642 Devstral-2-24B †Mistral 0.826 0.608 gemma-2-9b Google 0.801 0.645 OLMo-2-7B AllenAI 0.825 0.585 Olmo-3.1-32B †AllenAI 0.793 0.623 DeepSeek-R1-Distill-32B DeepSeek 0.802 0.515 granite-4.1-30b †IBM 0.793 0.621 Claude Opus 4.6 Anthropic 0.783 0.671 Claude Sonnet 4.6 Anthropic 0.807 0.669 Gemini 3.1 Pro Google 0.863 0.580 Gemini 3 Flash Google 0.832 0.583
+
+Table 10: Training on multiple source models is what makes the calibrator transfer. Cross-model transfer. AUROC when training on single vs. multiple source models. Multi-model training yields an AUROC gain of 0.12–0.21 over single-source training. Single-source rows evaluate on held-out target models the calibrator never trained on (the diagonal is N/A).                     
+
+> Training data GPT-5-mini GPT-5.2 Qwen3.5 Mean GPT-5-mini only N/A 0.715 0.693 0.704 GPT-5.2 only 0.741 N/A 0.776 0.759 Qwen3.5 only 0.658 0.687 N/A 0.672 All three sources 0.882 0.877 0.873 0.878
+
+E.4 Per-benchmark breakdown 
+
+Table 13 reports per-benchmark AUROC and effect size on the held-out test set. 
+
+E.5 Response length analysis 
+
+The response-length baseline in Table 3 (0.566 AUROC) and the length-only entry above (0.570) both show that response length alone is only weakly predictive of correctness. 
+
+E.6 Difficulty stratification 
+
+Table 15 breaks down calibrator performance by benchmark difficulty tier. 
+
+E.7 Difficulty-controlled disagreement test 
+
+On very hard questions a calibrator can look accurate without reading the answer at all: if almost every model fails a question, always predicting “incorrect” is right most of the time. To rule this out, we keep only the questions where the models whose responses trained P INOCCHIO disagree , with at least one correct and at least one incorrect response (397 questions, n=2,389 graded responses). Within one such question every response shares the same question, so difficulty is held fixed: the only thing separating a correct response from an incorrect one is the response itself, and any predictor that does not read the response 17 Published as a conference paper at COLM 2026 Table 11: The calibrator draws on both the question and the answer. Blanking or redacting the question leaves most of the signal intact, so the calibrator reads the answer rather than only gauging question difficulty, while the remaining drop shows the question still contributes. Brackets give 95% bootstrap CIs. “Empty question” leaves the question field blank; “question redacted” replaces it with the literal string “[QUESTION REDACTED]”; both use the trained calibrator without retraining, changing only the inference-time question field.          
+
+> Input AUROC ↑∆
+> Question + response (canonical) 0.863 –Response only, empty question 0.805 −0.058 Response only, question redacted 0.795 −0.068
+
+Table 12: Explicit hedge words barely move the calibrator’s score. Hedging probe. Strip-ping or injecting explicit hedge words (“maybe”, “I think”, “possibly”) barely changes AUROC; the calibrator uses signals beyond superficial hedging. The last column is the mean shift in predicted P(correct ).              
+
+> Condition AUROC ∆vs original Mean shift in P(correct )
+> Original responses 0.8633 ––Hedging stripped 0.8642 +0.0009 +0.0002 Hedging injected 0.8573 −0.0060 −0.056
+
+must give every response to the question the same score and so cannot rank them. Averaged within question, P INOCCHIO ranks the correct responses above the incorrect ones with AUROC 0.726, well above the 0.5 an answer-blind predictor is pinned to. We confirm this is not a chance effect of P INOCCHIO ’s score distribution with a within-question permutation test. Holding P INOCCHIO ’s scores fixed, we repeatedly reassign the correct/incorrect labels among the responses to each question, keeping the number of correct responses per question unchanged, and recompute the overall AUROC each time. Because the reshuffling stays within questions, it preserves each question’s difficulty and traces out exactly the AUROC an answer-blind predictor could reach by chance. P INOCCHIO ’s pooled AUROC of 0.742 is higher than under every one of these relabelings ( p < 0.0001), so its ordering of responses tracks which one is actually correct, not merely which questions are hard. We further check that P INOCCHIO responds to the answer rather than the model-identity tag. For each disagreement question we re-score every response after swapping in the answers the other source models gave to the same question, holding the original slot’s model tag fixed. Across all 14,687 (answer, slot) pairs, P INOCCHIO ’s score follows the swapped-in answer’s correctness at AUROC 0.705 (chance 0.5): even when an answer is paired with a different model’s tag, the calibrator ranks correct answers above incorrect ones, so it reads the response rather than the tag. 
+
+E.8 Leave-K-out cross-validation 
+
+Table 16 reports per-fold results for leave-K-out cross-validation ( K = 5, 4 folds). The mean gap between included- and excluded-benchmark AUROC is 0.002. 
+
+E.9 Elicitation strategy ablation 
+
+Table 17 compares different ways to extract the uncertainty signal from calibrator check-points on an internal validation split (absolute values therefore differ from the final model in Table 3). The standard logit-based approach (softmax over the i/ii tokens) achieves 0.859 AUROC. MC Dropout [11] (N=5 forward passes) provides no improvement (0.859), consistent with LoRA’s low-rank perturbations providing insufficient stochasticity. Ver-18 Published as a conference paper at COLM 2026 Table 13: The calibrator discriminates correctness across every benchmark. Per-benchmark calibrator performance on the held-out test set (question-level split, zero question overlap with training). d = Cohen’s d between calibrator scores for correct vs. incorrect responses. Sorted by AUROC descending.                                                                                                               
+
+> Benchmark Modality NAcc AUROC d
+> LiveBench Text 91 .637 .958 2.58 MathVista VLM 116 .397 .944 2.55 ARC-AGI Text 114 .421 .935 2.54 RealWorldQA VLM 112 .491 .931 1.99 BBEH Text 125 .456 .877 1.58 OmniMath Text 78 .282 .871 1.73 MM-Vet VLM 73 .342 .863 1.67 HallusionBench VLM 111 .847 .861 1.78 MathVerse VLM 103 .505 .857 1.38 MathVision VLM 88 .273 .799 1.09 PRBench Text 78 .769 .775 1.15 SimpleQA Text 120 .208 .773 1.09 VizWiz VLM 96 .656 .769 1.07 HLE Text 94 .170 .766 1.20 MMStar VLM 116 .741 .727 0.64 ChemBench Text 108 .731 .671 0.69 GPQA Text 90 .711 .653 0.48 CharXiv VLM 118 .678 .651 0.45 MMMU VLM 66 .879 .630 0.60 HLE-Multimodal VLM 58 .190 .557 0.02
+> Mean –98 .523 .793 1.31
+
+Table 14: Response length explains little of the calibrator’s signal. Response length analysis on the matched set. A length-only predictor reaches far below the calibrator, so response length alone is only weakly predictive of correctness.    
+
+> Metric Value
+> Calibrator AUROC 0.863 Length-only baseline AUROC 0.570
+
+balized probability (prompting the calibrator to output a number) degrades to 0.749. A hidden-state MLP probe achieves 0.878 (+0.019 AUROC), but requires open-weight access to the calibrator’s internals. Temperature scaling ( T = 1.34) leaves AUROC unchanged while marginally improving ECE (0.023 to 0.019), indicating the model is already well-calibrated. 
+
+## F Per-model results 
+
+Table 18 shows per-model AUROC for the main comparison. 
+
+## G Production use case details 
+
+AUROC measures discrimination in aggregate, but practitioners need to know: what can I actually do with a calibrator score? We evaluate three deployment scenarios on the same held-out test set (1,953 examples), comparing the calibrator against every baseline from the main results. 
+
+Adaptive clarification (error detection). Consider a customer-facing chatbot where in-correct responses damage user trust. The system monitors each response and flags likely errors for human review before delivery. We measure this as a binary detection task: given a response, predict whether it is incorrect. The calibrator achieves AUPRC of 0.867 and best 19 Published as a conference paper at COLM 2026 Table 15: Calibrator AUROC is lower on easy benchmarks, where errors are scarce. 
+
+Calibrator performance by benchmark difficulty tier.     
+
+> Tier Benchmarks NMean acc AUROC
+> Easy (
+
+≥0.65) 8 783 0.746 0.724 Medium (0.40–0.65) 5 545 0.495 0.909 Hard ( <0.40) 7 627 0.270 0.840     
+
+> All 20 1,955 0.523 0.863
+
+Table 16: Held-out benchmarks match in-distribution performance. Leave-K-out cross-validation ( K = 5, 4 folds, question-level split). In-dist. and held-out AUROC for each fold. Gap = in-dist. minus held-out (positive = degradation on unseen benchmarks).                            
+
+> Fold Held-out benchmarks In-dist. Held-out Gap 0GPQA, Hallusion., MathVerse, MM-Vet, VizWiz 0.879 0.866 +0.013 1HLE, MMMU, MMStar, OmniMath, SimpleQA 0.873 0.885 −0.012 2BBEH, CharXiv, MathVision, MathVista, RealWorldQA 0.878 0.876 +0.002 3ARC-AGI, ChemBench, HLE-Multimodal, LiveBench, PRBench 0.879 0.872 +0.007 Mean ±std 0.877 0.875 +0.002 ±0.009
+
+F1 of 0.782 across three target models, compared to 0.576 AUPRC for verbalized confidence (Table 19). We find numerous examples where the target model reports 100% verbalized confidence while the calibrator correctly assigns P(correct ) < 0.01; all such cases are indeed incorrect (Figure 4a). 
+
+Confidence-gated actions (agentic safety). Consider an agentic pipeline where an LLM takes irreversible actions (e.g., sending emails, executing trades, modifying databases). Only responses above a confidence threshold P(correct ) > t are auto-executed; the rest are held for human verification. The calibrator achieves 27–35% auto-execution coverage at 90% accuracy across target models; no baseline achieves comparable coverage at the same accuracy (Figure 4b). 
+
+Human-in-the-loop escalation (enterprise triage). Consider an enterprise helpdesk where thousands of queries arrive daily but only a limited number of human reviewers are avail-able. By reviewing low-confidence responses first (ranked by calibrator score), reviewers catch errors faster than random ordering. To reach 95% system accuracy, UQ-guided review requires examining only 79% of responses vs. 100% with random ordering, a 21% workload reduction (Figure 4c). A three-tier routing (high/medium/low confidence) assigns 35–43% of queries to auto-delivery at 88–90% accuracy, containing only 9% of total errors (Table 21). 
+
+G.1 Per-model use case breakdown 
+
+Figure 5 and Tables 20–21 break down all three use cases by target model. 
+
+G.2 Additional downstream applications 
+
+Beyond the three primary use cases above, we briefly evaluate P INOCCHIO on additional downstream tasks: 
+
+DPO pair selection. In reinforcement learning from human feedback (RLHF), training requires pairs of preferred and dispreferred responses. We use the calibrator’s confidence gap between two responses to the same question to select informative pairs where the calibrator is confident one is correct and the other incorrect. This achieves 88.8% informative pair accuracy, compared to random pairing which yields many uninformative pairs where both responses are correct or both incorrect. 20 Published as a conference paper at COLM 2026 Table 17: Simple logit-based elicitation captures nearly all available signal. Elicitation strategy ablation evaluated on an internal validation split. Absolute AUROC values differ from Table 3 (which reports the final model on the held-out test set); relative comparisons between strategies are unchanged. Logit-based extraction captures 95%+ of the available signal.        
+
+> Strategy AUROC Logit (softmax over i/ii) 0.859 MC Dropout (N=5) 0.859 Hidden-state MLP probe 0.878 Hidden + logit combined 0.884 Verbalized probability 0.749 Token entropy 0.520
+
+Table 18: PINOCCHIO outperforms baselines consistently across target models. Per-model AUROC on held-out test set. P INOCCHIO is consistent across all target models.                   
+
+> Method GPT-5-mini GPT-5.2 Qwen3.5 Verbalized (raw) 0.645 0.637 0.569 Verbalized (Isotonic) 0.647 0.646 0.659 Response length 0.633 0.609 0.500 Combined 0.693 0.658 0.656 PINOCCHIO 0.886 0.858 0.835
+
+Model selection. Given N candidate models, we use the calibrator to select the most confident model’s response for each query. With N=3 models, this achieves 67.4% accuracy, a +5.4% improvement over always using the single best model. The calibrator effectively routes each query to the model most likely to answer it correctly. 
+
+Data filtering. We use calibrator confidence to filter training data, retaining only high-confidence samples for downstream fine-tuning. At 50% retention, filtered accuracy reaches 90.9%, much higher than the unfiltered baseline. This suggests P INOCCHIO can serve as a quality filter for synthetic data pipelines. 
+
+Step-level uncertainty. We attempted to apply the calibrator at the reasoning-step level (predicting whether individual chain-of-thought steps are correct). This achieved only 0.53 AUROC, near random, indicating that the calibrator’s signal is response-level rather than step-level. Developing step-level uncertainty estimation remains an open problem. 
+
+## H Domain-specific deployment details 
+
+We evaluate P INOCCHIO in two domain-specific scenarios to illustrate how calibrated uncertainty enables practical deployment decisions. In each case, we simulate a tiered routing system where the calibrator’s confidence score determines whether an LLM response is auto-delivered, reviewed by a junior expert, or escalated to a senior expert. 
+
+H.1 Healthcare deployment 
+
+Consider a telehealth platform where patients submit medical questions to an LLM. Incor-rect medical advice can cause direct harm, so confidence-based routing is critical: high-confidence responses can be sent directly, moderate-confidence responses reviewed by a nurse, and low-confidence responses escalated to a physician. We evaluate on 1,006 sam-ples from medical/scientific benchmarks (ChemBench, MMMU, HLE, GPQA, SimpleQA), achieving 0.898 AUROC with a base accuracy of 54.9%. 21 Published as a conference paper at COLM 2026 Table 19: PINOCCHIO detects incorrect responses far better than baselines. Error detection for adaptive clarification. AUPRC and best F1 for detecting incorrect responses, averaged across three target models.              
+
+> Method AUPRC Best F1 PINOCCHIO (ours) 0.867 0.782
+> Verbalized confidence 0.576 0.405 Combined baseline 0.647 0.650 Isotonic (verbalized) 0.628 0.637 Length baseline 0.534 0.642
+
+Table 20: The calibrator enables meaningful auto-execution coverage at strict error targets. 
+
+Confidence-gated actions: coverage at target accuracy levels, per model (held-out test set, 
+
+n = 1,953).          
+
+> Risk Profile GPT-5-mini GPT-5.2 Qwen3.5 Aggressive ( ≤10% error) 29.3% 35.2% 26.9% Moderate ( ≤5% error) 14.4% 16.8% 21.3%
+
+Clinical triage. Table 22 is an illustrative threshold analysis, not a clinical study. At threshold 0.9, 4.1% of auto-approved benchmark responses are wrong and coverage is 27%. At threshold 0.7, coverage is 43%. The 90% “resident” row is an assumed comparison point rather than a measured human baseline and must not be interpreted as clinical evidence. 
+
+Harm severity. Of 454 total errors, only 26 (5.7%) fall in the high-confidence tier ( p > 0.8), while 340 (74.9%) are correctly assigned low confidence ( p < 0.5) and would be flagged automatically. Reviewing the least-confident responses yields a number-needed-to-review (NNR) of ≈1.0 for the first 25 reviews, meaning nearly every reviewed response is an actual error. 
+
+Telehealth routing. This is an illustrative economic calculation, not a deployment evalua-tion. It assumes per-query costs of $25 for physician review, $10 for nurse review, and $0.50 for an automated response. Under those assumptions and the stated routing thresholds, modeled cost falls from $25,150 to $11,654 per 1,006 queries, with 26 incorrect benchmark responses in the automated tier. The cost values and reviewer behavior are assumed, not measured. 
+
+H.2 Finance deployment 
+
+Consider an automated financial analysis tool where an LLM answers quantitative reasoning queries for investment analysts. Incorrect outputs could lead to costly trading errors, so a tiered system routes confident outputs directly, uncertain ones to a junior analyst, and low-confidence ones to a senior analyst for verification. We evaluate on 1,930 samples from quantitative reasoning benchmarks (GPQA, SimpleQA, LiveBench, BBEH, HLE, OmniMath, MathVista, MathVision, MathVerse), achieving 0.952 AUROC with a base accuracy of 43.7%. 
+
+Analyst triage. Table 23 reports error detection on the benchmark responses. Reviewing the bottom 50% by calibrator score captures 83% of observed errors. The 75% “junior analyst” value is an assumed comparison point, not a measured human baseline. 
+
+Risk tiering. The calibrator assigns 30% of outputs to the GREEN tier (reliable) at 95.3% accuracy, 11% to YELLOW (verify) at 72.9%, and 59% to RED (unreliable) at 12.1%. The false GREEN rate is 4.7% (27 wrong outputs labeled reliable out of 571 in the GREEN tier). 
+
+Robo-advisor routing. This illustrative calculation assumes per-query costs of $50 for senior review, $20 for junior review, and $0.50 for an automated response. Under the stated 22 Published as a conference paper at COLM 2026 0.0 0.2 0.4 0.6 0.8 1.0 
+
+Recall (fraction of errors caught) 
+
+0.6 0.7 0.8 0.9 1.0    
+
+> Precision (flagged are truly wrong)
+> F1=0.6 F1=0.7 F1=0.8 F1=0.9
+> AUPRC: Cal: 0.867 Verb: 0.576 Comb: 0.647
+
+(a) Error Detection for Clarification 
+
+Calibrator (ours) 0.0 0.2 0.4 0.6 0.8 1.0 
+
+Coverage (fraction auto-executed) 
+
+0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+> Accuracy of auto-executed actions
+
+17% coverage at 95% acc 
+
+(b) Confidence-Gated Actions 
+
+Calibrator (ours) Verbalized conf. Combined baseline Length baseline No gating (0.53) 95% accuracy target 0.0 0.2 0.4 0.6 0.8 1.0 
+
+Fraction of queries reviewed by human 
+
+0.0 0.2 0.4 0.6 0.8 1.0          
+
+> Fraction of errors caught
+> 38% errors caught at 20% review (1.9x random) Avg 21% less review to reach 95% accuracy
+> Three-tier routing: Green: 37% auto-sent, 88.7% acc Red: captures 70% of errors
+
+(c) Human Review Efficiency 
+
+Random review UQ-guided review 
+
+Production Deployment Use Cases: UQ-Enabled Workflows 
+
+Figure 4: Across three production workflows, the calibrator beats every baseline. (a) Error detection: calibrator AUPRC = 0.867 vs. verbalized 0.576. (b) Confidence-gated actions: only the calibrator achieves meaningful coverage at ≥90% accuracy. (c) Human escalation: UQ-guided review reduces workload by 21% to reach 95% accuracy. thresholds, modeled cost falls from $96,500 to $60,244 per 1,930 queries, with 27 incorrect benchmark responses in the automated tier. Neither the costs nor analyst performance were measured in this study. 23 Published as a conference paper at COLM 2026 0.2 0.4 0.6 0.8 
+
+> Threshold
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> UC-E: Error Detection Score
+> (a) Adaptive Clarification
+
+GPT-5-mini    
+
+> Precision Recall F1
+> 0.2 0.4 0.6 0.8
+> Threshold
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Score
+
+GPT-5.2    
+
+> Precision Recall F1
+> 0.2 0.4 0.6 0.8
+> Threshold
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Score
+
+Qwen3.5                         
+
+> Precision Recall F1
+> 0.2 0.3 0.4 0.5 0.6 0.7
+> Coverage
+> 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+> UC-F: Gated Actions Exec. Accuracy
+> (b) Confidence-Gated Actions
+> 0.2 0.4 0.6
+> Coverage
+> 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+> Exec. Accuracy
+> 0.2 0.4 0.6
+> Coverage
+> 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+> Exec. Accuracy
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Fraction reviewed
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> UC-G: Review Efficiency Errors Caught
+> (c) Human Review Efficiency
+> UQ-guided Random
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Fraction reviewed
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Errors Caught
+> UQ-guided Random
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Fraction reviewed
+> 0.0 0.2 0.4 0.6 0.8 1.0
+> Errors Caught
+> UQ-guided Random
+
+Production Use Cases — Per-Model Breakdown 
+
+Figure 5: The three production use cases hold consistently across every target model. 
+
+Top row: error detection (precision, recall, F1 vs. threshold). Middle row: coverage vs. accuracy for confidence-gated actions. Bottom row: human review efficiency (UQ-guided vs. random). Columns: GPT-5-mini, GPT-5.2, Qwen3.5. Results are consistent across all target models. 
+
+## I Cross-domain transfer to text-to-image evaluation 
+
+We test whether P INOCCHIO can transfer to a fundamentally different domain: detecting failure modes in text-to-image (T2I) generation. Using the FineGRAIN benchmark [20], which evaluates T2I outputs across 27 failure modes with human-annotated labels, we frame T2I evaluation as visual QA (“Does this image accurately depict: [prompt] ?”) and evaluate on 3,750 samples across 5 T2I models.Without any T2I-specific training, the calibrator achieves AUROC 0.736 [0.719, 0.751]. With domain adaptation (leave-one-model-out CV on 5 T2I models), AUROC improves to 0.953 ± 0.028. This suggests P INOCCHIO ’s learned correctness signals generalize beyond LLM text evaluation to visual quality assessment. 24 Published as a conference paper at COLM 2026 Table 21: Confidence-based routing cuts review workload while concentrating errors in the red tier. Human escalation: three-tier routing and workload reduction, per model (question-level split).                        
+
+> GPT-5-mini GPT-5.2 Qwen3.5 Green tier volume 35% 43% 34% Green tier accuracy 0.879 0.885 0.897 Green tier error share 9% 12% 7% Red tier error share 71% 64% 74% Review for 95% acc (UQ) 78% 79% 79% Review for 95% acc (random) 100% 100% 100% Workload reduction 22% 21% 21%
+
+Table 22: Confidence thresholds trade coverage for error rate on the healthcare benchmark subset. This is an illustrative threshold analysis, not a clinical evaluation; no human baseline was measured.                   
+
+> Threshold Coverage Auto Error Rate Catch Rate 0.5 59% 19.3% 75% 0.6 50% 13.2% 85% 0.7 43% 10.4% 90% 0.8 34% 7.7% 94% 0.9 27% 4.1% 98%
+
+## J Error analysis and failure cases 
+
+Of 1,953 test examples, the calibrator makes 116 “hard errors”: 48 confident-but-wrong (p > 0.9, incorrect; 2.5% of test set) and 68 unconfident-but-right ( p < 0.1, correct; 3.5%). Table 24 shows the distribution across benchmarks. 
+
+Systematic patterns. The confident-but-wrong failures cluster in visual reasoning bench-marks (RealWorldQA, VizWiz, MMStar, CharXiv) where the target model produces a plausible-sounding answer that is visually wrong. These are cases where the response text appears well-formed and confident, giving the calibrator insufficient signal that the answer is wrong.The unconfident-but-right failures concentrate in SimpleQA, RealWorldQA, MM-Vet, ARC-AGI, MathVista, and HLE. Many of these errors are terse or use unconventional answer formats. This descriptive pattern does not establish that response length causes the low scores; the residualized analysis in Table 14 finds that length explains little of the overall discrimination signal. 
+
+## K Statistical significance 
+
+We assess AUROC differences using paired comparisons only when methods are evaluated on the same examples. The full-set baselines use the held-out test set of 1,953 samples; the two proxy sampling baselines use the 1,376-example text-only subset and are excluded from the full-set significance statements below. DeLong’s test [9] compares correlated AU-ROC curves directly. Comparisons between P INOCCHIO and each full-set baseline yield 
+
+p < 0.001. Bootstrap confidence intervals. We compute 2,000 BCa bootstrap resamples of AUROC for the full-set methods. P INOCCHIO ’s 95% CI [0.847, 0.879] does not overlap with the full-set baseline intervals. The best full-set baseline is Combined at 0.649 [0.624, 0.673]. Effect sizes. Figure 6 visualizes the AUROC difference between the calibrator and each full-set baseline with 95% bootstrap CIs. The smallest gap is +0.214 against Combined, and all displayed differences are significant at p < 0.001. 25 Published as a conference paper at COLM 2026 Table 23: Confidence-ranked review concentrates errors on the finance benchmark subset. 
+
+This is an illustrative threshold analysis; no analyst baseline was measured.                   
+
+> Review % Errors Caught Errors Slipped Catch Rate 10% 193 894 18% 20% 383 704 35% 30% 567 520 52% 40% 744 343 68% 50% 899 188 83%
+
+Table 24: Hard errors are rare and spread thinly across benchmarks. Failure case distribu-tion by benchmark. CW = confident-but-wrong ( p > 0.9, incorrect); UR = unconfident-but-right ( p < 0.1, correct). Benchmarks sorted by total failure count.                                        
+
+> Benchmark CW UR Total RealWorldQA 7815 SimpleQA 1910 MM-Vet 189VizWiz 639ARC-AGI 178MMStar 538MathVista 178CharXiv 527BBEH 145HLE 055All others (10 benchmarks) 20 12 32
+> Total 48 68 116
+
+## L Grading robustness and self-preference 
+
+Fifteen of the twenty benchmarks use exact-match or programmatic grading and therefore require no LLM judge. The remaining five use rubric-based grading with GPT-5-mini. A post-hoc label audit found grading edge cases in 18 of 12,972 labels (0.14%), too few to affect the reported aggregate results. Table 25 summarizes the benchmark mixture. 
+
+## M Benchmark descriptions 
+
+M.1 Text benchmarks 
+
+• BBEH [25] (Big-Bench Extra Hard): 23 challenging reasoning tasks from BIG-Bench requiring multi-step inference, logical deduction, and causal reasoning. Strong models achieve ∼50% accuracy. • GPQA Diamond [41]: 198 PhD-level multiple-choice questions in physics, chem-istry, and biology, written by domain experts. Even expert humans achieve only 
+
+∼65% accuracy. • OmniMath [12]: Olympiad-level competition mathematics problems requiring symbolic reasoning and multi-step proofs. • SimpleQA [49]: Short-form factual questions with unambiguous, verifiable answers. Tests factual recall rather than reasoning. • HLE [38] (Humanity’s Last Exam): Expert-level questions across diverse academic domains, designed to be at the frontier of model capabilities. • LiveBench [50]: Continuously updated benchmark with fresh questions. Covers math, coding, reasoning, and data analysis. • ChemBench [36]: Chemistry knowledge and reasoning spanning organic, inorganic, and physical chemistry. 26 Published as a conference paper at COLM 2026 0.00 0.05 0.10 0.15 0.20 0.25 0.30 0.35 0.40         
+
+> AUROC difference (Calibrator −Baseline)
+> Combined Verb. (Iso.) Verb. (raw) Resp. length Random
+> * * * p< 0.001
+> +0.229 ***
+> +0.234 ***
+> +0.267 ***
+> +0.311 ***
+> +0.348
+
+Figure 6: PINOCCHIO beats every full-set baseline by a wide, significant margin. AUROC difference (calibrator minus baseline) with 95% bootstrap CIs. The two proxy sampling baselines, evaluated on a different text-only subset, are excluded. All displayed differences are significant at p < 0.001. Table 25: The benchmark mixture is broad and multimodal. Benchmark mixture spanning seven domains and two modalities.                 
+
+> Domain Benchmarks Modality
+> Mathematics OmniMath, MathVista, MathVerse, MathVision T+V Science GPQA Diamond, ChemBench TProfessional and coding PRBench, ARC-AGI TGeneral SimpleQA, LiveBench, BBEH TMultimodal MMMU, MMStar, MM-Vet, CharXiv, VizWiz VSpatial RealWorldQA, HallusionBench VFrontier HLE, HLE-Multimodal T+V
+
+• PRBench [1]: Professional reasoning benchmark with expert-written rubrics span-ning legal and finance domains. Uses LLM-as-judge grading. • ARC-AGI [7]: Abstraction and Reasoning Corpus requiring novel pattern com-pletion on grid-based visual tasks. Tests generalization to unseen transformation rules. 
+
+M.2 Vision-language benchmarks 
+
+• MMMU [54]: Multimodal questions requiring college-level knowledge across 30 subjects including art, science, engineering, and medicine. Images include diagrams, charts, and photographs. • MMStar [6]: Vision-indispensable questions specifically designed so that text-only models cannot solve them, ensuring genuine visual reasoning is required. • CharXiv [48]: Questions about scientific figures and charts extracted from arXiv papers, requiring chart comprehension and numerical reasoning. • HallusionBench [16]: Diagnostic suite for visual hallucination and illusion, testing whether models fabricate visual details or fall for optical illusions. • MathVista [34]: Visual math reasoning combining geometric diagrams, statistical charts, and function plots with mathematical problems. 27 Published as a conference paper at COLM 2026 • MathVerse [57]: Math problems where the visual diagram is necessary for correct interpretation; removing the image makes problems unsolvable. • MathVision [46]: Competition-level math problems with diagram dependencies, sourced from mathematical olympiads. • RealWorldQA [51]: Spatial reasoning about real-world photographs, testing under-standing of 3D scenes, object relationships, and physical properties. • VizWiz [18]: Visual questions captured by blind users using smartphone cameras, including unanswerable queries due to image quality issues. • MM-Vet [53]: Open-ended visual questions evaluating integrated capabilities in-cluding recognition, OCR, knowledge, spatial awareness, and language generation. Uses LLM-as-judge grading. 
+
+## N Prompt templates 
+
+N.1 Calibrator prompt (combined format) 
+
+Benchmark: {benchmark_name} Source model: {source_model} Question: {question} Answer: {response} Is the answer correct? (i) No (ii) Yes 
+
+For VLM benchmarks, we prepend the image to the question in the model’s native multi-modal format. For text-only benchmarks, we use a 28 ×28 gray placeholder image. 
+
+N.2 Using the calibrator Using the calibrator. PINOCCHIO is released as a pip package (pip install pinocchio-uq ; source at github.com/khayes95/pinocchio , weights at 
+
+huggingface.co/KevinDavidHayes/pinocchio-0.8b ). The released checkpoint is a0.8B model that performs on par with the 8B calibrator in the size ablation (Table 31). It wraps an existing API call: the judge downloads its weights on first use and returns 
+
+P(correct ) from a single forward pass. The two additional lines referenced in the abstract are instantiating the judge and calling score .
+
+from openai import OpenAI from pinocchio import Pinocchio client = OpenAI() judge = Pinocchio() messages = [{"role": "user", "content": question}] response = client.chat.completions.create( model="gpt-5", messages=messages )p_correct = judge.score(response, messages=messages) 
+
+N.3 Verbalized confidence prompt 
+
+You answered the following question: Question: {question} Your answer: {response} How confident are you that your answer is correct? Respond with only a number between 0 and 100, where 0 means certainly wrong and 100 means certainly correct. Confidence: 
+
+28 Published as a conference paper at COLM 2026 
+
+## O Baseline implementation details 
+
+All post-hoc baselines use scikit-learn with a 50/50 train/test split (stratified by correctness label) for fitting. We did not tune hyperparameters; we use library defaults except where noted. 
+
+Verbalized confidence (raw). The target model’s self-reported confidence, elicited via the prompt in Appendix N. Parsed as a float in [0, 1 ]; used directly as ˆ p(correct ) with no post-processing. 
+
+Platt scaling (logistic regression). A single-feature logistic regression fit on the verbalized confidence score: LogisticRegression(C=1.0, solver='lbfgs', max_iter=1000) .The sigmoid output serves as the calibrated ˆ p(correct ). This is a standard two-parameter recalibration [39]. 
+
+Isotonic regression. A non-parametric monotone recalibration of verbalized confidence: 
+
+IsotonicRegression(y_min=0.01, y_max=0.99, out_of_bounds='clip') . Unlike Platt scaling, isotonic regression makes no parametric assumptions about the cali-bration curve and can correct non-sigmoid miscalibration. The number of segments is determined automatically by the pool-adjacent-violators algorithm (typically 10–30 pieces for our sample sizes). 
+
+Response length. The feature is log (1 + t) where t is the response token count, fit with the same logistic regression configuration as Platt scaling. The log transform handles the heavy-tailed length distribution (response lengths span ∼10 to >5,000 tokens). This baseline tests whether response verbosity alone predicts correctness. 
+
+Combined (verbalized + length). A two-feature logistic regression on 
+
+[verbalized_confidence, log (1 + t)] , using the same LogisticRegression config-uration. Fit on a 50/50 train/test split to avoid overfitting the two-dimensional feature space. 
+
+LLM-as-judge (GPT-5-mini). A zero-shot prompt asks GPT-5-mini to estimate P(correct ) ∈
+
+[0.0, 1.0 ] given only the question and response (no reference answer). We send requests asynchronously with up to 20 concurrent API calls. Response parsing: (1) attempt direct float conversion; (2) regex search for a decimal in [0, 1 ]; (3) if the response contains “yes”/“correct”, assign 0.8; “no”/“incorrect”, assign 0.2; (4) otherwise assign 0.5. The fallback values are not optimized but are sufficient for AUROC evaluation: since AUROC depends only on rank ordering, any values satisfying no < fallback < yes yield identical discrimination. The 0.5 fallback approximates the dataset base rate (53.4% correct). We truncate questions and responses to 1,500 and 800 characters, respectively, matching the calibrator’s input format. 
+
+Proxy semantic entropy. We generate N=5 responses from Qwen3-VL-8B (temperature 0.7) for each question and compute the negative entropy of the semantic cluster distribution as a confidence score, following Kuhn et al. [29]. We call this a proxy 
+
+because the generations come from a different model than the target: since closed-source API models make repeated sampling prohibitively expensive, we use a small open-weight model as a stand-in. If the proxy model’s uncertainty were informative about the target model’s correctness, this would provide a cheap alternative to true semantic entropy. Evaluated on the 1,376 text-only test samples (VLM benchmarks excluded due to image input requirements). 
+
+Proxy self-consistency. Using the same N=5 proxy generations from Qwen3-VL-8B, we compute the fraction that agree with the target model’s response as a confidence score. We measure agreement by exact string match after normalization. As with proxy semantic entropy, this tests whether consistency among a proxy model’s responses predicts correctness of the target model. Evaluated on the same 1,376 text-only samples. 29 Published as a conference paper at COLM 2026 Table 26: Faithful same-target sampling baselines stay near random while P INOCCHIO 
+
+leads. Faithful same-target sampling baselines on LLaMA-3.1-8B ( N=10, 700 hard-suite questions), versus P INOCCHIO scored on the same responses. Paired ∆ is the AUROC difference on matched questions, with uncertainty estimated from 1,000 paired bootstrap resamples.   
+
+> Method AUROC
+
+↑ Paired ∆ vs. P INOCCHIO   
+
+> Semantic entropy (NLI) 0.476
+
++0.335 Self-consistency (NLI) 0.477 +0.334 Lin et al. [33] (best of 3) 0.553 +0.258 SPUQ [13] 0.482 +0.329 Su et al. [43] (LofreeCP) 0.574 +0.237 PINOCCHIO (ours) 0.811 –
+
+Table 27: PINOCCHIO ’s advantage replicates across three lab-independent targets. Faithful same-target sampling baselines on three lab-independent targets. Each baseline is run directly on N=10 generations from the target model itself on the hard suite, satisfying the methods’ same-target assumption. Lin (best) is the strongest of NumSemSets / Deg / EigV. The bottom row is the paired AUROC difference between P INOCCHIO and the strongest baseline for that target (1,000 paired bootstrap resamples). 
+
+> Method LLaMA-3.1-8B (n
+
+=700) Granite-4.1-30B (n=1576) Devstral-2-24B (n=1574) Semantic entropy (NLI) 0.476 0.558 0.514 Self-consistency (NLI) 0.477 0.559 0.514 Lin et al. [33] (best) 0.553 0.534 0.520 SPUQ [13] 0.482 0.588 0.553 Su et al. [43] (LofreeCP / conformal) 0.574 0.521 0.497 PINOCCHIO (ours) 0.811 0.806 0.836    
+
+> Paired ∆vs. best baseline
+
++0.237 +0.218 +0.283 
+
+> Granite-4.1-30B and Devstral-2-24B are text-only; VLM benchmarks are excluded for those two targets.
+
+## P Faithful same-target sampling baselines 
+
+The proxy semantic-entropy and self-consistency baselines in Table 3 sample a stand-in open model rather than the target. This is a low-cost workaround for closed APIs, but it does not satisfy the methods’ same-target assumption. We therefore also sample an open target directly, LLaMA-3.1-8B-Instruct, on the hard test suite (700 questions) and compute each method from N=10 generations. We use the official implementations of semantic entropy [29], the black-box estimators of Lin et al. [33], SPUQ [13], and the logit-free con-formal method of Su et al. [43]. Every faithful baseline stays near random on the hard suite (Table 26), and the gap to P INOCCHIO is significant for all of them. Increasing the sample budget does not change this: same-target semantic entropy is 0.476/0.486/0.477 at N=10/20/40. The same pipeline produces higher AUROC on short-form QA bench-marks (TriviaQA 0.740, BoolQ 0.679, and NaturalQA 0.629), so the hard-suite result is not uniform across evaluation sets. We also obtain near-random semantic-entropy AUROC on DeepSeek-R1-Distill-Qwen-32B (0.479) and Claude Sonnet 4.6 (0.489 at 25.3% accuracy). These additional targets show that the pattern is not confined to LLaMA-3.1-8B.The result also replicates across lab-independent targets at larger scale (Table 27): on Granite-4.1-30B (n=1576) and Devstral-2-24B ( n=1574), every faithful baseline stays near random while PINOCCHIO reaches 0.806 and 0.836, paired ∆ = + 0.218 and +0.283. Table 28 breaks the hard suite down by benchmark for LLaMA-3.1-8B. P INOCCHIO wins in aggregate by a wide margin and on the hardest long-form benchmarks ( hle 0.869, livebench 0.951), where the sampling methods fall to or below random. On a few lower-accuracy benchmarks whose answers are short enough that response diversity is informative, a sampling baseline is competitive or better (SPUQ on omnimath and simpleqa , the graph measure of Lin et al. [33] 30 Published as a conference paper at COLM 2026 Table 28: PINOCCHIO wins overall and dominates on long-form benchmarks. Per-benchmark AUROC on the hard suite for LLaMA-3.1-8B ( N=10, n=100 per benchmark, text-only). SE and SC are NLI-based semantic entropy and self-consistency; Lin is the best of the three graph measures of Lin et al. [33]. Bold marks the best method on each benchmark. PINOCCHIO is scored black-box on the same responses.                                                                         
+
+> Benchmark nAcc% SE SC Lin SPUQ LofreeCP PINOCCHIO
+> bbeh 100 30.352 0.347 0.644 0.478 0.629 0.641
+> chembench 100 43 0.493 0.517 0.468 0.568 0.579 0.583
+> gpqa 100 29 0.516 0.517 0.534 0.556 0.506 0.598
+> hle 100 14 0.532 0.532 0.503 0.549 0.630 0.869
+> livebench 100 53 0.404 0.405 0.682 0.422 0.541 0.951
+> omnimath 100 60.582 0.582 0.709 0.876 0.766 0.783
+> simpleqa 100 20.441 0.462 0.495 0.827 0.776 0.791 Overall 700 21 0.476 0.477 0.553 0.482 0.574 0.811
+
+Table 29: Even white-box log-probabilities carry no usable correctness signal on the hard suite. White-box sequence-likelihood baselines on LLaMA-3.1-8B with full logit access, on the hard suite. Even with direct access to the target’s token log-probabilities, sequence likelihood carries no usable correctness signal on hard reasoning, whereas P INOCCHIO 
+
+(black-box, scored on the same responses) reaches 0.811.   
+
+> Method AUROC
+
+↑ 
+
+> Mean log-prob (=
+
+−perplexity) 0.413 Min-token log-prob 0.447 Sum log-prob 0.521 Token entropy 0.520 Verbalized confidence 0.610 PINOCCHIO (ours) 0.811 
+
+on bbeh ), which is consistent with sampling-based uncertainty working precisely when consistency tracks correctness. The per-benchmark SE/SC values also expose a second result: where sampling methods fail, they fail by inverting below random, and the inver-sion is domain-specific rather than uniform. Strong inversion concentrates on benchmarks where the model commits to a single long-form wrong trajectory across all N samples ( bbeh 
+
+0.352, livebench 0.404); it weakens where some answer-space diversity survives ( chembench 
+
+0.493, gpqa 0.516); and it disappears on omnimath (0.582), whose short numerical answers paraphrase cleanly enough for NLI clustering to work. A wiring error would invert ev-ery benchmark uniformly. The pattern instead follows the two mechanisms behind the collapse: confidently wrong trajectories that repeated sampling cannot escape, and NLI-based semantic clustering (DeBERTa-large-MNLI, trained on short sentence pairs) failing on multi-paragraph reasoning, where it neither merges paraphrases of the same correct answer nor separates distinct wrong answers of similar surface form.Even white-box access to the target’s token log-probabilities gives no usable correctness signal on the hard suite (Table 29): on LLaMA-3.1-8B, mean log-probability scores 0.413 AUROC (below chance), and no sequence-likelihood statistic exceeds verbalized confidence (0.610), while P INOCCHIO ,scored black-box on the same responses, reaches 0.811. 
+
+## Q Computational resources 
+
+Table 30 summarizes the compute used for training and evaluation. 
+
+Training efficiency. The use of LoRA adapters (rank 32) reduces trainable parameters to 
+
+<1% of the base model, enabling training on 4 GPUs with standard VRAM ( ≥40GB per GPU for VLM training with images). 31 Published as a conference paper at COLM 2026 Table 30: Training and evaluation are inexpensive. Approximate training and evaluation times.      
+
+> Task Time PINOCCHIO training (32,419 examples) 2–3 hours Test set evaluation (1,953 examples) <30 minutes Use case scoring (1,953 examples) <1 hour
+
+Table 31: Calibrator size has little effect. Held-out AUROC, averaged over the four models whose responses train P INOCCHIO , across calibrator sizes at fixed LoRA rank. The 2B, 4B, and 8B calibrators share the Qwen3-VL backbone; the released 0.8B is a text-only Qwen3.5 model, evaluated on the text responses. Training-set size (Figure 7) has a much larger effect.            
+
+> Calibrator Params Held-out AUROC ↑
+> Qwen3.5 (text-only, released) 0.8B 0.861 Qwen3-VL 2B 0.857 Qwen3-VL 4B 0.863 Qwen3-VL (flagship) 8B 0.859
+
+Inference cost. At inference, P INOCCHIO requires a single forward pass through the 8B calibrator model per query ( ∼0.1 seconds on a single GPU). This contrasts with sampling-based methods like semantic entropy [29] that require 5–10 forward passes through the 
+
+target model, representing a 5–10 × reduction in cost per uncertainty estimate. 
+
+Smaller models. A size ablation at fixed LoRA rank (Table 31) shows that calibrator size has little effect: held-out AUROC stays near 0.86 from 0.8B to 8B, and the released 0.8B model performs on par with the 8B calibrator. 
+
+## R Additional main-body figures and tables 
+
+Table 32 reports the leave-one-model-out results. 
+
+R.1 Training scale and input ablations 
+
+Performance improves most rapidly up to N=1,000 and then shows diminishing returns. Removing benchmark and model-identity metadata reduces AUROC from 0.863 to 0.813. Removing only the model-identity tag gives 0.850 AUROC, with larger reductions on Qwen3.5 and VLM benchmarks. The question-versus-response ablation is reported in Table 11. 
+
+Vision-language data as text augmentation. Table 33 reports the text-budget sweep from Section 4.3: calibrators trained on N text examples, with and without the full vision-language training set added, all at matched configuration (LoRA rank 32, two epochs) and evaluated on the same held-out text benchmarks. 
+
+Response length. The response content is load-bearing: truncating it degrades AUROC monotonically (Table 34). At a 200-character budget AUROC falls to 0.790, and beyond the 800-character canonical setting it continues to rise slightly, so more of the response helps. 
+
+R.2 Per-model recalibration 
+
+For each target model, we fit Platt scaling and isotonic regression on 100 labeled examples and evaluate on the remainder. The procedure changes the mapping from scores to prob-abilities without retraining the calibrator. Table 35 reports the matched set results. Platt 32 Published as a conference paper at COLM 2026 100 250 500 1000 2000 5000 10392 
+
+> Number of training samples
+> 0.5 0.6 0.7 0.8 0.9
+> Held-out AUROC
+> Pinocchio VLM Text Best baseline (0.649) Verbalized (0.61) Random
+> 0.503 0.785 0.862 0.896 (full)
+
+Figure 7: More training data helps more than a larger calibrator. Training-set size. AUROC is measured on the ablation’s held-out split, on which the full-data calibrator reaches 0.896; on the main test set it reaches the 0.863 reported throughout (Table 3). Calibrator parameter count has a much smaller effect (Table 31). Table 32: The calibrator transfers to a held-out source model with only a small drop. 
+
+Leave-one-model-out (LOMO) cross-model transfer. Each row trains on two source models and evaluates on the held-out third. ∆ = difference from the full three-model calibrator (0.878). Held-out model Training models AUROC ∆
+
+GPT-5-mini GPT-5.2 + Qwen3.5 0.877 −0.001 GPT-5.2 GPT-5-mini + Qwen3.5 0.861 −0.017 Qwen3.5 GPT-5-mini + GPT-5.2 0.790 −0.088 Mean (LOMO) 0.843 −0.035 Best baseline (combined) 0.649 –scaling preserves AUROC because it is monotone. On the matched ablation set, isotonic regression introduces ties while reducing aggregate ECE from 0.096 to 0.063. 
+
+Held-out evaluation. PINOCCHIO is trained jointly on seven LLMs that span a wide capability range. It achieves 0.862 AUROC on held-out responses from those models; Table 8 reports its per-model calibration. Recalibration also holds when we hold out whole 
+
+domains rather than models. We run four leave-one-domain-out folds, in each of which the calibrator excludes a domain group from training and then scores it, and we fit recalibration on about 100 labels from the held-out domain (Table 36). Recalibrating on those ∼100 labels cuts pooled ECE several-fold, from 0.271 off-the-shelf to 0.050 with Platt scaling, and adding the target’s verbalized confidence as a feature does not consistently help beyond that. We note that AUROC on held-out domains is lower than on held-out models: domain holdout is the harder setting, and recalibration restores calibration but not the discrimination lost when an entire domain is unseen. 
+
+Error analysis. On the matched 1,953-response analysis set, per-benchmark AUROC varies from 0.616 (HLE) to 0.995 (LiveBench), but benchmark accuracy does not explain this variation: Spearman ρ = 0.045 ( p = 0.85). Two error patterns recur. On HLE and HLE-Multimodal, where target accuracy is 17%, 50–63% of the rare correct responses receive 
+
+P(correct ) < 0.2 and score separation is weak (Cohen’s d = 0.30–0.54). On PRBench, ChemBench, and GPQA, 17–22% of incorrect answers receive P(correct ) > 0.8. LiveBench, MathVista, and OmniMath instead exceed 0.929 AUROC. These observations identify where errors occur, but do not by themselves determine whether domain knowledge, response structure, or another factor causes the differences. 33 Published as a conference paper at COLM 2026 Table 33: Vision-language data improves text calibration when hard text data is scarce. 
+
+Text-benchmark AUROC for calibrators trained on N text examples, with and without the vision-language training set added (matched configuration, same held-out text set). Gains are largest at small N and taper as text data grows.        
+
+> N(text examples) Text only + vision-language ∆
+> 500 0.690 0.731
+
++0.041 1,000 0.730 0.789 +0.059 2,500 0.791 0.815 +0.025 
+
+Table 34: Longer response context monotonically improves AUROC. Response-truncation ablation. AUROC as a function of the response character budget, relative to the 800-character canonical setting.    
+
+> Response budget AUROC ∆vs canonical
+> r
+
+=200 0.7898 −0.074 
+
+> r
+
+=400 0.8357 −0.028 
+
+> r
+
+=800 (canonical) 0.8633 –
+
+> r
+
+=1600 0.8691 +0.006 
+
+> r
+
+=3000 0.8691 +0.006 
+
+Table 35: Platt scaling preserves AUROC while cutting ECE. Per-model recalibration on the matched ablation set with a 100-sample fit set. Aggregate is the unweighted mean across models.                                      
+
+> Raw Platt Isotonic Model AUROC ECE AUROC ECE AUROC ECE Neval
+> GPT-5-mini 0.878 0.106 0.878 0.067 0.865 0.076 551 GPT-5.2 0.875 0.078 0.875 0.062 0.870 0.050 624 Qwen3.5 0.869 0.103 0.869 0.064 0.864 0.064 473
+> Aggregate 0.874 0.096 0.874 0.064 0.866 0.063 N/A
+
+Table 36: Recalibration restores calibration even on held-out domains the calibrator never trained on. Pooled ECE across four leave-one-domain-out folds. Off-the-shelf is the excluded-domain calibrator with no recalibration; the others fit on about 100 labels from the held-out domain. Verbal elicitation adds the target’s self-reported confidence as a feature.   
+
+> Condition Pooled ECE
+
+↓    
+
+> Off-the-shelf (no recalibration) 0.271 Domain scaling (Platt) 0.050 Isotonic 0.080 Isotonic + verbal elicitation 0.065
+
+34

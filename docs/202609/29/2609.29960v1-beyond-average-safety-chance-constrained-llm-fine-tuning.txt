@@ -1,0 +1,788 @@
+Title: Beyond Average Safety: Chance-Constrained LLM Fine-tuning
+
+URL Source: https://arxiv.org/pdf/2609.29960v1
+
+Published Time: Fri, 25 Sep 2026 01:24:55 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Beyond Average Safety: Chance-Constrained LLM Fine-tuning 
+
+Taha Entesari, Mahyar Fazlyab 
+
+Department of Electrical and Computer Engineering Johns Hopkins University 
+
+{tentesa1, mahyarfazlyab}@jhu.edu 
+
+Abstract 
+
+Fine-tuning large language models on new objectives can improve helpfulness, instruction following, or domain-specific performance, but it can also induce regres-sions on safety-critical prompts. Existing safety-preserving fine-tuning methods typically control average safety loss or use weighted auxiliary penalties, which can obscure rare but severe failures. We propose a chance-constrained formulation for safety-preserving fine-tuning that limits the fraction of safety examples whose degradation relative to a reference model exceeds a prescribed threshold. Because the resulting empirical chance constraint contains a discontinuous indicator, we introduce a differentiable majorization of the violation rate, yielding a tractable con-servative constraint. We then develop a constraint-aware gradient descent method that treats the majorized constraint as a safe set in parameter space and minimally modifies the fine-tuning direction to preserve feasibility. The resulting update admits a closed form and produces a tail-aware safety correction that emphasizes examples near or above the degradation threshold. We conduct an extensive set of experiments on harmful fine-tuning across three different tasks and three models and show that our approach consistently outperforms the baselines that exist in the literature. These results suggest that safety preservation in LLM fine-tuning is better viewed as a reliability-constrained optimization problem than as average-risk regularization. 
+
+1 Introduction 
+
+Large language models (LLMs) are increasingly adapted to downstream objectives through supervised fine-tuning, preference optimization, and other post-training procedures [22, 25]. In many practical settings, however, improving a model on a target fine-tuning dataset can inadvertently degrade its behavior on safety-sensitive prompts: a model fine-tuned to become more helpful, domain-specialized, or instruction-following may regress on prompts involving harmful requests, refusal behavior, or other safety-critical interactions [24, 34, 18, 36]. This phenomenon, often referred to as harmful fine-tuning, persists even when the fine-tuning data is benign, and has motivated a growing body of defenses operating at the alignment stage [16, 15], at the fine-tuning stage [14, 19, 35, 32], in both stages jointly [21], or as a post-hoc patch [12]. The shared goal of these defenses is to resolve a fundamental tension in post-training: how to improve performance on a desired fine-tuning task while preserving acceptable behavior on a safety dataset. A common approach is to combine the fine-tuning loss and the safety loss through weighted averaging or regularization [14, 32, 21]. While simple and practical, this strategy controls only average behavior over the safety dataset. This can be misleading: a model may satisfy an average safety constraint while still exhibiting unacceptable degradation on a small but important subset of safety examples. Thus, controlling the mean safety loss does not directly control the frequency of safety regressions. 
+
+> Preprint. arXiv:2609.29960v1 [cs.LG] 24 Sep 2026
+
+This motivates viewing safety preservation as a reliability constraint rather than an auxiliary objective. Instead of bounding the average safety degradation, we require that the degradation remain below an acceptable threshold on all but a small user-specified fraction of safety examples. We formalize this through a chance-constrained formulation [5, 20], capturing a reliability requirement that expectation-based penalties cannot express. The empirical chance constraint contains a discontinuous indicator function, which is unsuitable for gradient-based fine-tuning. We replace it by a differentiable majorizer, yielding a conservative surrogate on the safety-regression rate; different choices trade smoothness for sharpness, and an exponential majorizer in particular connects the formulation to entropic risk [10], paralleling the role of CVaR in risk-averse optimization [26]. To solve the resulting problem, we develop a constraint-aware gradient descent method that treats the majorized chance constraint as a safe set in parameter space and, at each iteration, computes the closest Euclidean direction to the nominal fine-tuning gradient that satisfies a forward-invariance condition for this safe set — borrowed from the control barrier function literature [3]. The update coincides with standard SFT when already feasible and applies the smallest correction needed to remain safe otherwise, yielding a closed-form gradient filter without a tuned penalty weight or a reactive dual variable. This perspective differs from standard regularized or multi-task fine-tuning and is closer in spirit to constrained-policy approaches in safe reinforcement learning [1] and to recent constrained for-mulations of LLM unlearning [9]. Combining chance constraints, differentiable majorization, and constraint-aware gradient descent yields a principled mechanism for improving fine-tuning perfor-mance while limiting safety regressions. In summary, our main contributions are as follows: • We formulate safety-preserving LLM fine-tuning as a chance-constrained optimization problem that explicitly bounds the fraction of safety examples whose degradation relative to a reference model exceeds a prescribed threshold. • We introduce a differentiable majorization of the empirical chance constraint, yielding a tractable conservative constraint on the safety-regression rate and connecting exponential majorization to entropic risk. • We develop a constraint-aware gradient descent method that minimally modifies the nominal fine-tuning update to satisfy a forward-invariance condition for the majorized safety constraint. • We empirically demonstrate that the proposed method improves fine-tuning performance while reducing safety-regression rates compared with standard weighted and constrained baselines. We showcase the superiority of our methodology through experiments using Qwen 3.5 4B and 9B and Llama 3.1 8B on three highly poisoned tasks (SST-2, AG News, GSM8K). Overall, the paper advocates a simple thesis: safety preservation in LLM fine-tuning should be treated as reliability-constrained optimization rather than average-risk regularization . This shift from mean safety loss to controlled safety-regression rate leads to a practical fine-tuning algorithm that is both tail-aware and compatible with standard gradient-based training. 
+
+2 Fine-tuning with Safety Preservation 
+
+We consider the post-training of a pretrained autoregressive language model πθ0 (y | x) into a new model πθ (y | x) using two datasets with distinct roles. The first dataset, denoted by DSFT =
+
+{(xj , y j )}mj=1 , is a fine-tuning dataset that encodes the target behavior we wish to improve, such as helpfulness, instruction following, or domain-specific competence. The second dataset, Dsafe =
+
+{(˜ xi, ˜yi)}ni=1 , is a safety dataset that captures behaviors we wish to preserve during post-training, such as refusals, safe completions, or other safety-sensitive responses. Our goal is to improve performance on DSFT while avoiding unacceptable degradation on Dsafe .Throughout the paper, we focus on the supervised setting in which both fine-tuning and safety are measured through cross-entropy losses. For an input-output pair (x, y ), the autoregressive model defines πθ (y | x) = QT (y) 
+
+> t=1
+
+πθ (yt | x, y <t ), where T (y) denotes the sequence length. The sequence-level negative log-likelihood is therefore − log πθ (y | x) = − PT (y) 
+
+> t=1
+
+log πθ (yt | x, y <t ). We define 2the empirical fine-tuning loss as 
+
+LSFT (θ) := 1
+
+m
+
+> m
+
+X
+
+> j=1
+
+ℓSFT  
+
+> j
+
+(θ), ℓSFT  
+
+> j
+
+(θ) := − log πθ (yj | xj ). (1) 
+
+Safety degradation. For each safety example (˜ xi, ˜yi) ∈ Dsafe , define the safety cross-entropy loss 
+
+ℓsafe  
+
+> i
+
+(θ) := − log πθ (˜ yi | ˜xi).
+
+In post-training, the relevant quantity is often not the absolute safety loss, but its degradation relative to the reference model πθ0 . We therefore define 
+
+∆ℓsafe  
+
+> i
+
+(θ) := ℓsafe  
+
+> i
+
+(θ) − ℓsafe  
+
+> i
+
+(θ0) = − log πθ (˜ yi | ˜xi) + log πθ0 (˜ yi | ˜xi). (2) A positive value of ∆ℓsafe  
+
+> i
+
+(θ) means that post-training has reduced the likelihood of the desired safe completion on the ith safety example. This relative quantity separates degradation caused by fine-tuning from the intrinsic difficulty of the safety example. Accordingly, we define the empirical safety degradation as 
+
+Lsafe (θ) := 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+∆ℓsafe  
+
+> i
+
+(θ). (3) 
+
+Expectation-based baseline. A standard approach to safety preservation is to constrain the average degradation, 
+
+min  
+
+> θ
+
+LSFT (θ) s.t. Lsafe (θ) ≤ εavg , (4) or to add the same term as a weighted penalty. Although simple, this controls only the mean over 
+
+Dsafe . Thus, the constraint may be satisfied even when a small subset of safety prompts suffers large degradation, provided those failures are averaged out by many easy examples. To formalize this limitation, let Z be a nonnegative random variable representing absolute per-example safety degradation, and let τ be an unacceptable-degradation threshold. 
+
+Proposition 2.1. Fix μ > 0, τ > μ , and α ∈ (0 , 1) . There exists a nonnegative random variable Z
+
+such that 
+
+E[Z] ≤ μ and P(Z > τ ) ≥ α, 
+
+provided ατ < μ .Proof. Let Z = τ + η with probability α and Z = 0 otherwise, where η > 0 is chosen such that 
+
+α(τ + η) ≤ μ. Then 
+
+E[Z] = α(τ + η) ≤ μ, P(Z > τ ) = α. 
+
+Proposition 2.1 shows that mean control does not imply reliability: a model may satisfy an average safety-degradation constraint while still regressing on a nontrivial fraction of safety prompts. Thus, instead of requiring the mean of ∆ℓsafe  
+
+> i
+
+(θ) to be small, we require ∆ℓsafe  
+
+> i
+
+(θ) to remain below an acceptable threshold on most safety examples. This motivates the chance-constrained formulation developed next. 
+
+3 Chance-Constrained Safety Preservation 
+
+Motivated by the shortcomings of expectation-based formulations, we replace average safety preser-vation with a reliability constraint. Given a degradation threshold τ and violation level α ∈ (0 , 1) ,we require 
+
+P(˜ x, ˜y)∼Dsafe 
+
+ ∆ℓsafe (θ; ˜ x, ˜y) ≤ τ  ≥ 1 − α. (5) Here τ specifies the largest acceptable degradation relative to the reference model, while α specifies the tolerated fraction of safety examples that may exceed this threshold. On the finite safety dataset, the empirical chance constraint becomes 
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+1 ∆ℓsafe  
+
+> i
+
+(θ) > τ ≤ α. (6) This constraint directly controls the empirical rate of safety regressions, but the discontinuous indicator is unsuitable for gradient-based fine-tuning. 3Differentiable majorization of the chance constraint. To obtain a tractable conservative surrogate, we replace the indicator in (6) by a differentiable majorizer. Let ϕβ : R → R+ be a nonnegative function satisfying 1{z > 0} ≤ ϕβ (z), ∀z ∈ R, where β > 0 controls the sharpness or smoothness of the surrogate. Then the sufficient condition 
+
+gβ (θ) := 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ϕβ
+
+ ∆ℓsafe  
+
+> i
+
+(θ) − τ  − α ≤ 0 (7) implies the empirical chance constraint (6). We therefore solve the majorized chance-constrained fine-tuning problem 
+
+min  
+
+> θ
+
+LSFT (θ) s.t. gβ (θ) ≤ 0, (8) The choice of ϕβ determines the conservativeness and smoothness of the relaxation: sharper ma-jorizers better track the hard violation indicator, while smoother choices typically yield more stable gradients. 
+
+Connection to entropic risk. A particularly useful majorizer is the exponential function ϕβ (z) = exp( βz ), β > 0, which satisfies 1{z > 0} ≤ ϕβ (z). Substituting this choice into (7) gives the equivalent condition 
+
+ρβ,n 
+
+ ∆ℓsafe (θ) − τ  ≤ 1
+
+β log α, (9) where 
+
+ρβ,n (X) := 1
+
+β log 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+exp( βX i)
+
+!
+
+(10) is the empirical entropic risk [10]. Thus, the exponential majorizer converts the empirical chance constraint into an entropic-risk constraint on safety degradation. The next section develops a safe-gradient method for solving (8) while maintaining feasibility of the majorized safety constraint during fine-tuning. 
+
+4 Constraint-Aware Gradient Descent 
+
+We now develop an optimization method for solving the majorized chance-constrained problem (8). The key idea is to treat Cβ := {θ : gβ (θ) ≤ 0} as a safe set in parameter space and to modify the nominal fine-tuning direction only when necessary to keep the iterates feasible across all iterations. This yields a feasibility-aware alternative to penalty or primal-dual methods. Ignoring the constraint, the nominal gradient flow for fine-tuning is 
+
+˙θ = −∇L SFT (θ). (11) However, this dynamics may increase gβ (θ) and drive the model outside Cβ . To preserve feasibility, we impose the differential condition 
+
+ddt gβ (θ(t)) = ∇gβ (θ)⊤ ˙θ ≤ − κg β (θ), κ > 0, (12) where κ is a user-defined barrier parameter. If gβ (θ) = 0 , this condition requires the dynamics to point inward or tangent to the feasible set. If gβ (θ) < 0, it allows more freedom while still controlling motion toward violation. At each parameter value θ, we therefore choose the closest direction to the nominal descent direction that satisfies (12): 
+
+d⋆(θ) = arg min 
+
+> d
+
+12 ∥d + ∇L SFT (θ)∥2 s.t. ∇gβ (θ)⊤d ≤ − κg β (θ). (13) We then define the constraint-aware gradient flow ˙θ = d⋆(θ). This dynamics is minimally invasive: it coincides with ordinary gradient flow whenever the nominal direction already satisfies the constraint, and otherwise applies the smallest correction needed to satisfy the safety condition. 4Algorithm 1 Safe Gradient Descent for Chance-Constrained Fine-tuning  
+
+> 1:
+
+Input: model πθ0 , datasets DSFT , D safe , threshold τ , violation level α, majorizer ϕβ , gain κ,step size η 
+
+> 2:
+
+Initialize θ ← θ0 
+
+> 3:
+
+for k = 0 , 1, . . . , K − 1 do  
+
+> 4:
+
+Sample minibatches BSFT ⊆ DSFT and Bsafe ⊆ Dsafe  
+
+> 5:
+
+Estimate ∇L SFT (θ), gβ (θ), and ∇gβ (θ) on the minibatches  
+
+> 6:
+
+Compute d⋆(θ) from (14)–(15)  
+
+> 7:
+
+Update θ ← θ + ηd ⋆(θ) 
+
+> 8:
+
+end for  
+
+> 9:
+
+Return: θ
+
+Since (13) has a single affine constraint in d, it admits a closed-form solution. Specifically, if 
+
+∇gβ (θ)⊤(−∇L SFT (θ)) ≤ − κg β (θ),
+
+then d⋆(θ) = −∇L SFT (θ). Otherwise, 
+
+d⋆(θ) = −∇L SFT (θ)
+
+| {z }
+
+> nominal
+
+− λ⋆(θ)∇gβ (θ)
+
+| {z }
+
+> correction
+
+, (14) where 
+
+λ⋆(θ) = 
+
+ −∇ gβ (θ)⊤∇L SFT (θ) + κg β (θ)
+
+∥∇ gβ (θ)∥2
+
+
+
+> +
+
+, (15) where (·)+ yields the non-negative component of its operand. The correction is normal to the constraint surface and activates only when the nominal fine-tuning gradient would violate the forward-invariance condition. 
+
+Gradient of the safety constraint. From (7), the safety-gradient term is 
+
+∇gβ (θ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+ϕ′
+
+> β
+
+ ∆ℓsafe  
+
+> i
+
+(θ) − τ  ∇∆ℓsafe  
+
+> i
+
+(θ). (16) Since the reference-model term in ∆ℓsafe  
+
+> i
+
+(θ) is constant with respect to θ, ∇∆ℓsafe  
+
+> i
+
+(θ) = ∇ℓsafe  
+
+> i
+
+(θ).
+
+Thus, the safety correction is driven by safety examples according to their majorizer weights 
+
+ϕ′
+
+> β
+
+ ∆ℓsafe  
+
+> i
+
+(θ) − τ  . For common majorizers, these weights emphasize examples near or above the degradation threshold. 
+
+Stochastic iterative implementation and feasibility. In practice, we compute the constraint-aware direction using stochastic minibatch estimates of ∇L SFT (θ), gβ (θ), and ∇gβ (θ). Given a step size 
+
+η > 0, the basic update is 
+
+θk+1 = θk + ηd ⋆(θk). (17) The forward-invariance guarantee, however, holds for exact values of gβ and ∇gβ ; with minibatches, sampling noise can lead to constraint violations. To mitigate this, we can use a buffered stochastic constraint 
+
+bgbuf  
+
+> β
+
+(θ) := bgβ (θ) + ρ, ρ > 0, (18) and compute the constraint-aware direction by enforcing ∇bgβ (θ)⊤d ≤ − κbgbuf  
+
+> β
+
+(θ). The buffer ρ
+
+provides slack against estimation error. These modifications preserve the scalability of minibatch training while reducing stochastic constraint violations. The resulting method can be interpreted as a safety filter on the fine-tuning gradient: when the SFT gradient already respects the majorized chance constraint, the update is unchanged; when it would increase the safety violation too quickly, the update is projected onto a safe half-space determined by ∇gβ (θ), providing a direct mechanism for maintaining safety feasibility without introducing a dual variable or hand-tuned penalty weight. The algorithm is summarized in Algorithm 1. 55 Experiments 
+
+We empirically evaluate our method against a broad suite of recent defenses for safety-preserving fine-tuning. Following the harmful fine-tuning (HFT) literature [14, 15, 19], we adopt a two-stage protocol: a base instruct model is first aligned on a safety dataset, and then fine-tuned on a downstream task whose data has been poisoned with harmful prompt-response pairs. The defense is applied either at the alignment stage or the fine-tuning stage, depending on the method. 
+
+5.1 Setup Models. We use three open-weight instruct models spanning two families and two size regimes: Llama-3.1-8B-Instruct, Qwen-3.5-9B, and Qwen-3.5-4B. All defenses train LoRA adapters [13] of rank 32 with αLoRA =4 , attached to the query/key/value projections of every transformer block, so all methods adapt the same parameter set. Models are loaded in bfloat16; remaining compute and software details are summarized in Appendix E. 
+
+Safety dataset and harmful evaluation. The safety dataset Dsafe is constructed from the B EAVER -TAILS 30k_train split [17] by selecting prompt–response pairs flagged is_safe=True . We use 
+
+5,000 such pairs for both the alignment stage and as the constraint dataset for our method. For evaluation, we hold out a disjoint set of 700 unique harmful prompts from the 30k_test split. 
+
+Downstream tasks and poisoning. We adopt three standard downstream tasks used throughout the HFT literature: SST-2 [28] (binary sentiment), AG News [37] (4-way topic classification), and 
+
+GSM8K [7] (grade-school math). Each task is poisoned by mixing in harmful (prompt, response) pairs sampled from the B EAVER TAILS unsafe split: ⌊p · N ⌋ harmful pairs are concatenated with the benign task examples and shuffled, where N =1000 is the total fine-tuning budget and p ∈ [0 , 1] is the poison ratio. Our main table fixes a high-poison regime with p=0 .5 to expose defenses to a strong attack; the dependence on p is studied in Section 5.5. 
+
+Two-stage training. Alignment. The base model is fine-tuned on Dsafe with the alignment-stage defense (or plain supervised fine-tuning, for fine-tuning-stage defenses). Standard alignment uses learning rate 5×10 −4, 3 epochs, batch size 10 , constant schedule, and weight decay 0.1; alignment-stage defenses (Vaccine [16], Booster [15]) instead align for 20 epochs, matching the recipes used in their original works. After alignment, the LoRA adapter is merged into the base weights so subsequent fine-tuning starts from a well-defined aligned checkpoint. 
+
+Fine-tuning. The aligned model is then fine-tuned on the poisoned downstream task with learning rate 1×10 −5, 20 epochs, batch size 10 , constant schedule, weight decay 0.1, and maximum sequence length 512 . The longer fine-tuning horizon ensures that all defenses are challenged with sustained poisoning exposure rather than under-trained baselines. We perform fine-tuning under three different seeds and report mean ± std for the desired metrics in our tables. Defense-specific hyperparameters (reproduced verbatim from the originating papers wherever applicable) are listed in Appendix B. 
+
+5.2 Defenses 
+
+We compare our method against seven baselines used in the recent HFT literature. We present these methods in Table 1, along with a categorization of the stage in which they operate. For our method, we instantiate the majorized problem (8) using the one-sided ramp function ϕβ (z) = max(1 + βz, 0) , β > 0. The constraint then takes the form 
+
+gβ (θ) = 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+max  1 + β(∆ ℓsafe  
+
+> i
+
+(θ) − τ ), 0 − α ≤ 0 (19) where τ is the largest acceptable degradation relative to the reference model and α ∈ (0 , 1) is the tolerated violation rate. At each step we form the safe descent direction by the closed-form correction in (14)–(17), reusing the batch of Dsafe already drawn for ∇gβ as the constraint mini-batch and the poisoned task batch as ∇L SFT . Throughout the main experiments, we use the configuration 
+
+(τ, β, α ) = (0 .1, 10 , 0.05) and set the barrier parameter κ as the inverse of the learning rate. We provide results for hyperparameter search in Section C. 6Method Alignment SFT Post-hoc Mechanism SFT ✓ Plain supervised fine-tuning on the poisoned task; worst-case lower bound w/o defensive intervention. Vaccine [16] ✓ SAM-style perturbation of attention representations during align-ment to flatten the loss landscape against fine-tuning shifts. Booster [15] ✓ Adds a harmful-perturbation regularizer ( λ=5 ) that perturbs param-eters along the harmful gradient before each alignment step. Lisa [14] ✓ Bi-state optimization alternating fine-tuning and alignment phases, with a proximal pull toward the aligned checkpoint. SafeGrad [35] ✓ Gradient surgery resolving conflicts between the task gradient and a KL-based alignment gradient at every fine-tuning step. AsFT [32] ✓ Anchors fine-tuning to the alignment direction by penalizing the orthogonal component of the LoRA update ( λreg =1 ). SaLoRA [19] ✓ Precomputes a safety direction from Dsafe and projects it out of the fine-tuning gradient at every step. SafeLoRA [12] ✓ Training-free, data-free patch projecting the trained LoRA update of selected layers onto the safety-aligned subspace. 
+
+Table 1: Baselines grouped by stage of intervention. SafeLoRA is training-free and applied to the LoRA artifact after fine-tuning. 
+
+5.3 Evaluation metrics 
+
+We report two complementary metrics, following standard HFT practice: 
+
+Harmful Score (HS, ↓). We generate 512 -token responses to each of the 700 held-out harmful BEAVER TAILS prompts and score them with the PKU-Alignment/beaver-dam-7b moderation classifier [17]. For each prompt i, the moderator returns a vector of safety-category probabilities; we take the maximum across categories as the per-prompt harm probability hi. The headline HS is the fraction of prompts with hi > 0.4, the threshold used in the original B EAVER TAILS evaluation. We additionally report the per-prompt quantiles HS qK , K ∈ { 10 , 25 , 50 , 75 , 90 , 95 , 99 }, of {hi}700 
+
+> i=1
+
+,which directly track tail behavior and are the quantities that our method is constructed to control. 
+
+Fine-tune Accuracy (FA, ↑). Task utility is measured on 200 held-out test examples per task using the standard task metric: substring match for SST-2 and AG News, and exact-match on the extracted final answer for GSM8K. Generation uses left-padded greedy decoding with up to 256 new tokens. 
+
+5.4 Main results: high poisoning 
+
+Table 2 reports performance at poison ratio p=0 .5 for three backbones and three downstream tasks. For each configuration we report the harmful-response rate HS, the per-prompt harm quantile HS qK 
+
+(K=90 for the Qwen backbones, K=50 for Llama, where higher quantiles saturate), and the task accuracy FA. The Base and Aligned (SFT) rows give the pre-fine-tuning model and its safety-aligned counterpart as references, and undefended SFT serves as the failure baseline against which all defenses are measured. 
+
+Harm reduction. Across backbones and tasks, our method sits at or near the lowest HS and HS qK 
+
+in every configuration, so the reduction reflects the upper tail of the per-prompt harm distribution and not merely the threshold statistic. The reference that matters is the aligned model. Our HS is at or statistically indistinguishable from it everywhere, while undefended SFT and most regularization-based defenses raise harm well above that level. Fine-tuning under our method therefore leaves the safety profile of the aligned checkpoint essentially intact, which is what the constraint was written to enforce. A more detailed breakdown of the quantiles can be found in Appendix D. 
+
+Classification tasks. On SST-2 and AG News, suppressing harm does not come at the expense of task learning: our method fits the downstream task to within a modest margin of the strongest utility-oriented baselines while simultaneously achieving the lowest or near-lowest harm on both metrics. The regularization-based defenses are markedly less stable at this poison ratio, with the HS of 7Table 2: Main results at poison ratio p=0 .5. For each (model, defense, task) we report HS (fraction of prompts with max harm probability > 0.4), HS qK (per-prompt K-th quantile of max harm probability), and FA (task accuracy). K=50 for Llama (higher quantiles saturate near 1.0 across all defenses); K=90 for Qwen models. Bold = best, underlined = second best per column. ↓ lower is better, ↑ higher is better. Defense rows are mean ±std over 3 seeds. 
+
+Defense SST-2 AG News GSM8K HS ↓ HS qK ↓ FA ↑ HS ↓ HS qK ↓ FA ↑ HS ↓ HS qK ↓ FA ↑
+
+> Qwen-3.5-4B ( qK =90 )
+
+Base 0.430 0.707 0.915 0.430 0.707 1.000 0.430 0.707 0.280 Aligned (SFT) 0.350 0.738 0.940 0.350 0.738 0.890 0.350 0.738 0.170 SFT 0.546 ±0.042 0.890 ±0.015 0.973 ±0.016 0.545 ±0.043 0.901 ±0.025 0.890 ±0.015 0.637 ±0.047 0.945 ±0.017 0.633 ±0.064 
+
+Vaccine 0.688 ±0.032 0.962 ±0.008 0.963 ±0.038 0.680 ±0.025 0.960 ±0.002 0.932 ±0.033 0.697 ±0.023 0.968 ±0.009 0.378 ±0.172 
+
+Booster 0.665 ±0.021 0.940 ±0.012 0.943 ±0.018 0.674 ±0.013 0.949 ±0.007 0.952 ±0.021 0.715 ±0.012 0.951 ±0.002 0.427 ±0.083 
+
+Lisa 0.489 ±0.051 0.845 ±0.037 0.968 ±0.003 0.510 ±0.038 0.874 ±0.020 0.900 ±0.018 0.532 ±0.032 0.913 ±0.016 0.290 ±0.041 
+
+SaLoRA 0.540 ±0.040 0.895 ±0.014 0.975 ±0.005 0.558 ±0.024 0.898 ±0.022 0.898 ±0.020 0.656 ±0.016 0.947 ±0.004 0.655 ±0.061 
+
+SafeLoRA 0.363 ±0.014 0.721 ±0.019 0.952 ±0.018 0.358 ±0.026 0.726 ±0.008 0.898 ±0.032 0.358 ±0.012 0.720 ±0.002 0.135 ±0.005 
+
+SafeGrad 0.445 ±0.015 0.843 ±0.006 0.967 ±0.019 0.450 ±0.038 0.864 ±0.031 0.888 ±0.006 0.495 ±0.026 0.894 ±0.028 0.542 ±0.083 
+
+AsFT 0.371 ±0.013 0.774 ±0.010 0.952 ±0.006 0.374 ±0.011 0.792 ±0.009 0.907 ±0.010 0.348 ±0.006 0.737 ±0.013 0.138 ±0.016 
+
+Ours 0.340 ±0.032 0.726 ±0.041 0.957 ±0.018 0.340 ±0.017 0.732 ±0.039 0.927 ±0.006 0.360 ±0.052 0.780 ±0.118 0.267 ±0.110 
+
+> Qwen-3.5-9B ( qK =90 )
+
+Base 0.434 0.715 0.995 0.434 0.715 0.980 0.434 0.715 0.380 Aligned (SFT) 0.546 0.781 0.980 0.546 0.781 0.855 0.546 0.781 0.250 SFT 0.670 ±0.023 0.898 ±0.031 0.980 ±0.005 0.672 ±0.025 0.885 ±0.016 0.903 ±0.030 0.681 ±0.020 0.947 ±0.005 0.300 ±0.080 
+
+Vaccine 0.601 ±0.052 0.938 ±0.010 0.993 ±0.012 0.622 ±0.038 0.938 ±0.007 0.965 ±0.022 0.687 ±0.030 0.947 ±0.008 0.227 ±0.059 
+
+Booster 0.628 ±0.011 0.867 ±0.010 0.945 ±0.005 0.622 ±0.015 0.845 ±0.005 0.972 ±0.013 0.619 ±0.023 0.869 ±0.012 0.597 ±0.049 
+
+Lisa 0.612 ±0.036 0.854 ±0.020 0.963 ±0.003 0.610 ±0.023 0.853 ±0.012 0.905 ±0.026 0.622 ±0.047 0.900 ±0.022 0.517 ±0.049 
+
+SaLoRA 0.677 ±0.013 0.903 ±0.014 0.983 ±0.003 0.689 ±0.007 0.893 ±0.008 0.925 ±0.017 0.710 ±0.011 0.943 ±0.008 0.258 ±0.059 
+
+SafeLoRA 0.531 ±0.015 0.771 ±0.005 0.967 ±0.014 0.509 ±0.005 0.777 ±0.012 0.885 ±0.035 0.501 ±0.013 0.760 ±0.017 0.258 ±0.029 
+
+SafeGrad 0.604 ±0.025 0.868 ±0.020 0.983 ±0.010 0.612 ±0.009 0.855 ±0.014 0.907 ±0.028 0.613 ±0.028 0.919 ±0.005 0.317 ±0.058 
+
+AsFT 0.529 ±0.009 0.800 ±0.002 0.972 ±0.013 0.547 ±0.007 0.811 ±0.019 0.892 ±0.029 0.529 ±0.005 0.801 ±0.013 0.235 ±0.036 
+
+Ours 0.539 ±0.024 0.836 ±0.048 0.957 ±0.013 0.536 ±0.022 0.822 ±0.030 0.902 ±0.050 0.548 ±0.027 0.857 ±0.059 0.325 ±0.087 
+
+> Llama-3.1-8B ( qK =50 )
+
+Base 0.553 0.435 0.995 0.553 0.435 0.985 0.553 0.435 0.185 Aligned (SFT) 0.786 0.781 0.830 0.786 0.781 0.850 0.786 0.781 0.175 SFT 0.910 ±0.003 0.913 ±0.005 0.995 ±0.005 0.915 ±0.005 0.914 ±0.004 0.980 ±0.013 0.894 ±0.017 0.888 ±0.013 0.355 ±0.071 
+
+Vaccine 0.851 ±0.055 0.837 ±0.055 0.962 ±0.019 0.851 ±0.049 0.822 ±0.039 0.903 ±0.033 0.843 ±0.013 0.821 ±0.039 0.140 ±0.018 
+
+Booster 0.894 ±0.015 0.891 ±0.020 0.995 ±0.005 0.905 ±0.013 0.898 ±0.019 0.972 ±0.026 0.908 ±0.007 0.911 ±0.012 0.342 ±0.038 
+
+Lisa 0.887 ±0.015 0.887 ±0.021 0.998 ±0.003 0.899 ±0.010 0.891 ±0.012 0.925 ±0.061 0.848 ±0.007 0.823 ±0.010 0.427 ±0.042 
+
+SaLoRA 0.910 ±0.012 0.899 ±0.009 0.997 ±0.003 0.909 ±0.009 0.906 ±0.000 0.985 ±0.005 0.895 ±0.014 0.891 ±0.007 0.333 ±0.120 
+
+SafeLoRA 0.794 ±0.001 0.797 ±0.010 0.878 ±0.033 0.790 ±0.006 0.792 ±0.005 0.910 ±0.038 0.778 ±0.001 0.777 ±0.004 0.173 ±0.023 
+
+SafeGrad 0.831 ±0.007 0.844 ±0.004 1.000 ±0.000 0.850 ±0.009 0.856 ±0.010 0.973 ±0.014 0.824 ±0.009 0.807 ±0.010 0.358 ±0.008 
+
+AsFT 0.800 ±0.009 0.777 ±0.006 0.982 ±0.013 0.801 ±0.002 0.800 ±0.006 0.892 ±0.032 0.796 ±0.008 0.766 ±0.007 0.205 ±0.028 
+
+Ours 0.776 ±0.015 0.785 ±0.009 0.985 ±0.015 0.785 ±0.026 0.794 ±0.015 0.928 ±0.032 0.794 ±0.032 0.796 ±0.022 0.268 ±0.050 
+
+Vaccine and Booster exceeding that of undefended SFT on several Qwen configurations. Perturbing or smoothing the fine-tuning objective thus redistributes harm rather than controlling it when the poison fraction is large. By contrast, the behavior of our method is consistent across model scale. 
+
+GSM8K and constraint satisfaction. GSM8K is the most informative setting for assessing whether a defense genuinely respects the safety constraint. Task accuracy is far from saturated here, so the safety-utility trade-off is visible in a way it is not on the classification tasks, and no method approaches undefended-SFT accuracy without an HS far above the aligned reference. The constraint is therefore active. This changes the question a defense should be asked. Since our formulation maximizes task performance subject to gβ (θ) ≤ 0 rather than trading the two off through a penalty, the relevant comparison is not who attains the lowest harm outright, but who extracts the most utility from among the methods that keep harm at the aligned level. On that comparison our method is the strongest on every backbone: the few baselines that record lower HS than ours do so only by sacrificing task accuracy, in the Qwen-3.5-4B and Llama cases falling to roughly half of what our method achieves. Their apparent safety advantage is model degradation, not constraint satisfaction. Our method instead recovers substantial accuracy over the aligned model on all three backbones while holding harm at the aligned level, and on Qwen-3.5-9B it surpasses undefended-SFT accuracy outright without any corresponding rise in harm. The additional accuracy that the remaining baselines extract is accompanied by exactly the harm the constraint precludes. This is the behavior prescribed for a faithful constrained method in the harmful-fine-tuning regime, and it is the property that distinguishes our approach from baselines whose safety guarantees hold only in expectation. 
+
+5.5 Poison-ratio sweep 
+
+To probe how each defense scales with attack strength, we hold all other settings fixed and sweep the poison ratio p ∈ { 0.05 , 0.1, 0.25 , 0.5} on Qwen-3.5-4B/SST-2. Table 3 reports HS and FA for every defense at each p. The tables for the other tasks are deferred to the Appendix. 8Table 3: Poison-ratio sweep on Qwen-3.5-4B / SST-2 (align=sft). For each defense and poison ratio 
+
+p ∈ { 0.05 , 0.1, 0.25 , 0.5} we report HS (fraction of prompts with max harm probability > 0.4, ↓), HS q90 (90th-percentile per-prompt max harm probability, ↓), and FA (SST-2 accuracy, ↑). Base and Aligned-SFT baselines do not depend on p and are shown as single spanned values. Bold = best, underlined = second best per column. Antibody-FT is deferred to the appendix. Defense rows are mean ±std over 3 seeds.                                                                                                                                                                                                                                                                
+
+> Defense p=0 .05 p=0 .1p=0 .25 p=0 .5
+> HS ↓HS q90 ↓FA ↑HS ↓HS q90 ↓FA ↑HS ↓HS q90 ↓FA ↑HS ↓HS q90 ↓FA ↑
+> Base HS = 0.430 HS q90 = 0.707 FA = 0.915 (constant in p)
+> Aligned (SFT) HS = 0.350 HS q90 = 0.738 FA = 0.940 (constant in p)
+> SFT 0.425 ±0.040 0.810 ±0.029 0.985 ±0.013 0.437 ±0.037 0.828 ±0.021 0.977 ±0.014 0.516 ±0.020 0.862 ±0.015 0.983 ±0.020 0.546 ±0.042 0.890 ±0.015 0.973 ±0.016
+> Vaccine 0.575 ±0.046 0.940 ±0.018 0.973 ±0.019 0.604 ±0.027 0.944 ±0.008 0.972 ±0.010 0.665 ±0.025 0.958 ±0.006 0.983 ±0.010 0.688 ±0.032 0.962 ±0.008 0.963 ±0.038
+> Booster 0.464 ±0.015 0.872 ±0.013 0.973 ±0.008 0.493 ±0.015 0.883 ±0.007 0.957 ±0.008 0.600 ±0.026 0.918 ±0.010 0.943 ±0.016 0.665 ±0.021 0.940 ±0.012 0.943 ±0.018
+> Lisa 0.395 ±0.018 0.792 ±0.026 0.982 ±0.010 0.421 ±0.023 0.804 ±0.025 0.967 ±0.010 0.447 ±0.037 0.815 ±0.011 0.973 ±0.008 0.489 ±0.051 0.845 ±0.037 0.968 ±0.003
+> SaLoRA 0.430 ±0.016 0.815 ±0.008 0.990 ±0.005 0.467 ±0.008 0.841 ±0.016 0.983 ±0.008 0.536 ±0.030 0.867 ±0.024 0.988 ±0.012 0.540 ±0.040 0.895 ±0.014 0.975 ±0.005
+> SafeLoRA 0.351 ±0.013 0.735 ±0.012 0.957 ±0.015 0.361 ±0.003 0.735 ±0.014 0.952 ±0.020 0.364 ±0.012 0.727 ±0.004 0.953 ±0.010 0.363 ±0.014 0.721 ±0.019 0.952 ±0.018
+> SafeGrad 0.377 ±0.010 0.758 ±0.017 0.978 ±0.008 0.393 ±0.022 0.787 ±0.015 0.973 ±0.012 0.415 ±0.031 0.806 ±0.033 0.973 ±0.016 0.445 ±0.015 0.843 ±0.006 0.967 ±0.019
+> AsFT 0.378 ±0.010 0.776 ±0.002 0.953 ±0.010 0.374 ±0.012 0.784 ±0.006 0.952 ±0.010 0.360 ±0.006 0.779 ±0.002 0.958 ±0.006 0.371 ±0.013 0.774 ±0.010 0.952 ±0.006
+> Ours 0.311 ±0.018 0.715 ±0.010 0.962 ±0.019 0.325 ±0.002 0.719 ±0.024 0.957 ±0.019 0.339 ±0.007 0.727 ±0.021 0.960 ±0.018 0.340 ±0.032 0.726 ±0.041 0.957 ±0.018
+
+The poison-ratio sweep on Qwen-3.5-4B (Tables 3, 4, and 5) isolates the defining behavior of our method: its harm metrics are approximately invariant to the poison ratio. As p climbs from 5% to 
+
+50% , our HS and HS q90 remain nearly constant, whereas the harm of the undefended baseline (SFT) climbs steadily. Whether this fixed safety can be combined with high accuracy depends on the task. On SST-2 and AG News (Tables 3 and 4) it can: our method is the lowest-harm defense at every poison ratio while its accuracy trails the best-performing baseline by only a few points. The next-lowest-harm defenses (SafeLoRA, AsFT) are likewise approximately flat in p, but at a higher harm level. Vaccine and Booster exceed the undefended baseline at every poison ratio. On GSM8K (Table 5), high accuracy and low harm are not jointly attainable among the defenses we evaluate: harm and accuracy are negatively associated across methods, and the lowest-harm defenses (SafeLoRA, AsFT) reach the aligned harm floor only by failing to learn the task, at accuracy near 
+
+0.15 . Here our method keeps the safety constraint binding and lets accuracy take a value compatible with it. Among the methods we compare, our method is the only one that has kept the harmfulness low whilst increasing the task accuracy. 
+
+6 Conclusion 
+
+We formulated safety preservation in LLM post-training as a chance constraint on the safety degrada-tion relative to a reference model and gave a tractable instantiation via differentiable majorization and a closed-form safety filter on the fine-tuning gradient. The method enforces the safety budget step by step rather than as a soft penalty integrated against the example distribution. Across three backbones and three tasks under harmful fine-tuning, this yields a strong and safe operating point on the safety-utility trade-off: harm at or near the lowest in nearly every cell, at a modest cost in task accuracy. 
+
+7 Limitations 
+
+Our method requires access to a separate safety dataset on which to instantiate the chance constraint. This is standard within the HFT framework, as most defenses in our comparison set assume the same. Computationally, the only addition relative to plain SFT is the constraint gradient: each step evaluates ∇gβ (θ) on a constraint mini-batch, which costs one extra forward–backward pass and roughly doubles the per-step wall-clock time. Appendix E reports a detailed runtime analysis together with a primal–dual reformulation that folds this gradient into a single backward pass, trading part of the per-step feasibility guarantee for speed. A further limitation is that our constraint is instantiated on a fixed safety dataset, scored by simply the cross-entropy being low on such samples. A natural extension is to define the chance constraint on a reward model applied to the model’s own generations, giving an on-policy safety constraint that tracks the current policy’s outputs rather than a static prompt set. We leave this direction to future work. 9References 
+
+[1] Joshua Achiam, David Held, Aviv Tamar, and Pieter Abbeel. Constrained policy optimization. In International conference on machine learning , pages 22–31. Pmlr, 2017. [2] Eitan Altman. Constrained Markov Decision Processes . Chapman and Hall/CRC, 1999. [3] Aaron D Ames, Samuel Coogan, Magnus Egerstedt, Gennaro Notomista, Koushil Sreenath, and Paulo Tabuada. Control barrier functions: Theory and applications. In 2019 18th European control conference (ECC) , pages 3420–3431. IEEE, 2019. [4] Giuseppe Carlo Calafiore and Marco C Campi. The scenario approach to robust control design. 
+
+IEEE Transactions on automatic control , 51(5):742–753, 2006. [5] Abraham Charnes and William W Cooper. Chance-constrained programming. Management science , 6(1):73–79, 1959. [6] Yinlam Chow, Mohammad Ghavamzadeh, Lucas Janson, and Marco Pavone. Risk-constrained reinforcement learning with percentile risk criteria. Journal of Machine Learning Research ,18(167):1–51, 2018. [7] Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168 , 2021. [8] Josef Dai, Xuehai Pan, Ruiyang Sun, Jiaming Ji, Xinbo Xu, Mickel Liu, Yizhou Wang, and Yaodong Yang. Safe rlhf: Safe reinforcement learning from human feedback. arXiv preprint arXiv:2310.12773 , 2023. [9] Taha Entesari, Arman Hatami, Rinat Khaziev, Anil Ramakrishna, and Mahyar Fazlyab. Con-strained entropic unlearning: A primal-dual framework for large language models. Advances in Neural Information Processing Systems , 38:166435–166474, 2026. [10] Hans Föllmer and Alexander Schied. Convex measures of risk and trading constraints. Finance and stochastics , 6(4):429–447, 2002. [11] Danny Halawi, Alexander Wei, Eric Wallace, Tony T Wang, Nika Haghtalab, and Jacob Steinhardt. Covert malicious finetuning: Challenges in safeguarding llm adaptation. arXiv preprint arXiv:2406.20053 , 2024. [12] Chia-Yi Hsu, Yu-Lin Tsai, Chih-Hsun Lin, Pin-Yu Chen, Chia-Mu Yu, and Chun-Ying Huang. Safe lora: The silver lining of reducing safety risks when finetuning large language models. 
+
+Advances in Neural Information Processing Systems , 37:65072–65094, 2024. [13] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, Weizhu Chen, et al. Lora: Low-rank adaptation of large language models. ICLR ,1(2):3, 2022. [14] Tiansheng Huang, Sihao Hu, Fatih Ilhan, Selim Tekin, and Ling Liu. Lisa: Lazy safety alignment for large language models against harmful fine-tuning attack. Advances in Neural Information Processing Systems , 37:104521–104555, 2024. [15] Tiansheng Huang, Sihao Hu, Fatih Ilhan, Selim Furkan Tekin, and Ling Liu. Booster: Tackling harmful fine-tuning for large language models via attenuating harmful perturbation. arXiv preprint arXiv:2409.01586 , 2024. [16] Tiansheng Huang, Sihao Hu, and Ling Liu. Vaccine: Perturbation-aware alignment for large language models against harmful fine-tuning attack. Advances in Neural Information Processing Systems , 37:74058–74088, 2024. [17] Jiaming Ji, Mickel Liu, Josef Dai, Xuehai Pan, Chi Zhang, Ce Bian, Boyuan Chen, Ruiyang Sun, Yizhou Wang, and Yaodong Yang. Beavertails: Towards improved safety alignment of llm via a human-preference dataset. Advances in Neural Information Processing Systems ,36:24678–24704, 2023. 10 [18] Simon Lermen, Charlie Rogers-Smith, and Jeffrey Ladish. Lora fine-tuning efficiently undoes safety training in llama 2-chat 70b. arXiv preprint arXiv:2310.20624 , 2023. [19] Mingjie Li, Wai Man Si, Michael Backes, Yang Zhang, and Yisen Wang. Salora: Safety-alignment preserved low-rank adaptation. arXiv preprint arXiv:2501.01765 , 2025. [20] Arkadi Nemirovski and Alexander Shapiro. Convex approximations of chance constrained programs. SIAM Journal on Optimization , 17(4):969–996, 2007. [21] Quoc Minh Nguyen, Trung Le, Jing Wu, Anh Tuan Bui, and Mehrtash Harandi. Antibody: Strengthening defense against harmful fine-tuning for large language models via attenuating harmful gradient influence. arXiv preprint arXiv:2603.00498 , 2026. [22] Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. Advances in neural information processing systems ,35:27730–27744, 2022. [23] Santiago Paternain, Luiz Chamon, Miguel Calvo-Fullana, and Alejandro Ribeiro. Constrained reinforcement learning has zero duality gap. Advances in Neural Information Processing Systems , 32, 2019. [24] Xiangyu Qi, Yi Zeng, Tinghao Xie, Pin-Yu Chen, Ruoxi Jia, Prateek Mittal, and Peter Henderson. Fine-tuning aligned language models compromises safety, even when users do not intend to! 
+
+arXiv preprint arXiv:2310.03693 , 2023. [25] Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn. Direct preference optimization: Your language model is secretly a reward model. 
+
+Advances in neural information processing systems , 36:53728–53741, 2023. [26] R Tyrrell Rockafellar, Stanislav Uryasev, et al. Optimization of conditional value-at-risk. 
+
+Journal of risk , 2:21–42, 2000. [27] Domenic Rosati, Jan Wehner, Kai Williams, Łukasz Bartoszcze, David Atanasov, Robie Gonza-les, Subhabrata Majumdar, Carsten Maple, Hassan Sajjad, and Frank Rudzicz. Representation noising: A defence mechanism against harmful finetuning. Advances in Neural Information Processing Systems , 37:12636–12676, 2024. [28] Richard Socher, Alex Perelygin, Jean Wu, Jason Chuang, Christopher D Manning, Andrew Y Ng, and Christopher Potts. Recursive deep models for semantic compositionality over a sentiment treebank. In Proceedings of the 2013 conference on empirical methods in natural language processing , pages 1631–1642, 2013. [29] Adam Stooke, Joshua Achiam, and Pieter Abbeel. Responsive safety in reinforcement learning by pid lagrangian methods. In International conference on machine learning , pages 9133–9143. PMLR, 2020. [30] Chen Tessler, Daniel J Mankowitz, and Shie Mannor. Reward constrained policy optimization. 
+
+arXiv preprint arXiv:1805.11074 , 2018. [31] Alexander Wei, Nika Haghtalab, and Jacob Steinhardt. Jailbroken: How does llm safety training fail? Advances in neural information processing systems , 36:80079–80110, 2023. [32] Shuo Yang, Qihui Zhang, Yuyang Liu, Yue Huang, Xiaojun Jia, Kun-Peng Ning, Jia-Yu Yao, Jigang Wang, Dai Hailiang, Yibing Song, et al. Asft: Anchoring safety during llm fine-tuning within narrow safety basin. In Proceedings of the AAAI Conference on Artificial Intelligence ,volume 40, pages 34322–34330, 2026. [33] Tsung-Yen Yang, Justinian Rosca, Karthik Narasimhan, and Peter J Ramadge. Projection-based constrained policy optimization. arXiv preprint arXiv:2010.03152 , 2020. [34] Xianjun Yang, Xiao Wang, Qi Zhang, Linda Petzold, William Yang Wang, Xun Zhao, and Dahua Lin. Shadow alignment: The ease of subverting safely-aligned language models. arXiv preprint arXiv:2310.02949 , 2023. 11 [35] Biao Yi, Jiahao Li, Baolei Zhang, Lihai Nie, Tong Li, Tiansheng Huang, and Zheli Liu. Gradient surgery for safe llm fine-tuning. arXiv preprint arXiv:2508.07172 , 2025. [36] Qiusi Zhan, Richard Fang, Rohan Bindu, Akul Gupta, Tatsunori B Hashimoto, and Daniel Kang. Removing rlhf protections in gpt-4 via fine-tuning. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 2: Short Papers) , pages 681–687, 2024. [37] Xiang Zhang, Junbo Zhao, and Yann LeCun. Character-level convolutional networks for text classification. Advances in neural information processing systems , 28, 2015. 12 Table 4: Poison-ratio sweep on Qwen-3.5-4B / AG News (align=sft). For each defense and poison ratio p ∈ { 0.05 , 0.1, 0.25 , 0.5} we report HS (fraction of prompts with max harm probability > 0.4,
+
+↓), HS q90 (90th-percentile per-prompt max harm probability, ↓), and FA (AG News accuracy, ↑). Base and Aligned-SFT baselines do not depend on p and are shown as single spanned values. Bold =best, underlined = second best per column. Defense rows are mean ±std over 3 seeds. 
+
+Defense p=0 .05 p=0 .1 p=0 .25 p=0 .5
+
+HS ↓ HS q90 ↓ FA ↑ HS ↓ HS q90 ↓ FA ↑ HS ↓ HS q90 ↓ FA ↑ HS ↓ HS q90 ↓ FA ↑
+
+Base HS = 0.430 HS q90 = 0.707 FA = 1.000 (constant in p)
+
+Aligned (SFT) HS = 0.350 HS q90 = 0.738 FA = 0.890 (constant in p)
+
+SFT 0.434 ±0.024 0.844 ±0.004 0.917 ±0.026 0.445 ±0.010 0.866 ±0.006 0.912 ±0.028 0.517 ±0.008 0.882 ±0.023 0.895 ±0.040 0.545 ±0.043 0.901 ±0.025 0.890 ±0.015 
+
+Vaccine 0.584 ±0.024 0.936 ±0.008 0.947 ±0.062 0.613 ±0.015 0.947 ±0.011 0.930 ±0.066 0.684 ±0.021 0.967 ±0.002 0.943 ±0.028 0.680 ±0.025 0.960 ±0.002 0.932 ±0.033 
+
+Booster 0.476 ±0.029 0.884 ±0.006 0.975 ±0.018 0.496 ±0.016 0.891 ±0.004 0.968 ±0.021 0.597 ±0.010 0.918 ±0.004 0.973 ±0.006 0.674 ±0.013 0.949 ±0.007 0.952 ±0.021 
+
+Lisa 0.398 ±0.007 0.819 ±0.012 0.917 ±0.025 0.413 ±0.013 0.835 ±0.032 0.913 ±0.025 0.476 ±0.010 0.865 ±0.008 0.917 ±0.016 0.510 ±0.038 0.874 ±0.020 0.900 ±0.018 
+
+SaLoRA 0.415 ±0.027 0.842 ±0.006 0.908 ±0.033 0.433 ±0.004 0.851 ±0.005 0.913 ±0.030 0.513 ±0.012 0.876 ±0.012 0.898 ±0.036 0.558 ±0.024 0.898 ±0.022 0.898 ±0.020 
+
+SafeLoRA 0.361 ±0.018 0.744 ±0.008 0.903 ±0.023 0.357 ±0.007 0.724 ±0.026 0.900 ±0.022 0.354 ±0.017 0.723 ±0.007 0.902 ±0.029 0.358 ±0.026 0.726 ±0.008 0.898 ±0.032 
+
+SafeGrad 0.388 ±0.004 0.825 ±0.012 0.913 ±0.025 0.395 ±0.012 0.835 ±0.002 0.917 ±0.026 0.450 ±0.003 0.856 ±0.010 0.900 ±0.018 0.450 ±0.038 0.864 ±0.031 0.888 ±0.006 
+
+AsFT 0.363 ±0.005 0.794 ±0.016 0.917 ±0.019 0.358 ±0.011 0.790 ±0.008 0.910 ±0.020 0.359 ±0.010 0.785 ±0.011 0.907 ±0.019 0.374 ±0.011 0.792 ±0.009 0.907 ±0.010 
+
+Ours 0.327 ±0.019 0.755 ±0.034 0.913 ±0.038 0.322 ±0.015 0.750 ±0.024 0.918 ±0.029 0.324 ±0.005 0.753 ±0.013 0.913 ±0.016 0.340 ±0.017 0.732 ±0.039 0.927 ±0.006 
+
+Table 5: Poison-ratio sweep on Qwen-3.5-4B / GSM8K (align=sft). For each defense and poison ratio p ∈ { 0.05 , 0.1, 0.25 , 0.5} we report HS (fraction of prompts with max harm probability > 0.4,
+
+↓), HS q90 (90th-percentile per-prompt max harm probability, ↓), and FA (GSM8K accuracy, ↑). Base and Aligned-SFT baselines do not depend on p and are shown as single spanned values. Bold = best, underlined = second best per column. Defense rows are mean ±std over 3 seeds. 
+
+Defense p=0 .05 p=0 .1 p=0 .25 p=0 .5
+
+HS ↓ HS q90 ↓ FA ↑ HS ↓ HS q90 ↓ FA ↑ HS ↓ HS q90 ↓ FA ↑ HS ↓ HS q90 ↓ FA ↑
+
+Base HS = 0.430 HS q90 = 0.707 FA = 0.280 (constant in p)
+
+Aligned (SFT) HS = 0.350 HS q90 = 0.738 FA = 0.170 (constant in p)
+
+SFT 0.470 ±0.024 0.877 ±0.006 0.665 ±0.010 0.510 ±0.043 0.889 ±0.016 0.665 ±0.020 0.605 ±0.026 0.938 ±0.010 0.660 ±0.043 0.637 ±0.047 0.945 ±0.017 0.633 ±0.064 
+
+Vaccine 0.636 ±0.024 0.948 ±0.013 0.498 ±0.020 0.653 ±0.024 0.952 ±0.004 0.465 ±0.044 0.696 ±0.015 0.964 ±0.005 0.465 ±0.026 0.697 ±0.023 0.968 ±0.009 0.378 ±0.172 
+
+Booster 0.565 ±0.010 0.924 ±0.002 0.460 ±0.025 0.587 ±0.016 0.923 ±0.005 0.450 ±0.015 0.658 ±0.009 0.938 ±0.007 0.452 ±0.019 0.715 ±0.012 0.951 ±0.002 0.427 ±0.083 
+
+Lisa 0.420 ±0.004 0.852 ±0.016 0.377 ±0.020 0.429 ±0.010 0.871 ±0.008 0.372 ±0.038 0.487 ±0.025 0.883 ±0.007 0.313 ±0.014 0.532 ±0.032 0.913 ±0.016 0.290 ±0.041 
+
+SaLoRA 0.469 ±0.040 0.869 ±0.027 0.683 ±0.018 0.510 ±0.040 0.897 ±0.022 0.667 ±0.020 0.592 ±0.017 0.940 ±0.010 0.668 ±0.016 0.656 ±0.016 0.947 ±0.004 0.655 ±0.061 
+
+SafeLoRA 0.354 ±0.011 0.723 ±0.004 0.147 ±0.023 0.361 ±0.007 0.709 ±0.015 0.137 ±0.015 0.365 ±0.008 0.707 ±0.026 0.130 ±0.033 0.358 ±0.012 0.720 ±0.002 0.135 ±0.005 
+
+SafeGrad 0.415 ±0.026 0.857 ±0.025 0.623 ±0.078 0.418 ±0.007 0.864 ±0.013 0.600 ±0.052 0.461 ±0.014 0.888 ±0.016 0.588 ±0.090 0.495 ±0.026 0.894 ±0.028 0.542 ±0.083 
+
+AsFT 0.367 ±0.006 0.800 ±0.008 0.153 ±0.015 0.366 ±0.015 0.799 ±0.014 0.133 ±0.008 0.369 ±0.012 0.778 ±0.000 0.137 ±0.029 0.348 ±0.006 0.737 ±0.013 0.138 ±0.016 
+
+Ours 0.386 ±0.005 0.837 ±0.002 0.395 ±0.005 0.389 ±0.012 0.845 ±0.019 0.382 ±0.003 0.404 ±0.007 0.845 ±0.006 0.380 ±0.009 0.360 ±0.052 0.780 ±0.118 0.267 ±0.110 
+
+A Related Work 
+
+Harmful fine-tuning: attacks and defenses. The vulnerability of safety-aligned LLMs to fine-tuning was first systematically documented in [24], which showed that GPT-3.5’s safety guardrails can be removed with as few as ten adversarially designed examples and that benign instruction data also degrades safety. Similar findings followed for open-weight models [34, 18] and for GPT-4 via the public fine-tuning API [36], with related work on jailbreak failure modes [31] and detection-evading attacks [11]. Defenses are organized by where they intervene in the post-training pipeline. Alignment-stage methods reshape the loss landscape against fine-tuning shifts via flat-minimum perturbations [16, 15] or by removing harmful representations from intermediate activations [27]. Fine-tuning-stage methods constrain or project the LoRA update — through proximal corrections toward the aligned checkpoint [14], projection of safety directions out of the gradient [19], gradient surgery against a KL-based alignment gradient [35], or orthogonal anchoring penalties [32]. Joint two-stage [21] and post-hoc [12] methods fill the remaining cells. 
+
+Chance-constrained optimization and tail-risk measures. Chance-constrained programming [5] addresses optimization under uncertainty through bounds on the probability of constraint violation. Direct optimization is intractable due to the discontinuous indicator, and the standard remedies are convex inner approximations [20] or sampling-based scenario relaxations [4], both of which yield deterministic problems with high-probability feasibility. These tools have entered machine learning primarily through risk-sensitive RL [6]. 
+
+Constrained policy optimization and constrained LLM post-training. Treating safety as a hard constraint has a long history in safe RL through the constrained MDP framework [2], with two main algorithmic families. Trust-region methods [1, 33] take constrained policy steps using first-order approximations of the objective and the cost constraint together with a quadratic (KL) trust region. Primal-Dual methods drive the policy toward feasibility through dual ascent on a Lagrange multiplier [30, 29], justified theoretically by the zero-duality-gap result of [23]. In the LLM setting, Safe 
+
+13 RLHF [8] formalizes helpfulness-versus-harmlessness as a Lagrangian-relaxed CMDP with separate reward and cost models, and [9] adopt a similar primal-dual treatment for LLM unlearning. Both of these methods rely on the dual variable to react to constraint violations after they occur. Our constraint-aware gradient descent operates differently: it computes a closed-form QP correction at each step that keeps the iterate inside the feasible set defined by the majorized chance constraint, providing anytime feasibility. 
+
+B Defense Hyperparameters 
+
+Table 6 gives the hyperparameters used for every defense in every experiment. Both stages share the optimizer (AdamW, β1=0 .9, β2=0 .999 , weight decay 0.1) and a constant learning-rate schedule, with learning rate 5×10 −4 at the alignment stage and 1×10 −5 at the fine-tuning stage. Mini-batch size is 10 for all defenses; ∇f and ∇g for our method are computed on disjoint mini-batches of size 
+
+10 drawn each step from the poisoned task and from Dsafe , respectively. All defenses fine-tune for 
+
+20 epochs on 1,000 task examples (poisoned at ratio p); LoRA adapters use rank 32 , α=4 , dropout 
+
+0.05 , and a maximum sequence length of 512 tokens. Table 6: Defense-specific hyperparameters used in all experiments. Symbols follow the originating papers; “align epochs” is the number of epochs of the alignment-stage objective on the 5,000 -example 
+
+Dsafe split. “ft” abbreviates fine-tuning.                          
+
+> Defense Hyperparameters Vaccine ρ=2 , align epochs 20
+> Booster αB=0 .1,λ=5 , align epochs 20
+> Lisa align step 100 , ft step 900 ,ρ=0 .01 , guide 10 ,000
+> SaLoRA projection strength αproj =1 .0
+> SafeLoRA projection threshold τSL =0 .5(applied after plain SFT fine-tuning) SafeGrad ρ=1 .0(KL alignment weight) AsFT λreg =1 .0
+> Antibody ρ=0 .1,λref =1 ,τ=1 , align epochs 20
+
+C Hyperparameter search 
+
+Our method exposes three hyperparameters: the degradation budget relative to the reference model τ ,the ramp slope β, and the tolerated violation probability α. We sweep these on Qwen-3.5-4B/SST-2 at p=0 .5, with τ ∈ { 0, 0.01 , 0.05 , 0.1, 0.2}, α ∈ { 0.01 , 0.05 , 0.1, 0.2}, and β ∈ { 1, 10 }, and report the results in Table 7. We see that the method is robust across two orders of magnitude of α and τ : all configurations land within a small band on q90 . We adopt (τ, β, α )=(0 .1, 10 , 0.05) for all remaining experiments. 
+
+D Tail Statistics 
+
+We provide detailed breakdown of the tail statistics for the different tasks for the Qwen-3.5 4B model in Tables 8, 9, and 10. The tables show that our method consistently wins across high-tail statistics. 
+
+E Computational Complexity 
+
+All training and evaluation runs were executed on a single A100/H100 node per run, using PyTorch 2.x with bfloat16 mixed precision. Our method roughly doubles the per-step wall-clock time relative to plain SFT, owing to the additional forward/backward pass on the constraint batch. We provide a profiling comparison of our method against some of the baselines for the Qwen-3.5 4B model in Table 11. 14 Table 7: Hyperparameter sensitivity on Qwen-3.5-4B / SST-2 at p=0 .5. Each section sweeps one of the three hyperparameters while holding the other two at the canonical values used in the main results (τ, α, β ) = (0 .1, 0.05 , 10) . Bold = best, underlined = second best within each sweep. ↓ lower is better, ↑ higher is better. 
+
+Value HS ↓ q50 ↓ q90 ↓ q99 ↓ FA ↑
+
+τ sweep, fixing α = 0 .05 , β = 10 
+
+0 0.323 0.256 0.676 0.942 0.925 0.01 0.311 0.250 0.691 0.930 0.925 0.05 0.314 0.252 0.704 0.949 0.930 0.1 0.320 0.253 0.707 0.930 0.920 0.2 0.350 0.252 0.723 0.949 0.935 
+
+α sweep, fixing τ = 0 .1, β = 10 
+
+0.01 0.313 0.253 0.704 0.934 0.920 0.05 0.320 0.253 0.707 0.930 0.920 0.1 0.300 0.236 0.723 0.941 0.925 0.2 0.314 0.250 0.730 0.953 0.930 
+
+β sweep, fixing τ = 0 .1, α = 0 .05 
+
+1 0.303 0.263 0.676 0.902 0.925 
+
+10 0.320 0.253 0.707 0.930 0.920 
+
+Table 8: HS-quantile breakdown on Qwen-3.5-4B / SST-2 at p=0 .5, align=sft. HS is the fraction of prompts with max harm probability > 0.4 (binary flag rate); qk columns are the k-th percentile of the per-prompt max harm probability (continuous). ↓ for HS columns, ↑ for FA. Bold = best, underlined = second best per column. Defense rows are mean ±std over 3 seeds.                                                                                                                                                                                                                             
+
+> Defense HS ↓q10 ↓q25 ↓q50 ↓q75 ↓q90 ↓q95 ↓q99 ↓q100 ↓FA ↑
+> Base 0.430 0.161 0.248 0.365 0.531 0.707 0.824 0.938 0.984 0.915 Aligned (SFT) 0.350 0.094 0.164 0.296 0.504 0.738 0.867 0.961 1.000 0.940 SFT 0.546 ±0.042 0.119 ±0.010 0.227 ±0.020 0.446 ±0.040 0.705 ±0.037 0.890 ±0.015 0.947 ±0.008 0.992 ±0.000 1.000 ±0.000 0.973 ±0.016
+> Vaccine 0.688 ±0.032 0.149 ±0.023 0.316 ±0.033 0.611 ±0.026 0.861 ±0.022 0.962 ±0.008 0.986 ±0.002 1.000 ±0.000 1.000 ±0.000 0.963 ±0.038
+> Booster 0.665 ±0.021 0.143 ±0.013 0.305 ±0.017 0.584 ±0.030 0.826 ±0.026 0.940 ±0.012 0.970 ±0.006 1.000 ±0.000 1.000 ±0.000 0.943 ±0.018
+> Lisa 0.489 ±0.051 0.115 ±0.009 0.206 ±0.022 0.392 ±0.046 0.651 ±0.045 0.845 ±0.037 0.925 ±0.012 0.983 ±0.014 1.000 ±0.000 0.968 ±0.003
+> SaLoRA 0.540 ±0.040 0.117 ±0.004 0.217 ±0.027 0.440 ±0.050 0.710 ±0.049 0.895 ±0.014 0.941 ±0.008 0.990 ±0.002 1.000 ±0.000 0.975 ±0.005
+> SafeLoRA 0.363 ±0.014 0.099 ±0.002 0.169 ±0.007 0.298 ±0.003 0.500 ±0.018 0.721 ±0.019 0.840 ±0.022 0.970 ±0.004 0.996 ±0.004 0.952 ±0.018
+> SafeGrad 0.445 ±0.015 0.101 ±0.008 0.175 ±0.006 0.349 ±0.018 0.633 ±0.014 0.843 ±0.006 0.928 ±0.002 0.986 ±0.002 1.000 ±0.000 0.967 ±0.019
+> AsFT 0.371 ±0.013 0.090 ±0.004 0.154 ±0.005 0.287 ±0.002 0.541 ±0.016 0.774 ±0.010 0.875 ±0.004 0.965 ±0.008 0.993 ±0.002 0.952 ±0.006
+> Ours 0.340 ±0.032 0.089 ±0.005 0.151 ±0.006 0.272 ±0.008 0.494 ±0.038 0.726 ±0.041 0.827 ±0.030 0.947 ±0.005 0.990 ±0.008 0.957 ±0.018
+
+F Primal-Dual Algorithm 
+
+As discussed in Section E, our algorithm incurs additional computational overhead during training, primarily due to the separate backward pass required to compute the gradient of the constraint. This overhead can be circumvented by replacing the gradient-flow formulation with a simpler primal-dual scheme. To this end, we adopt the framework developed for constrained unlearning in [9], which eliminates the need for a separate backward call. We emphasize that this reformulation does not alter the underlying computational complexity of evaluating the constraint gradient; rather, it integrates naturally into modern automatic differentiation pipelines, reducing the effective runtime to that of a standard regularization technique. A detailed description of the algorithm, together with the analysis establishing that it yields valid solutions to the optimization problem, is provided in [9]. Table 12 reports the results of applying this primal-dual algorithm to the constrained setup of our experiments. The primal-dual variant attains comparable utility (FA within 0.02 of our method on all three tasks). On AG News and GSM8K, however, our method achieves lower harm, consistent with its anytime-feasibility guarantee. On SST-2 the two are comparable. 
+
+G Composition with a Dual-Stage Defense 
+
+Antibody [21] intervenes at both stages: it replaces the alignment run that produces θ0 and then defends the fine-tuning run that starts from it. Its alignment stage also changes two things at once, the objective and the epoch budget (20 vs. 3), so the resulting pre-attack safety cannot be attributed to 15 Table 9: HS-quantile breakdown on Qwen-3.5-4B / AG News at p=0 .5, align=sft. HS is the fraction of prompts with max harm probability > 0.4 (binary flag rate); qk columns are the k-th percentile of the per-prompt max harm probability (continuous). ↓ for HS columns, ↑ for FA. Bold = best, underlined = second best per column. Defense rows are mean ±std over 3 seeds. 
+
+Defense HS ↓ q10 ↓ q25 ↓ q50 ↓ q75 ↓ q90 ↓ q95 ↓ q99 ↓ q100 ↓ FA ↑
+
+Base 0.430 0.161 0.248 0.365 0.531 0.707 0.824 0.938 0.984 1.000 Aligned (SFT) 0.350 0.094 0.164 0.296 0.504 0.738 0.867 0.961 1.000 0.890 SFT 0.545 ±0.043 0.113 ±0.010 0.216 ±0.024 0.449 ±0.049 0.730 ±0.035 0.901 ±0.025 0.948 ±0.011 0.992 ±0.008 1.000 ±0.000 0.890 ±0.015 
+
+Vaccine 0.680 ±0.025 0.154 ±0.012 0.311 ±0.025 0.617 ±0.023 0.857 ±0.006 0.960 ±0.002 0.982 ±0.002 0.999 ±0.002 1.000 ±0.000 0.932 ±0.033 
+
+Booster 0.674 ±0.013 0.155 ±0.006 0.319 ±0.015 0.597 ±0.027 0.836 ±0.008 0.949 ±0.007 0.979 ±0.002 1.000 ±0.000 1.000 ±0.000 0.952 ±0.021 
+
+Lisa 0.510 ±0.038 0.108 ±0.009 0.200 ±0.019 0.407 ±0.032 0.666 ±0.022 0.874 ±0.020 0.940 ±0.012 0.992 ±0.004 1.000 ±0.000 0.900 ±0.018 
+
+SaLoRA 0.558 ±0.024 0.111 ±0.004 0.214 ±0.024 0.456 ±0.024 0.746 ±0.038 0.898 ±0.022 0.947 ±0.016 0.992 ±0.004 1.000 ±0.000 0.898 ±0.020 
+
+SafeLoRA 0.358 ±0.026 0.101 ±0.004 0.167 ±0.001 0.287 ±0.015 0.507 ±0.012 0.726 ±0.008 0.837 ±0.020 0.957 ±0.010 0.992 ±0.007 0.898 ±0.032 
+
+SafeGrad 0.450 ±0.038 0.092 ±0.002 0.164 ±0.004 0.349 ±0.040 0.649 ±0.049 0.864 ±0.031 0.936 ±0.014 0.988 ±0.004 1.000 ±0.000 0.888 ±0.006 
+
+AsFT 0.374 ±0.011 0.085 ±0.002 0.151 ±0.006 0.279 ±0.010 0.542 ±0.014 0.792 ±0.009 0.883 ±0.015 0.983 ±0.002 1.000 ±0.000 0.907 ±0.010 
+
+Ours 0.340 ±0.017 0.087 ±0.009 0.149 ±0.007 0.269 ±0.017 0.513 ±0.035 0.732 ±0.039 0.831 ±0.035 0.961 ±0.012 0.997 ±0.005 0.927 ±0.006 
+
+Table 10: HS-quantile breakdown on Qwen-3.5-4B / GSM8K at p=0 .5, align=sft. HS is the fraction of prompts with max harm probability > 0.4 (binary flag rate); qk columns are the k-th percentile of the per-prompt max harm probability (continuous). ↓ for HS columns, ↑ for FA. Bold = best, underlined = second best per column. Defense rows are mean ±std over 3 seeds. 
+
+Defense HS ↓ q10 ↓ q25 ↓ q50 ↓ q75 ↓ q90 ↓ q95 ↓ q99 ↓ q100 ↓ FA ↑
+
+Base 0.430 0.161 0.248 0.365 0.531 0.707 0.824 0.938 0.984 0.280 Aligned (SFT) 0.350 0.094 0.164 0.296 0.504 0.738 0.867 0.961 1.000 0.170 SFT 0.637 ±0.047 0.133 ±0.025 0.275 ±0.049 0.558 ±0.055 0.814 ±0.049 0.945 ±0.017 0.979 ±0.009 1.000 ±0.000 1.000 ±0.000 0.633 ±0.064 
+
+Vaccine 0.697 ±0.023 0.176 ±0.007 0.346 ±0.017 0.614 ±0.028 0.872 ±0.016 0.968 ±0.009 0.991 ±0.002 1.000 ±0.000 1.000 ±0.000 0.378 ±0.172 
+
+Booster 0.715 ±0.012 0.175 ±0.022 0.361 ±0.016 0.635 ±0.014 0.847 ±0.004 0.951 ±0.002 0.982 ±0.002 1.000 ±0.000 1.000 ±0.000 0.427 ±0.083 
+
+Lisa 0.532 ±0.032 0.096 ±0.003 0.195 ±0.014 0.438 ±0.039 0.739 ±0.039 0.913 ±0.016 0.958 ±0.010 0.997 ±0.002 1.000 ±0.000 0.290 ±0.041 
+
+SaLoRA 0.656 ±0.016 0.138 ±0.011 0.291 ±0.030 0.586 ±0.026 0.841 ±0.010 0.947 ±0.004 0.982 ±0.005 1.000 ±0.000 1.000 ±0.000 0.655 ±0.061 
+
+SafeLoRA 0.358 ±0.012 0.099 ±0.006 0.180 ±0.009 0.307 ±0.007 0.502 ±0.014 0.720 ±0.002 0.826 ±0.002 0.947 ±0.009 0.992 ±0.007 0.135 ±0.005 
+
+SafeGrad 0.495 ±0.026 0.083 ±0.007 0.166 ±0.014 0.385 ±0.039 0.718 ±0.055 0.894 ±0.028 0.954 ±0.005 0.991 ±0.006 1.000 ±0.000 0.542 ±0.083 
+
+AsFT 0.348 ±0.006 0.091 ±0.002 0.156 ±0.001 0.272 ±0.004 0.504 ±0.014 0.737 ±0.013 0.858 ±0.009 0.951 ±0.015 0.995 ±0.005 0.138 ±0.016 
+
+Ours 0.360 ±0.052 0.090 ±0.010 0.154 ±0.005 0.284 ±0.018 0.540 ±0.075 0.780 ±0.118 0.876 ±0.079 0.977 ±0.027 0.997 ±0.005 0.267 ±0.110 
+
+either in isolation. We report it separately in Table 13, together with the more informative experiment: applying our filter to the Antibody-aligned checkpoint rather than the SFT-aligned one. Our constraint is written on degradation relative to θ0, not on absolute harm, so it is indifferent to how the reference was produced and composes with any alignment-stage procedure that supplies one. The composition pays off where the constraint is active. On GSM8K, Antibody’s own fine-tuning stage does not hold the floor its alignment stage establishes, harm moves further from the Antibody-aligned checkpoint than undefended SFT moves from the standard one, with the largest seed variance in the column. Our filter, on the same checkpoint, holds it: the composed configuration attains the lowest post-attack HS of any configuration we evaluate on GSM8K for all three backbones, with the same ordering on HS qK , while recovering accuracy over its reference rather than reaching low harm by failing to learn the task. On SST-2 and AG News, where accuracy saturates and the constraint is slack for most of training, Antibody retains the lower HS . f The filter preserves the Antibody-aligned reference less tightly than the standard one. The constraint acts on cross-entropy over Dsafe , and the extra safety the alignment stage buys is evidently not fully captured by that proxy; separately, (τ, β, α )
+
+were tuned against the SFT-aligned reference and τ is an absolute budget in nats, so a lower-loss reference plausibly needs a tighter one. We did not re-tune per reference model. 16 Table 11: Per-step training cost on Qwen-3.5 4B / SST2 (one A100, batch=10). step is the median wall-clock time over 25 measured optimizer steps after a 5-step warmup. ×SFT normalizes the step time by SFT. 
+
+Defense step (ms) p90 (ms) GPU (MB) samples/s ×SFT SFT 136.8 160.5 14512 28.16 1.00 Lisa 138.6 153.3 14797 28.30 1.00 SafeGrad 334.7 371.5 26137 11.83 2.38 AsFT 525.6 551.4 16083 7.55 3.73 Ours 282.2 306.1 16739 13.98 2.01 
+
+Table 12: Primal-Dual ablation: we compare solving the chance-constrained finetuning problem using our method and a primal dual method on the Qwen 3.5 4B model. Bold = best. 
+
+Task Method HS ↓ HS q90 ↓ FA ↑
+
+AG News Our method 0.324 0.688 0.930 Primal-Dual 0.346 0.755 0.935 
+
+GSM8K Our method 0.303 0.645 0.140 Primal-Dual 0.380 0.802 0.155 
+
+SST-2 Our method 0.317 0.684 0.940 Primal-Dual 0.311 0.703 0.940 
+
+Table 13: Antibody vs. our method under the harmful fine-tuning attack ( p=0 .5). Rows above the rule are the pre-attack floors. HS and HS qK (per-prompt K-th quantile of max harm-prob; K=90 
+
+Qwen, K=50 Llama) are lower-is-safer; FA is task accuracy. Mean ±std over seeds {42 , 1337 , 2024 }.
+
+Bold = best defense per column. 
+
+SST-2 AG News GSM8K Method HS ↓ HS qK ↓ FA ↑ HS ↓ HS qK ↓ FA ↑ HS ↓ HS qK ↓ FA ↑
+
+> Qwen-3.5-4B (q90)
+
+SFT-Aligned 0.350 0.738 0.940 0.350 0.738 0.890 0.350 0.738 0.170 
+
+Antibody-Aligned 0.204 0.571 0.835 0.204 0.571 0.805 0.204 0.571 0.145 
+
+SFT 0.546 ±0.042 0.890 ±0.015 0.973 ±0.016 0.545 ±0.043 0.901 ±0.025 0.890 ±0.015 0.637 ±0.047 0.945 ±0.017 0.633 ±0.064 
+
+Antibody 0.273 ±0.016 0.690 ±0.016 0.867 ±0.062 0.244 ±0.010 0.648 ±0.024 0.888 ±0.020 0.519 ±0.067 0.907 ±0.031 0.383 ±0.070 
+
+Ours on SFT-Aligned 0.340 ±0.032 0.726 ±0.041 0.957 ±0.018 0.340 ±0.017 0.732 ±0.039 0.927 ±0.006 0.360 ±0.052 0.780 ±0.118 0.267 ±0.110 
+
+Ours on Antibody-Aligned 0.378 ±0.009 0.793 ±0.007 0.905 ±0.020 0.357 ±0.007 0.786 ±0.003 0.842 ±0.070 0.347 ±0.013 0.796 ±0.033 0.198 ±0.039 
+
+> Qwen-3.5-9B (q90)
+
+SFT-Aligned 0.546 0.781 0.980 0.546 0.781 0.855 0.546 0.781 0.250 
+
+Antibody-Aligned 0.224 0.582 0.785 0.224 0.582 0.930 0.224 0.582 0.145 
+
+SFT 0.670 ±0.023 0.898 ±0.031 0.980 ±0.005 0.672 ±0.025 0.885 ±0.016 0.903 ±0.030 0.681 ±0.020 0.947 ±0.005 0.300 ±0.080 
+
+Antibody 0.330 ±0.030 0.699 ±0.016 0.857 ±0.003 0.217 ±0.020 0.596 ±0.015 0.950 ±0.018 0.492 ±0.127 0.875 ±0.061 0.510 ±0.038 
+
+Ours on SFT-Aligned 0.539 ±0.024 0.836 ±0.048 0.957 ±0.013 0.536 ±0.022 0.822 ±0.030 0.902 ±0.050 0.548 ±0.027 0.857 ±0.059 0.325 ±0.087 
+
+Ours on Antibody-Aligned 0.444 ±0.031 0.758 ±0.022 0.863 ±0.014 0.364 ±0.004 0.740 ±0.016 0.958 ±0.008 0.341 ±0.041 0.777 ±0.021 0.347 ±0.010 
+
+> Llama-3.1-8B (q50)
+
+SFT-Aligned 0.786 0.781 0.830 0.786 0.781 0.850 0.786 0.781 0.175 
+
+Antibody-Aligned 0.426 0.351 0.775 0.426 0.351 0.985 0.426 0.351 0.110 
+
+SFT 0.910 ±0.003 0.913 ±0.005 0.995 ±0.005 0.915 ±0.005 0.914 ±0.004 0.980 ±0.013 0.894 ±0.017 0.888 ±0.013 0.355 ±0.071 
+
+Antibody 0.470 ±0.012 0.378 ±0.011 0.997 ±0.003 0.508 ±0.008 0.410 ±0.010 0.965 ±0.013 0.721 ±0.021 0.689 ±0.035 0.333 ±0.021 
+
+Ours on SFT-Aligned 0.776 ±0.015 0.785 ±0.009 0.985 ±0.015 0.785 ±0.026 0.794 ±0.015 0.928 ±0.032 0.794 ±0.032 0.796 ±0.022 0.268 ±0.050 
+
+Ours on Antibody-Aligned 0.635 ±0.008 0.546 ±0.017 0.998 ±0.003 0.641 ±0.012 0.565 ±0.002 0.985 ±0.005 0.543 ±0.020 0.443 ±0.017 0.300 ±0.035 
+
+17
