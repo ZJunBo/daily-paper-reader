@@ -6,38 +6,32 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-09-30
-- 运行时间：2026-09-30 23:28:08 UTC
+- 最新运行日期：2026-10-01
+- 运行时间：2026-10-01 23:30:16 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：3
+- 本次总论文数：4
+- 精读区：2
 - 速读区：2
 
 ### 今日简报（AI）
-- 今日共生成 5 篇推荐（精读 3 篇，速读 2 篇）
-- 精读：《How to Tame a Multi-Headed Hydra? Adaptive Multi-Category Safety Steering for Large Language Models》（8.0/10）, 《Semantic Uncertainty Quantification Needs Factual Equivalence》（8.0/10）
-- 速读：《DeShortcut-Align: Decoupling Spurious Shortcuts for Robust Safety Alignment in Large Reasoning Models》（7.0/10）, 《How Synthetic Labels Improve Conformal Prediction: A Perspective on Conditional Coverage》（6.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202609/30/README](/202609/30/README)
+今天精读2篇、速读2篇共4篇，聚焦LLM涌现错位机制诊断与黑箱不确定性量化。最值得看的是两篇8分工作：前者定位错位成因并在参数空间缓解，后者为大推理模型打开越狱式不确定性评估窗口。普通读者可先读这两篇精读，再按需浏览梯度激活引导与在线合成数据筛选的速读思路。
+- 详情：[/202610/01/README](/202610/01/README)
 
 ### 精读区论文标签
-1. [How to Tame a Multi-Headed Hydra? Adaptive Multi-Category Safety Steering for Large Language Models](/202609/30/2609.34514v2-how-to-tame-a-multi-headed-hydra-adaptive-multi-category-safety-steering-for-large-language-models)  
-   标签：评分：8.0/10、query:dg
-   evidence：面向多危害类别的大语言模型激活引导安全
-2. [Semantic Uncertainty Quantification Needs Factual Equivalence](/202609/30/2609.34967v1-semantic-uncertainty-quantification-needs-factual-equivalence)  
+1. [See it, Say it, Sorted: Mechanistic Diagnosis and Parameter-Space Mitigation of Emergent Misalignment in LLMs](/202610/01/2609.34970v1-see-it-say-it-sorted-mechanistic-diagnosis-and-parameter-space-mitigation-of-emergent-misalignment-in-llms)  
+   标签：评分：8.0/10、query:smd
+   evidence：研究微调引发的涌现失配并提出缓解
+2. [Jailbreaks for Black-Box Uncertainty Quantification in Large Reasoning Models](/202610/01/2609.35350v1-jailbreaks-for-black-box-uncertainty-quantification-in-large-reasoning-models)  
    标签：评分：8.0/10、query:luq
-   evidence：面向大语言模型的语义不确定性量化与事实等价
-3. [Jailbreaks for Black-Box Uncertainty Quantification in Large Reasoning Models](/202609/30/2609.35350v1-jailbreaks-for-black-box-uncertainty-quantification-in-large-reasoning-models)  
-   标签：评分：8.0/10、query:luq
-   evidence：面向大推理模型的黑盒不确定性量化
+   evidence：面向对齐大推理模型的黑盒不确定性量化
 
 ### 速读区论文标签
-1. [DeShortcut-Align: Decoupling Spurious Shortcuts for Robust Safety Alignment in Large Reasoning Models](/202609/30/2609.34896v1-deshortcut-align-decoupling-spurious-shortcuts-for-robust-safety-alignment-in-large-reasoning-models)  
-   标签：评分：7.0/10、query:smd
-   evidence：通过SFT与RL实现鲁棒安全对齐并缓解过度拒答与能力退化
-2. [How Synthetic Labels Improve Conformal Prediction: A Perspective on Conditional Coverage](/202609/30/2609.33482v1-how-synthetic-labels-improve-conformal-prediction-a-perspective-on-conditional-coverage)  
-   标签：评分：6.0/10、query:uq-safety
-   evidence：通过共形预测与条件覆盖进行不确定性量化
+1. [Guarded Gradient-Based Activation Steering of Shutdown Responses in Qwen3.5-0.8B: A Minimum-Step Policy](/202610/01/2609.30326v1-guarded-gradient-based-activation-steering-of-shutdown-responses-in-qwen35-08b-a-minimum-step-policy)  
+   标签：评分：7.0/10、query:dg
+   evidence：对安全相关关机行为的激活引导
+2. [Let Training Guide Selection: Online Synthetic Data Filtering via Real-Anchored Utility](/202610/01/2609.29988v1-let-training-guide-selection-online-synthetic-data-filtering-via-real-anchored-utility)  
+   标签：评分：6.0/10、query:smd
+   evidence：微调过程中的合成数据在线筛选与选择
 
 
 <div class="dpr-home-promo-card">
