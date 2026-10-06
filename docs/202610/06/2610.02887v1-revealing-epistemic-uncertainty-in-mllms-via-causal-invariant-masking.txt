@@ -1,0 +1,1917 @@
+Revealing Epistemic Uncertainty in MLLMs via
+Causal-Invariant Masking
+Haoyang Luo
+Computer Science
+City University of Hong Kong
+Linwei Tao
+Machine Learning Research
+Apple
+Jie Gui
+Cyber Science and Engineering
+Southeast University
+Xinghao Chen
+Huawei Noah’s Ark Lab
+Chang Xu
+Computer Science
+University of Sydney
+Jianyuan Guo
+Computer Science
+City University of Hong Kong
+Minjing Dong
+Computer Science
+City University of Hong Kong
+Abstract
+Multimodal Large Language Models (MLLMs) suffer from hallucinations, creating
+a critical need for Uncertainty Quantification (UQ) to ensure reliable deployment.
+However, existing approaches struggle to detect uncertainty caused by superfi-
+cial associations, especially when the query-relevant signal is weak. We mainly
+attribute this issue to their bias toward aleatoric uncertainty arising from data
+ambiguity, overlooking epistemic uncertainty stemming from model limitations.
+To further decompose uncertainty types for a comprehensive UQ, we propose
+Causal-Invariant Masking (CIM), which measures the semantic shift between the
+original predictions and those conditioned on a causally-focused view. Based on
+this framework, we introduce Semantic Divergence as our core metric for UQ and
+provide theoretical evidence that it converges to the variance of model’s sensitivity
+to non-causal correlations, establishing its ability to capture MLLM’s limitation. To
+accelerate UQ in MLLMs, we further propose Expected Embedding Drift (EED),
+a fast geometric proxy metric that estimates semantic shift directly within the
+hyperspherical embedding space. Experiments show that our method achieves
+state-of-the-art performance on various benchmarks, while the proposed EED
+accelerates by nearly 50% with comparable performance.
+1
+Introduction
+Large Language Models (LLMs) [51, 32] and Multimodal Large Language Models (MLLMs) [47, 4]
+have significantly altered the landscape of artificial intelligence. By connecting visual perception
+with textual semantics, MLLMs are able to demonstrate consistent success in tasks ranging from
+visual question answering to complex reasoning [28, 37, 50]. However, their reliable deployment in
+real-world applications requires solving the severe problem of hallucination [5, 17], where MLLMs
+confidently generate factually incorrect but grammatically plausible content. Especially for VLMs,
+non-existent objects, attributes, and events may unreasonably occur in the responses when misleading
+factors, either in vision or language, dominate the query. It suggests that MLLMs do not internally
+40th Conference on Neural Information Processing Systems (NeurIPS 2026).
+arXiv:2610.02887v1  [cs.CV]  2 Oct 2026
+
+
+realize their visual capability boundary and highlights a critical need for robust safety measures
+targeting generative trustworthiness.
+With this aim, numerous Uncertainty Quantification (UQ) methods have been developed. By es-
+timating the confidence level of a model, systems can abstain from answering or flag potential
+hallucinations when encountering high uncertainty. Therefore, precise UQ becomes a proxy for
+hallucination detection. Traditional UQ approaches typically measure the entropy of the predictive
+distribution, often aggregated at the token level [46, 42]. Recent advancements [21, 20, 34] have
+shifted towards measuring semantic uncertainty using sampling-based methods, such as Semantic
+Entropy (SE) [13], which aggregates probabilities over clusters of similar generations to calculate the
+response variety.
+However, these approaches exhibit limited discrimination under hallucinative visual content, espe-
+cially when the query-irrelevant elements generate spurious hints. For instance, background objects
+with prominent colors can dominate the response to queries on the foreground object, making con-
+sistent mistakes in the sampled output. Thus, a more comprehensive UQ is necessary for MLLMs.
+In fact, both epistemic and aleatoric uncertainties play important roles in UQ, where epistemic un-
+certainty reveals insufficiency in the model’s perception or comprehension and aleatoric uncertainty
+reflects the poor data quality or incomplete information [19]. Quantifying both of them is crucial in
+UQ [41, 1], however, existing approaches fail to do so because they typically assume that all forms of
+uncertainty can be equally estimated. In this paper, we show that they are biased towards quantifying
+mostly aleatoric uncertainty in MLLMs, leaving epistemic uncertainty underestimated.
+We introduce Causal-Invariant Masking (CIM), a framework that disentangles intrinsic epistemic
+instability from data ambiguity by probing semantic consistency under causally invariant transforms.
+Our core insight is that robust reasoning must remain invariant when task-irrelevant features are
+removed. By constructing a Region-of-Interest (RoI) view that retains only causal features, we
+measure the shift in the model’s belief distribution. We quantify this using Semantic Divergence,
+defined as the shift from the semantic distributions of the original to the focused inputs. Supported
+by theoretical derivation, this metric targets the model stability against irrelevant distractions to
+effectively isolate epistemic uncertainty, thereby alleviating the biased quantification in previous
+works. To address the computational costs of discrete semantic clustering, we then propose a
+fast proxy called Expected Embedding Drift (EED). Leveraging the hyperspherical geometry of
+the embedding space, EED estimates semantic shift directly from token embeddings, eliminating
+costly discrete operations. Experiments demonstrate that our method significantly outperforms
+baselines, achieving state-of-the-art hallucination detection of 76.8% AUROC on the challenging
+AdVQA and superior results on POPE. Furthermore, EED reduces computational overhead by 50%
+without compromising performance, facilitating applications such as hallucination mitigation and
+adaptive-resolution inference.
+2
+Related Work
+2.1
+Uncertainty Estimation in LLMs
+UQ in LLMs is pivotal for reliability and hallucination detection, generally categorized into intrinsic,
+verbalized, and consistency-based methods. Intrinsic metrics like perplexity [41] measure token-level
+confidence, while verbalized methods [45, 43] prompt models to explicitly express uncertainty,
+often yielding better calibration than raw probabilities. Consistency-based works are currently
+dominant approaches. Semantic Entropy [13] and Semantic Dispersion [27] detect hallucinations by
+aggregating multiple sampled responses based on meaning rather than exact phrasing. Recent works
+further exploit internal representations as uncertainty indicators by utilizing activation covariance
+and propose EigenScore [10] or geometric convex hull analysis [9] to quantify dispersion in high-
+dimensional embedding spaces. However, these methods target general UQ for LLMs and can be
+challenged in vision-language tasks.
+2.2
+Uncertainty Estimation in MLLMs
+Extending UQ to MLLMs involves challenges from combined visual and textual modalities, often
+focusing on hallucination detection in vision-language tasks. Similar to those for LLMs, consistency-
+based sampling techniques are explored, e.g., [23] develops UMPIRE, a training-free UQ framework
+2
+
+
+that estimates consistency in multiple sampled responses by a coherence-adjusted semantic volume.
+Perturbation-based methods introduce variations in inputs to probe uncertainty. VL-Uncertainty [48]
+and Uncertainty-o [49] measure hallucination in LVLMs by computing entropy over clustered
+responses, but using semantic-equivalently perturbed visual and textual queries, supporting tasks of
+hallucination mitigation and uncertainty-aware reasoning. However, these approaches typically rely
+on global perturbations under the full context, without explicitly isolating the model’s reliance on
+critical and irrelevant features. CIM is also a perturbation-style test in its implementation, but its
+perturbation is query-conditioned and RoI-preserving. The goal is to compare the original belief with
+a view that keeps the answer evidence while suppressing irrelevant context, rather than purely testing
+variance under general information loss.
+3
+Method
+3.1
+Preliminary
+Blurred
+Image
+Background
+Mixup
+Source
+Image
+500
+1000
+1500
+2000
+2500
+MSE to Original Image
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+Avg. SE Increase
+Blurring
+Background Paste
+Blur
+Bg. Mixup
+Perturbation Type
+0.00
+0.05
+0.10
+0.15
+0.20
+0.25
+0.30
+0.35
+0.40
+Std. Uncertainty Increase
+0.047
+0.093
+0.101
+0.342
+Uncertainty Metric
+SE
+Ours
+Figure 1: Left: A case of blurred and background-mixup image pair. Middle: Sensitivity of Semantic
+Entropy to visual perturbations in MLLMs. Similar levels of error to the original image are binned
+into the same point. Right: Comparison of uncertainty increase under blurring and background
+mixup perturbations. While Semantic Entropy increases slightly across both, it fails to distinguish
+hallucination. In contrast, our proposed Semantic Divergence remains robust to visual blur but
+exhibits a distinct spike under hallucinative perturbations. The values are normalized by the standard
+deviation of each metric.
+We consider an MLLM parameterized by θ over visual space V and vocabulary W.
+Given
+an image v and query q, it generates a token sequence y = (y1, . . . , yT ) autoregressively via
+Pθ(y|v, q) = QT
+t=1 Pθ(yt|y<t, v, q). For simplicity, we henceforth omit q and θ, denoting the distri-
+bution as P(y|v). Token-level entropy, i.e., H(y) = −P P(y) log P(y), or perplexity values, i.e.,
+PPL(y) = exp
+
+−1
+T
+PT
+t=1 log P(yt|y<t, v)
+
+, often misestimate uncertainty because semantically
+equivalent outputs are treated as distinct. Semantic Entropy (SE) [13] samples K sequences, maps
+them to a semantic space S with a clustering operation G : W∗→S, and aggregates meaning-
+level probabilities: Hsem(v) = −P
+s∈S P(s|v) log P(s|v), where W∗is the set of W-strings and
+P(s|v) = P
+y:G(y)=s P(y|v) is the aggregated probability. While SE handles linguistic variance, it
+still fails to distinguish epistemic from aleatoric uncertainty.
+3.2
+Epistemic Uncertainty Isolation via Causal Masking
+Reliable MLLM deployment requires separating aleatoric uncertainty, which reflects data ambiguity,
+from epistemic uncertainty, which reflects model limitation. Existing metrics often blend the two and
+therefore skew toward aleatoric noise. As illustrated in Fig. 1 middle, Semantic Entropy rises quickly
+under blurring for aleatoric uncertainty, but is much less sensitive to background mixup for epistemic
+uncertainty, suggesting that it treats causal and non-causal features alike. Robust reasoning instead
+should satisfy causal invariance: predictions should stay stable when task-irrelevant context changes,
+whereas uncertain responses should not.
+Methodology.
+We propose CIM to isolate the epistemic component through causal invariance.
+Given a query q, we decompose the visual input v into causal features vc and non-causal features
+3
+
+
+Part 1: Semantic Divergence (𝒰𝒰sem) – Isolating Epistemic Uncertainty
+Causal Filter 𝑇𝑇⋅
+(e.g., RoI Crop)
+Original Input (𝑣𝑣)
+Causal-Masked View (𝑣𝑣𝑣)
+q: ‘Where is the man 
+looking at?’
+Original Sampling 
+𝑃𝑃(⋅|𝑣𝑣)
+Masked Sampling 
+𝑄𝑄(⋅|𝑣𝑣𝑣)
+Semantic 
+Clustering 𝒢𝒢(⋅)
+‘The red train…’
+‘The train…’
+…
+‘The far building’
+𝑦𝑦1:
+𝑦𝑦2:
+…
+𝑦𝑦𝐾𝐾:
+‘The ground…’
+‘Looking down…’
+…
+‘At the track…’
+𝑦𝑦1:
+𝑦𝑦2:
+…
+𝑦𝑦𝐾𝐾𝐾:
+Original Distribution
+Causal Distribution
+𝒰𝒰sem = 𝐷𝐷KL(𝑄𝑄⋅𝑣𝑣′ ∥𝑃𝑃(⋅|𝑣𝑣))
+Semantic Divergence:
+(Aleatoric: ) Low SE
+(Epistemic:) High 𝒰𝒰sem
+Part 2: Expected Embedding Drift (𝒰𝒰sem) – Fast Geometric Proxy
+Original Input (𝑣𝑣)
+Causal-Masked View (𝑣𝑣𝑣)
+MLLM
+Embedding Space
+MLLM
+Embedding Space
+Original Expected 
+Embedding 𝝁𝝁𝑃𝑃,𝑡𝑡
+∑𝑃𝑃(𝑤𝑤|𝑦𝑦1:𝑡𝑡, 𝑣𝑣)𝐞𝐞𝑤𝑤
+Sampled Causal 
+Embedding 𝐞𝐞𝑦𝑦𝑡𝑡(𝑦𝑦𝑡𝑡~Q)
+𝐷𝐷drift = 1 −cos(𝐞𝐞𝑦𝑦𝑡𝑡, 𝝁𝝁𝑃𝑃,𝑡𝑡)
+Hyperspherical Space 𝕊𝕊𝑑𝑑−1
+Autogregressive
+Timestep 𝑡𝑡
+𝜃𝜃
+Larger 𝜃𝜃 ⟹ High Drift ⟹ Spurious Reliance
+Average over 𝑡𝑡, 𝐾𝐾𝐾 samples ⟹ Expected Embedding Drift 𝒰𝒰EED
+No clustering
+More Efficient
+Uncertainty Detected.
+Figure 2: The detailed framework of CIM. Left: We isolate epistemic uncertainty via Semantic
+Divergence, which measures the KL divergence between the semantic distribution of the original
+input and a causally-filtered view v′, revealing the model’s reliance on query-irrelevant information.
+Right: Expected Embedding Drift geometrically estimates semantic shift via cosine distance in the
+hyperspherical embedding space, eliminating the computational overhead of discrete clustering.
+vs, where vc is query-relevant, while vs may carry spurious hints of correlations. This split is
+defined with respect to an oracle predictor satisfying P(s|vc, vs) = P(s|vc), rather than assuming
+that the evaluated MLLM already knows it. Accordingly, reliable reasoning should remain stable
+when non-causal variables are removed, and any large shift after filtering vs exposes reliance on
+spurious correlations. We therefore introduce a vc-preserving masking operator T(·) : V →V,
+mainly implemented as query-conditioned Region-of-Interest (RoI) cropping. In practice, we detect
+key objects with GroundingDINO [29], filter overly large boxes, and crop the union bounding box so
+inter-object relations and local context are preserved. This acts as an empirical proxy for the oracle
+vc filter: it preserves query-relevant evidence while removing as much vs as possible, yielding a
+focused view v′ = T(v). Because only a vc-preserving transform is required, the detector choice is
+not essential, as validated in Appendix C.6.
+To quantify the shift caused by causal masking, we define Semantic Divergence (SD) as the Kullback-
+Leibler divergence between the semantic probability distributions of the intervened input P(s|v′, q)
+and the original model P(s|v, q). In practice, we sample K′ sequences from the model, group them
+into clusters {si}M
+j=1 via entailment G(·), and aggregate their likelihoods similarly to SE. After
+grouping, the Semantic Divergence is thus calculated as:
+Usem(v, q) = DKL(P(s|v′)∥P(s|v))
+=
+X
+s∈S
+P(s|v′) log P(s|v′)
+P(s|v) .
+(1)
+This KL divergence measures the information gain from removing non-causal features. If the
+model is robust, or the data is ambiguous while the model is honest, the distribution over meanings
+remains stable, yielding low Usem. In contrast, hallucinations that rely on background context cause
+a semantic shift and high Usem. Unlike global perturbations that flatten both distributions, this
+measure targets epistemic failures. Our Usem significantly outperforms traditional SE in recognizing
+epistemic uncertainty. As illustrated in Fig. 1 right, we plot the shift of uncertainty when imposing
+different ambiguity types. Our Usem significantly outperforms traditional SE in recognizing epistemic
+uncertainty.
+3.3
+Theoretical Analysis
+We justify why Usem isolates epistemic uncertainty by framing the MLLM’s semantic output as an
+Energy-Based Model (EBM) [8, 24, 12]. This is compatible with autoregressive decoding: prior
+work interprets pre-softmax logits as token energies [33], connects left-to-right language models
+and EBMs through a function-space equivalence [6], and uses energy functions for constrained text
+decoding [39]. Because MLLM decoding remains autoregressive after conditioning on images, the
+4
+
+
+same energy view applies. Under standard causal assumptions, the divergence in Eq. (1) converges to
+the variance of sensitivity to spurious features.
+Standard causal theory [36, 35] models the input v as causal variables vc and non-causal variables vs.
+An oracle predictor would satisfy P(s|vc, vs) = P(s|vc), but real models often fail to be invariant.
+We therefore introduce a unified assumption on the masking operation and the energy landscape:
+Assumption 3.1 (Energy Decomposition). The MLLM’s semantic output over S is modeled as a
+Boltzmann distribution Pθ(s|v) =
+1
+Z(v)e−Eθ(s,v), where the total energy decomposes additively
+into a causal term Ec(s, vc) and a non-causal term Es(s, vs). We assume that the causal energy Ec
+remains invariant under the causal-preserving T(·), i.e., Ec(s, v′
+c) = Ec(s, vc), while the non-causal
+energy shifts by a quantity ∆s(s) ≜Es(s, vs) −Es(s, v′
+s).
+This invariant/variant split follows the broader causal-invariance view that causal mechanisms should
+remain stable across interventions or environments [38, 2, 40]. Related decomposition work also
+separates shared invariant factors from domain-specific variants [7]. Rather than requiring pixel-level
+separation, Assumption 3.1 only asks that T(·) preserve query-relevant evidence while suppressing
+non-causal context. The empirical validations in Appendix C.7, Table 3, and Appendix C.4 show
+that causal-energy shifts are far below the model’s logit margins, while detected RoIs rarely fail and
+closely match ground truth RoIs.
+We first show that the aleatoric component ϕc cancels in the likelihood ratio. With the empirical
+evidence above, the cancellation derived is a high-fidelity approximation in practice.
+Lemma 3.2 (Aleatoric Cancellation). Given Assumption 3.1, the log-likelihood ratio between the
+perturbed and original distributions depends solely on the non-causal energy shift ∆s(s) and the
+partition function ratio, i.e.,
+log Q(s)
+P(s) = ∆s(s) + log Z(v)
+Z(v′).
+(2)
+The proof is provided in Appendix A.1. Lemma 3.2 shows that Ec(s, vc) cancels in the likelihood
+ratio, so the metric is invariant to ambiguity in vc. Next, we establish the exact form of the divergence.
+Theorem 3.3 (Epistemic Jensen Gap). The Semantic Divergence Usem = DKL(Q∥P) is equivalent
+to the Jensen Gap of the exponential function acting on ∆s(s) with respect to distribution Q.
+Furthermore, if we assume the shift magnitude is bounded such that sup |∆s(s)| ≤ϵ for a small
+ϵ > 0. The Semantic Divergence converges to half of the energy shift ∆s(s) with a third-order error
+bound:
+Usem = 1
+2Vars∼Q[∆s(s)] + O(ϵ3).
+(3)
+We provide the detailed proof in Appendix A.2. This result shows that Usem quantifies epistemic
+instability caused by irrelevant features under the stated approximation. When the vc-focused op-
+eration T(·) removes most of vs, we have ∆s(s) = Es(s, vs), so Usem measures variance on
+query-irrelevant signals. Appendix C.7 reports empirical ∆s magnitudes, showing its bounded level
+in practice.
+3.4
+Fast Quantification via Expected Embedding Drift
+Despite its theoretical validity, Semantic Divergence Usem is expensive to compute. Equation (1)
+requires estimating P(s|v) = P
+y:G(y)=s P(y|v), which in turn needs samples from P and Q,
+followed by expensive LLM clustering G(·).
+However, we observe that semantic meaning is already embedded in the model’s high-dimensional
+geometry, where tokens with similar meanings lie close together. We exploit this and propose
+Expected Embedding Drift (EED), a clustering-free proxy that bypasses discrete semantic grouping.
+Specifically, it measures the geometric divergence between the masked-input distribution Q and the
+original semantic distribution P by mapping token probabilities to single vectors on a hypersphere.
+Expected Semantic Vector.
+For a response y ∼Q at time step t conditioned on y<t and v, rather
+than treating the output solely as a discrete categorical distribution, we view the token distribution as
+5
+
+
+a distribution over semantic vectors and compute the expected embedding vector, µP,t as
+µP,t = Ew∼P (·|y<t,v)[ew] =
+X
+w∈W
+P(w|y<t) · ew,
+(4)
+where ew ∈Rd is the L2-normalized embedding vector for token w in W. This expected embedding
+is the probability-weighted semantic center in hyperspherical space, filtering low-probability noise
+and pointing to the aggregate intent.
+Drift Calculation.
+To measure epistemic inconsistency, for each generated response sequence
+y = (y1, . . . , yT ) ∼Q, we measure the cosine drift of yt from the source semantic expectation µP,t
+at each autoregressive timestep t:
+Ddrift(yt) = 1 −cos(eyt, µP,t) = 1 −
+eyt · µP,t
+∥eyt∥∥µP,t∥,
+(5)
+where eyt is the embedding vector of token yt. Lower drift means the perturbed token still aligns with
+the original average belief, while higher drift indicates a stronger rotation after irrelevant features
+are removed. We average this drift over K′ stochastic sampling passes and their tokens to obtain the
+sequence-level EED:
+UEED(v, q) = 1
+K′
+K′
+X
+k=1
+Tk
+X
+t=1
+Ddrift(y(K+k)
+t
+),
+(6)
+This aggregates the step-wise deviations into a scalar score, where ey(k)
+t
+is the embedding of the
+token generated by the perturbed model in the k-th sample. Notably, EED scores require far fewer
+samples than SD to stabilize, thanks to its non-discrete semantic aggregation. It also avoids a semantic
+clustering model and O((K + K′)2) entailment judgments, reducing the overhead to just O(K′).
+We present the framework of the proposed uncertainty metrics in Fig. 2
+Theoretical Justification
+To justify EED, we show that under a geometric distribution assumption,
+minimizing UEED is equivalent to minimizing the KL divergence between the semantic distributions.
+Assumption 3.4 (Spherical Semantic Distribution). We model the continuous semantic distribution
+of the MLLM output as a von Mises-Fisher (vMF) distribution on the unit hypersphere Sd−1 [30, 22].
+The probability density of a semantic vector z given mean direction µ ∈Sd−1 and concentration
+κ > 0 is:
+p(z|µ, κ) = Cd(κ) exp(κµ⊤z),
+(7)
+where Cd(κ) = κd/2−1/((2π)d/2Id/2−1(κ)) is the normalization constant.
+This connects the discrete token space to the continuous geometry, where µ corresponds to the
+normalized expected embedding µP,t.
+Lemma 3.5 (KL Divergence of vMF Distributions). Let Q ∼vMF(µQ, κ) and P ∼vMF(µP , κ) be
+two von Mises-Fisher distributions with identical concentration κ. The Kullback-Leibler divergence
+between them is strictly proportional to the cosine distance between their mean directions:
+DKL(Q∥P) = κAd(κ)(1 −µ⊤
+QµP ),
+(8)
+where Ad(κ) = ∥Ez∼Q[z]∥=
+Id/2(κ)
+Id/2−1(κ) is the ratio of Bessel functions.
+The derivation is detailed in Appendix A.3.
+Theorem 3.6 (Geometric Proxy Equivalence). The Expected Embedding Drift UEED is an unbiased
+estimator of the KL divergence between the perturbed semantic distribution Q and the original belief
+P, up to a scaling factor and additive constant.
+The full proof is available in Appendix A.4, which connects the proxy to our core objective. The
+point-wise drift in Eq. (5) is aggregated in Eq. (6) to estimate the expected cosine distance. As
+established in Eq. (8) and Thm. 3.6, this distance effectively estimates the Semantic Divergence in
+Eq. (1), giving an efficient proxy for epistemic uncertainty.
+6
+
+
+Table 1: Uncertainty estimation performance (%) on visual question answering benchmarks. AUC
+is short for AUROC in the table.
+BENCHMARK
+VQAV2
+OKVQA
+ADVQA
+MLLM
+INTERNVL2-8B
+QWEN2.5-VL-7B
+INTERNVL2-8B
+QWEN2.5-VL-7B
+INTERNVL2-8B
+QWEN2.5-VL-7B
+METRIC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+PERPLEXITY
+70.3
+80.7
+77.6
+81.4
+65.4
+76.8
+75.1
+82.3
+65.7
+60.3
+66.4
+61.2
+SELF EVALUATION [45]
+60.9
+75.1
+62.4
+71.9
+66.4
+77.0
+63.1
+75.5
+60.4
+57.1
+55.3
+49.7
+VERBALIZED CONFIDENCE [43]
+54.3
+68.3
+57.2
+69.2
+55.3
+67.8
+58.2
+72.1
+50.4
+48.6
+57.1
+51.9
+SEMANTIC ENTROPY [13]
+78.7
+82.5
+76.5
+79.5
+80.6
+84.5
+78.6
+83.8
+75.5
+66.6
+73.6
+63.1
+EIGENSCORE [10]
+72.6
+80.7
+75.8
+79.9
+72.2
+78.5
+76.8
+83.0
+67.1
+60.2
+64.6
+59.1
+UMPIRE [23]
+74.3
+81.7
+72.9
+78.4
+72.6
+79.0
+76.4
+83.0
+68.2
+61.9
+65.5
+59.6
+UNCERTAINTY-O [49]
+72.1
+80.1
+64.9
+74.2
+67.7
+77.8
+61.8
+74.2
+60.1
+56.1
+57.4
+53.7
+OURS (SD)
+81.3
+85.2
+78.4
+81.5
+81.8
+85.7
+79.6
+84.2
+76.8
+66.9
+74.5
+64.8
+OURS (EED)
+80.3
+84.5
+77.9
+81.1
+80.9
+84.5
+79.3
+84.0
+75.8
+66.5
+74.6
+64.6
+Table 2: Uncertainty estimation performance (%) on all 3 sub-tasks of the POPE benchmark.
+BENCHMARK
+POPE RANDOM
+POPE POPULAR
+POPE ADVERSARIAL
+MLLM
+INTERNVL
+QWENVL
+INTERNVL
+QWENVL
+INTERNVL
+QWENVL
+METRIC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+AUC
+AURAC
+PERPLEXITY
+68.7
+91.2
+68.5
+91.5
+68.1
+90.4
+67.3
+90.2
+68.9
+90.8
+65.2
+89.2
+SELF EVALUATION [45]
+52.0
+84.6
+61.3
+91.4
+53.6
+84.7
+51.5
+88.1
+53.5
+85.2
+57.4
+89.5
+VERBALIZED CONFIDENCE [43]
+50.9
+84.2
+60.4
+88.2
+51.8
+82.9
+60.5
+87.2
+50.6
+82.8
+60.6
+87.5
+SEMANTIC ENTROPY [13]
+70.6
+89.6
+62.9
+88.7
+68.7
+88.5
+64.8
+88.0
+72.3
+90.2
+63.0
+86.3
+EIGENSCORE [10]
+65.5
+89.4
+56.0
+87.2
+64.4
+87.8
+56.6
+86.5
+63.8
+88.5
+54.6
+85.4
+UMPIRE [23]
+68.7
+91.2
+80.5
+94.4
+68.7
+90.5
+79.1
+93.4
+68.2
+90.5
+77.0
+92.7
+UNCERTAINTY-O [49]
+64.6
+88.8
+51.5
+85.4
+66.4
+88.6
+55.1
+85.9
+62.8
+88.2
+56.6
+86.1
+OURS (SD)
+75.9
+92.4
+66.2
+89.3
+74.8
+91.3
+66.1
+88.7
+74.9
+91.7
+64.5
+88.1
+OURS (EED)
+73.1
+91.6
+83.2
+95.1
+71.0
+90.5
+81.5
+94.3
+73.0
+91.3
+78.6
+93.6
+4
+Experiment
+We adopt InternVL2-8B [11] and Qwen2.5-VL-7B-Instruct [3] as our evaluated models. We test the
+performance of Usem and UEED on various benchmarks, including common visual question answering
+(VQAv2 [15], OKVQA [31], AdVQA [25]) and hallucination-targeted benchmarks (POPE [26],
+MME [14]). For simplicity, we adopt the lightweight GroundingDINO detector [29] as our RoI
+generator. In practice, specialized or query-conditioned detectors can also instantiate T(·), as verified
+in Appendix C.6. We fix the test subset and set an equal maximum sampling time Ktotal = K
+(baseline methods) or Ktotal = K + K′ (our method) to 32 for fair comparison. In practice, as
+{yk}K
+k=1 ∼P can be utilized to yield our values while producing a half-sampled SE (compared to
+Ktotal samples), we calculate a mixed uncertainty metric by interpolating our values with this SE to
+balance estimation of distinct uncertainty types. Since hallucination detection benefits from total
+uncertainty, this interpolation captures both aleatoric and epistemic uncertainty. Appendix B provides
+the detailed experimental setup.
+4.1
+Results on Hallucination Detection
+General VQA Benchmarks.
+Table 1 presents the results on VQAv2, OKVQA, and AdVQA.
+CIM consistently outperforms existing baselines all evaluated VQA benchmarks. Notably, on the
+AdVQA benchmark, which is specifically designed to elicit model errors, our method achieves an
+AUROC of 76.8% on InternVL, surpassing Semantic Entropy (75.5%) and EigenScore (67.1%).
+This suggests that our method’s specific reliance on causal invariance by checking if the answer
+holds after removing background context is more robust to adversarial visual perturbations than
+methods that solely attend to the output distribution. Furthermore, our computationally efficient
+proxy, Ours (EED), performs competitively with the Usem method, often within 1% of the explicit
+Semantic Divergence scores, validating the theoretical connection in Lemma 3.5.
+We also provide case study in Appendix C.2, to further verify that SD more successfully capture
+epistemic uncertainty.
+Hallucination-targeted Benchmarks.
+Table 2 details performance on the POPE benchmark. This
+benchmark is crucial as it directly evaluates on the topic of object hallucinations. On the InternVL
+model, our explicit method dominates the performance across all splits, achieving ∼75% AUROC,
+7
+
+
+Table 3: Ablation study of the xc-focused image transform. AUROC and AURAC use the final
+mixed score, while AUROCEPI uses the SE-free pure SD score. GT RoI is available only on GQA; –
+denotes not applicable. IVL / QVL denotes InternVL / QwenVL, respectively.
+METRIC
+AUROC
+AUROCEPI
+AURAC
+BENCHMARK
+VQAV2
+ADVQA
+GQA
+VQAV2
+ADVQA
+GQA
+VQAV2
+ADVQA
+GQA
+MLLM
+IVL QVL IVL QVL IVL QVL IVL QVL IVL QVL IVL QVL IVL QVL IVL QVL IVL QVL
+RANDOM CROP
+80.2 77.9 75.7 71.9 77.9 68.8 70.3 62.1 61.4 54.3 61.0 57.5 83.6 81.6 66.7 61.5 81.5 61.3
+REVERSED CROP
+77.6 76.1 74.8 71.9 76.8 69.5 53.7 56.5 54.2 50.7 58.7 54.5 81.5 79.2 65.0 61.3 80.1 61.5
+GT ROI CROP
+–
+–
+–
+–
+80.3 71.4
+–
+–
+–
+–
+72.1 66.3
+–
+–
+–
+–
+82.4 63.9
+OURS (ROI CROP) 81.3 78.5 76.8 74.5 79.9 70.2 76.8 73.7 70.6 68.3 73.3 64.6 85.2 81.9 66.9 64.8 82.5 63.1
+significantly outperforming Semantic Entropy (∼68-72%). Interestingly, on QwenVL, our EED
+proxy outperforms the explicit method (e.g., 83.2% vs 66.2% on Random). We find that QwenVL’s
+decoding distribution is much sharper than InternVL’s on POPE (Appendix C.8), which makes
+discrete semantic clustering less stable for the explicit method. In contrast, EED operates in the
+continuous embedding space and is less affected by hard cluster assignments. A significant gap is
+observed between our CIM and other baselines on the challenging Adversarial split, confirming
+CIM’s identification of whether the context priors are relied on rather than visual evidence. We further
+evaluate on the comprehensive MME benchmark in Appendix C.1, where Fig. 7 shows that CIM
+remains the best-performing method. This demonstrates CIM’s generalization beyond simple object
+existence to complex reasoning in MME, and again verifies its consistency in uncertainty estimation.
+4.2
+Discussions
+Causal Masking.
+Our theoretical framework proposes that the visual input operator T(·) must
+focus on isolating causal features xc to separate epistemic from aleatoric uncertainty. To validate
+such a design choice of xc-focused RoI Cropping, we compare it against: 1) Random Crop, which
+crops an arbitrary region, 2) Reversed Crop, which masks the detected RoIs and keeps only the
+background, and 3) Ground-Truth RoIs, which are from the box-annotated GQA benchmark. The
+ablation results are presented in Table 3. We also compare with the commonly used gaussian noise
+perturbation in Appendix C.3. From the results, Random Crop yield inferior performance compared
+to our targeted approach. This aligns with our hypothesis that random perturbations degrade the
+aleatoric and epistemic signals indiscriminately. Crucially, Reversed Crop performs significantly
+worse than Random Crop in most tested cases. This is because feeding only the background forces
+the model to hallucinate or guess, but does not provide an anchor point for the correct reasoning. In
+contrast, our method of RoI Crop achieves significantly larger AUROC across all settings (e.g., 81.3%
+on VQAv2 for InternVL). By preserving necessary evidence while maximally removing spurious
+context, our measurement effectively grounds the MLLM’s confidence in causal signals, providing
+the cleanest isolation of epistemic uncertainty.
+While the SE component is included to retain aleatoric sensitivity for hallucination detection, it can
+dilute the random-vs-RoI gap on epistemic UQ. To isolate the epistemic component, the AUROCEPI
+metric reports AUROCs in a pure SD setup without the auxiliary SE score. Under this setting, the
+separation becomes much larger: Our RoI Crop improves over Random Crop by 6.5/9.2 AUROC on
+InternVL VQAv2/AdVQA or by 11.6/14.0 AUROC on QwenVL VQAv2/AdVQA, and is even more
+superior to the Reversed Crop. We additionally include GQA [18] because it provides ground-truth
+object annotations, enabling a controlled comparison with GT RoIs. On GQA, our operation is
+comparable to GT RoIs Crop and both clearly outperform the others, validating that CIM relies on
+preserving query-relevant causal evidence rather than arbitrary perturbation, and exact crops are less
+critical than retaining causal evidence.
+Number of Samples.
+In Fig. 3, we show the optimal sampling allocation under a fixed total
+number K + K′ between estimating the original P(s|v), i.e., for SE and Usem, and measuring the
+masked P(s|v′) only for Usem. We observe a consistent middle-peaking trend across benchmarks.
+The maximal performance is achieved at a balanced sampling budget of 40%-60% each. Biased
+allocations degrade performance, as insufficient samples for either distribution lead to mis-estimation
+of one type of uncertainty. Furthermore, while increasing the total budget universally improves
+AUROC, the optimal allocation proportion remains stable, suggesting its robustness in such scaling.
+8
+
+
+0
+20
+40
+60
+80
+100
+Usem Samples (%)
+70
+71
+72
+73
+74
+AUROC
+AUROC vs Usem Sample Usage
+K = 8
+K = 16
+K = 24
+K = 32
+0
+20
+40
+60
+80
+100
+Usem Samples (%)
+62
+63
+64
+65
+66
+67
+AUROC
+AUROC vs Usem Sample Usage
+K = 8
+K = 16
+K = 24
+K = 32
+Figure 3: Hallucination detection performance
+with fixed numbers of total samples, w.r.t. the
+proportion of samples for Usem calculation besides
+SE calculation, showing QwenVL results using
+AdVQA (left) and MME (right).
+VQAv2
+OKVQA
+AdVQA POPE adv.
+Benchmark
+0
+1
+2
+3
+4
+5
+6
+7
+Sample Avg. Processing Time (s)
+InternVL
+Measure
+Usem
+Ueed
+VQAv2
+OKVQA
+AdVQA POPE adv.
+Benchmark
+0
+2
+4
+6
+8
+10
+Sample Avg. Processing Time (s)
+QwenVL
+Measure
+Usem
+Ueed
+Figure 4: Sample-wise efficiency comparison
+for Usem and UEED. It takes only half time for
+UEED to compute the uncertainty under saturated
+performance.
+VQAv2
+OKVQA
+AdVQA
++2.7
++3.2
++3.2
+InternVL
+45
+55
+65
+75
+Accuracy (%)
+VQAv2
+OKVQA
+AdVQA
++1.5
++1.9
++2.5
+QwenVL
+Vanilla
+Ours
+Figure 5: Hallucination mitigation per-
+formance (Acc%) using uncertainty val-
+ues estimated by our proposed method
+to threshold and re-answer the query.
+Efficiency of EED.
+Fig. 4 compares the average pro-
+cessing time per sample between the Semantic Divergence
+Usem and our proposed proxy UEED. Across both MLLM
+architectures and all four benchmarks, UEED consistently
+reduces the computational cost by approximately 50%.
+For instance, on the computationally demanding AdVQA
+benchmark with QwenVL, the processing time drops from
+∼9.6s to ∼4.8s per sample. Compared with sampling-
+and-clustering methods under the same generation budget,
+EED removes the NLI-based O((K + K′)2)-time clus-
+tering for the perturbed input and operates directly in the
+embedding space. Appendix C.9 further shows that SD is
+not strongly tied to one entailment model, but EED avoids
+that clustering dependency altogether.
+Applications.
+Beyond detection, a practical uncertainty
+metric should enable the model to correct its own errors.
+We study whether CIM can act as a filter to improve factual quality. In this setting, we perform a
+reject-and-refine strategy: if the estimated uncertainty Usem exceeds a threshold, we instruct the model
+to re-generate the answer. Accuracy improvements on VQAv2, OKVQA, and AdVQA are reported in
+Fig. 5, which demonstrates the effectiveness of such intervention. By using our uncertainty estimates
+to trigger re-answering, we observe consistent accuracy gains across all benchmarks. Importantly, on
+the difficult AdVQA benchmark, the performance of InternVL improves from 47.9% to 51.1%, and
+QwenVL from 47.5% to 50.0%. This significant increase indicates that our method successfully flags
+epistemic failures where the model was previously hallucinating due to adversarial visual contexts.
+0
+50
+100
+Uncertainty Percentile
+1.4
+1.6
+1.8
+Avg. Time (s)
+Avg. time
+Accuracy
+Baseline acc.
+Best acc.
+80.0
+80.2
+80.4
+Accuracy (%)
+0
+50
+100
+Uncertainty Percentile
+0.4
+0.5
+0.6
+Avg. Time (s)
+Avg. time
+Accuracy
+Baseline acc.
+Best acc.
+74.0
+74.5
+75.0
+75.5
+76.0
+Accuracy (%)
+Figure 6: Adaptive-resolution VQA performance on MME
+using different uncertainty thresholds as the indicator: confident
+samples are processed under low resolutions. Left: w/ InternVL;
+Right: w/ QwenVL.
+We further apply CIM to adaptive-
+resolution inference, where sam-
+ples with uncertainty below a per-
+centile threshold are processed
+at a low maximum resolution of
+256, reserving high-resolution in-
+ference for uncertain samples. As
+shown in Fig. 6, thresholding con-
+fident samples reduces inference
+time and also boosts accuracy be-
+yond the high-resolution baseline.
+For QwenVL, downscaling the
+most confident 50% samples re-
+duces average latency from 0.65s
+to 0.50s and raises accuracy from
+∼75.2% to ∼76.1%; InternVL
+shows similar gains around the
+9
+
+
+50th–70th percentile thresholds. This suggests that high resolution can distract the inference on
+already sufficient samples, while CIM identifies when low-resolution evidence is adequate.
+5
+Conclusion
+This work addresses the critical bias in existing MLLM uncertainty quantification methods toward
+aleatoric uncertainty, which often ignores hallucinations driven by spurious correlations. We proposed
+CIM, a framework that isolates epistemic uncertainty by measuring the semantic shift under causally
+invariant perturbations with theoretical guarantee. Our proposed Semantic Divergence effectively
+targets reliance on non-causal features, achieving state-of-the-art performance. Furthermore, the
+Expected Embedding Drift (EED) reduces computational latency by 50% without compromising
+accuracy. By enabling robust hallucination detection and efficient adaptive inference, CIM enables a
+rigorous path toward trustworthy multimodal reasoning.
+Limitations.
+CIM depends on the quality of the RoIs and equivalence estimation, so failures of
+them can affect the results. Nevertheless, we empirically show their impact is limited.
+Acknowledgments and Disclosure of Funding
+Use unnumbered first level headings for the acknowledgments. All acknowledgments go at the
+end of the paper before the list of references. Moreover, you are required to declare funding
+(financial activities supporting the submitted work) and competing interests (related financial activities
+outside the submitted work). More information about this disclosure can be found at: https:
+//neurips.cc/Conferences/2026/PaperInformation/FundingDisclosure.
+Do not include this section in the anonymized submission, only in the final paper. You can use
+the ack environment provided in the style file to automatically hide this section in the anonymized
+submission.
+References
+[1] Gustaf Ahdritz, Tian Qin, Nikhil Vyas, Boaz Barak, and Benjamin L Edelman. Distinguish-
+ing the knowable from the unknowable with language models. In Proceedings of the 41st
+International Conference on Machine Learning, pages 503–549, 2024.
+[2] Martin Arjovsky, Léon Bottou, Ishaan Gulrajani, and David Lopez-Paz. Invariant risk mini-
+mization. arXiv preprint arXiv:1907.02893, 2019.
+[3] Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge, Sibo Song, Kai Dang, Peng Wang,
+Shijie Wang, Jun Tang, Humen Zhong, Yuanzhi Zhu, Mingkun Yang, Zhaohai Li, Jianqiang
+Wan, Pengfei Wang, Wei Ding, Zheren Fu, Yiheng Xu, Jiabo Ye, Xi Zhang, Tianbao Xie, Zesen
+Cheng, Hang Zhang, Zhibo Yang, Haiyang Xu, and Junyang Lin. Qwen2.5-vl technical report,
+2025. URL https://arxiv.org/abs/2502.13923.
+[4] Tianyi Bai, Hao Liang, Binwang Wan, Yanran Xu, Xi Li, Shiyu Li, Ling Yang, Bozhou Li,
+Yifan Wang, Bin Cui, et al. A survey of multimodal large language model from a data-centric
+perspective. arXiv preprint arXiv:2405.16640, 2024.
+[5] Zechen Bai, Pichao Wang, Tianjun Xiao, Tong He, Zongbo Han, Zheng Zhang, and Mike Zheng
+Shou.
+Hallucination of multimodal large language models: A survey.
+arXiv preprint
+arXiv:2404.18930, 2024.
+[6] Mathieu Blondel, Michael E Sander, Germain Vivier-Ardisson, Tianlin Liu, and Vincent Roulet.
+Autoregressive language models are secretly energy-based models: Insights into the lookahead
+capabilities of next-token prediction. arXiv preprint arXiv:2512.15605, 2025.
+[7] Konstantinos Bousmalis, George Trigeorgis, Nathan Silberman, Dilip Krishnan, and Dumitru
+Erhan. Domain separation networks. Advances in Neural Information Processing Systems, 29,
+2016.
+10
+
+
+[8] Miguel A Carreira-Perpinan and Geoffrey Hinton. On contrastive divergence learning. In
+International workshop on artificial intelligence and statistics, pages 33–40. PMLR, 2005.
+[9] Ferhat Ozgur Catak and Murat Kuzlu. Uncertainty quantification in large language models
+through convex hull analysis. Discover Artificial Intelligence, 4(1):90, 2024.
+[10] Chao Chen, Kai Liu, Ze Chen, Yi Gu, Yue Wu, Mingyuan Tao, Zhihang Fu, and Jieping Ye.
+Inside: Llms’ internal states retain the power of hallucination detection. In Proceedings of the
+Twelfth International Conference on Learning Representations, 2024.
+[11] Zhe Chen, Weiyun Wang, Hao Tian, Shenglong Ye, Zhangwei Gao, Erfei Cui, Wenwen Tong,
+Kongzhi Hu, Jiapeng Luo, Zheng Ma, et al. How far are we to gpt-4v? closing the gap to
+commercial multimodal models with open-source suites. Science China Information Sciences,
+67(12):220101, 2024.
+[12] Yilun Du and Igor Mordatch. Implicit generation and modeling with energy based models.
+Advances in neural information processing systems, 32, 2019.
+[13] Sebastian Farquhar, Jannik Kossen, Lorenz Kuhn, and Yarin Gal. Detecting hallucinations in
+large language models using semantic entropy. Nature, 630(8017):625–630, 2024.
+[14] Chaoyou Fu, Peixian Chen, Yunhang Shen, Yulei Qin, Mengdan Zhang, Xu Lin, Jinrui Yang,
+Xiawu Zheng, Ke Li, Xing Sun, et al. Mme: A comprehensive evaluation benchmark for multi-
+modal large language models. In The Thirty-ninth Annual Conference on Neural Information
+Processing Systems Datasets and Benchmarks Track, 2025.
+[15] Yash Goyal, Tejas Khot, Douglas Summers-Stay, Dhruv Batra, and Devi Parikh. Making
+the v in vqa matter: Elevating the role of image understanding in visual question answering.
+In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition, pages
+6904–6913, 2017.
+[16] Pengcheng He, Xiaodong Liu, Jianfeng Gao, and Weizhu Chen. Deberta: Decoding-enhanced
+bert with disentangled attention. In International Conference on Learning Representations,
+2021.
+[17] Lei Huang, Weijiang Yu, Weitao Ma, Weihong Zhong, Zhangyin Feng, Haotian Wang, Qiang-
+long Chen, Weihua Peng, Xiaocheng Feng, Bing Qin, et al. A survey on hallucination in large
+language models: Principles, taxonomy, challenges, and open questions. ACM Transactions on
+Information Systems, 43(2):1–55, 2025.
+[18] Drew A Hudson and Christopher D Manning. Gqa: A new dataset for real-world visual
+reasoning and compositional question answering. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pages 6700–6709, 2019.
+[19] Eyke Hüllermeier and Willem Waegeman. Aleatoric and epistemic uncertainty in machine
+learning: An introduction to concepts and methods. Machine learning, 110(3):457–506, 2021.
+[20] Jannik Kossen, Jiatong Han, Muhammed Razzak, Lisa Schut, Shreshth Malik, and Yarin Gal.
+Semantic entropy probes: Robust and cheap hallucination detection in llms. arXiv preprint
+arXiv:2406.15927, 2024.
+[21] Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. Semantic uncertainty: Linguistic invari-
+ances for uncertainty estimation in natural language generation. In The Eleventh International
+Conference on Learning Representations, 2023.
+[22] Sachin Kumar and Yulia Tsvetkov. Von mises-fisher loss for training sequence to sequence
+models with continuous outputs. In International Conference on Learning Representations,
+2019.
+[23] Gregory Kang Ruey Lau, Hieu Dao, Nicole Kan Hui Lin, and Bryan Kian Hsiang Low. Un-
+certainty quantification for mllms. In ICML 2025 Workshop on Reliable and Responsible
+Foundation Models, 2025.
+11
+
+
+[24] Yann LeCun, Sumit Chopra, Raia Hadsell, M Ranzato, Fujie Huang, et al. A tutorial on
+energy-based learning. Predicting structured data, 1(0), 2006.
+[25] Linjie Li, Jie Lei, Zhe Gan, and Jingjing Liu. Adversarial vqa: A new benchmark for evaluating
+the robustness of vqa models. In Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 2042–2051, 2021.
+[26] Yifan Li, Yifan Du, Kun Zhou, Jinpeng Wang, Wayne Xin Zhao, and Ji-Rong Wen. Evaluating
+object hallucination in large vision-language models. In Proceedings of the 2023 Conference
+on Empirical Methods in Natural Language Processing, pages 292–305, 2023.
+[27] Zhen Lin, Shubhendu Trivedi, and Jimeng Sun. Generating with confidence: Uncertainty quan-
+tification for black-box large language models. Transactions on Machine Learning Research,
+2024, 2024.
+[28] Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee.
+Visual instruction tuning.
+Advances in Neural Information Processing Systems, 36:34892–34916, 2023.
+[29] Shilong Liu, Zhaoyang Zeng, Tianhe Ren, Feng Li, Hao Zhang, Jie Yang, Qing Jiang, Chunyuan
+Li, Jianwei Yang, Hang Su, et al. Grounding dino: Marrying dino with grounded pre-training for
+open-set object detection. In European conference on computer vision, pages 38–55. Springer,
+2024.
+[30] Kanti V Mardia and Peter E Jupp. Directional statistics. John Wiley & Sons, 2009.
+[31] Kenneth Marino, Mohammad Rastegari, Ali Farhadi, and Roozbeh Mottaghi. Ok-vqa: A visual
+question answering benchmark requiring external knowledge. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages 3195–3204, 2019.
+[32] Shervin Minaee, Tomas Mikolov, Narjes Nikzad, Meysam Chenaghlu, Richard Socher,
+Xavier Amatriain, and Jianfeng Gao. Large language models: A survey. arXiv preprint
+arXiv:2402.06196, 2024.
+[33] Robert Adrian Minut, Hazem Dewidar, Iacopo Masi, et al. Spilled energy in large language
+models. In Proceedings of the International Conference on Learning Representations, 2026.
+[34] Alexander Nikitin, Jannik Kossen, Yarin Gal, and Pekka Marttinen. Kernel language entropy:
+Fine-grained uncertainty quantification for llms from semantic similarities. Advances in Neural
+Information Processing Systems, 37:8901–8929, 2024.
+[35] Judea Pearl, Madelyn Glymour, and Nicholas P Jewell. Causal inference in statistics: A primer.
+John Wiley & Sons, 2016.
+[36] Judea Pearl et al. Models, reasoning and inference. Cambridge, UK: CambridgeUniversityPress,
+19(2):3, 2000.
+[37] Jingwei Peng, Jiehao Chen, Mateo Alejandro Rojas, and Meilin Zhang. Mv-core: Multi-
+modal visual-conceptual reasoning for complex visual question answering. arXiv preprint
+arXiv:2508.07023, 2025.
+[38] Jonas Peters, Peter Bühlmann, and Nicolai Meinshausen. Causal inference by using invariant
+prediction: identification and confidence intervals. Journal of the Royal Statistical Society
+Series B: Statistical Methodology, 78(5):947–1012, 2016.
+[39] Lianhui Qin, Sean Welleck, Daniel Khashabi, and Yejin Choi. Cold decoding: Energy-based con-
+strained text generation with langevin dynamics. Advances in Neural Information Processing
+Systems, 35:9538–9551, 2022.
+[40] Bernhard Schölkopf, Francesco Locatello, Stefan Bauer, Nan Rosemary Ke, Nal Kalchbrenner,
+Anirudh Goyal, and Yoshua Bengio. Toward causal representation learning. Proceedings of the
+IEEE, 109(5):612–634, 2021.
+[41] Ola Shorinwa, Zhiting Mei, Justin Lidard, Allen Z. Ren, and Anirudha Majumdar. A survey on
+uncertainty quantification of large language models: Taxonomy, open research challenges, and
+future directions. ACM Computing Surveys, 2025.
+12
+
+
+[42] Linwei Tao, Yi-Fan Yeh, Minjing Dong, Tao Huang, Philip Torr, and Chang Xu. Revisiting un-
+certainty estimation and calibration of large language models. arXiv preprint arXiv:2505.23854,
+2025.
+[43] Katherine Tian, Eric Mitchell, Allan Zhou, Archit Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea
+Finn, and Christopher D Manning. Just ask for calibration: Strategies for eliciting calibrated
+confidence scores from language models fine-tuned with human feedback. In Proceedings of the
+2023 Conference on Empirical Methods in Natural Language Processing, pages 5433–5442,
+2023.
+[44] Bin Xiao, Haiping Wu, Weijian Xu, Xiyang Dai, Houdong Hu, Yumao Lu, Michael Zeng, Ce Liu,
+and Lu Yuan. Florence-2: Advancing a unified representation for a variety of vision tasks. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pages
+4818–4829, 2024.
+[45] Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. Can
+llms express their uncertainty? an empirical evaluation of confidence elicitation in llms. arXiv
+preprint arXiv:2306.13063, 2023.
+[46] Miao Xiong, Zhiyuan Hu, Xinyang Lu, YIFEI LI, Jie Fu, Junxian He, and Bryan Hooi. Can
+llms express their uncertainty? an empirical evaluation of confidence elicitation in llms. In The
+Twelfth International Conference on Learning Representations, 2024.
+[47] Shukang Yin, Chaoyou Fu, Sirui Zhao, Ke Li, Xing Sun, Tong Xu, and Enhong Chen. A survey
+on multimodal large language models. National Science Review, 11(12), 2024.
+[48] Ruiyang Zhang, Hu Zhang, and Zhedong Zheng. Vl-uncertainty: Detecting hallucination
+in large vision-language model via uncertainty estimation. arXiv preprint arXiv:2411.11919,
+2024.
+[49] Ruiyang Zhang, Hu Zhang, Hao Fei, and Zhedong Zheng.
+Uncertainty-o: One model-
+agnostic framework for unveiling uncertainty in large multimodal models. arXiv preprint
+arXiv:2506.07575, 2025.
+[50] Xiaofeng Zhang, Fanshuo Zeng, Yihao Quan, Zheng Hui, and Jiawei Yao. Enhancing multi-
+modal large language models complex reason via similarity computation. In Proceedings of the
+AAAI Conference on Artificial Intelligence, volume 39, pages 10203–10211, 2025.
+[51] Wayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang, Xiaolei Wang, Yupeng Hou, Yingqian Min,
+Beichen Zhang, Junjie Zhang, Zican Dong, et al. A survey of large language models. arXiv
+preprint arXiv:2303.18223, 1(2), 2023.
+13
+
+
+Appendix
+A
+Proofs of Equations and Propositions
+A.1
+Proof of Lemma 3.2 (Aleatoric Cancellation)
+Proof. Let P(s) ≜Pθ(s|v) and Q(s) ≜Pθ(s|v′) be the distribution given the original input and the
+masked input v′ = T(v), respectively. The log-probabilities for these inputs are
+log Q(s) = −(Ec(s, vc) + Es(s, v′
+s)) −log Z(v′)
+log P(s) = −(Ec(s, vc) + Es(s, vs)) −log Z(v).
+Subtracting the two equations yields:
+log Q(s)
+P(s) = (Es(s, vs) −Es(s, v′
+s)) + log Z(v)
+Z(v′)
+= ∆s(s) + log Z(v)
+Z(v′).
+(9)
+A.2
+Proof of Theorem 3.3 (Epistemic Jensen Gap)
+Part 1: Equivalence to Jensen Gap
+Proof. We first expand the partition function ratio. By definition, Z(v) = P
+y exp(−(Ec(s, vc) +
+Es(s, vs))). The exponent can be rewritten as −Ec −Es(v′
+s) −(Es(vs) −Es(v′
+s)) = −E(s, v′) −
+∆s(s). Therefore, we can derive that
+Z(v) =
+X
+s
+e−Eθ(s,v′)e−∆s(s).
+(10)
+By definition of Z(v′), we have e−Eθ(s,v′) = Z(v′)Q(s) which simplifies Eq. (10) as
+Z(v) =
+X
+s
+Z(v′)Q(s)e−∆s(s)
+= Z(v′) · Es∼Q[e−∆s(s)]
+(11)
+Thus, the constant term from Lemma 3.2 is log Z(v)
+Z(v′) = log Ey∼Q[e−∆s(s)]. Now, substituting
+Lemma 3.2 into the definition in Eq. (1) yields
+Usem = Es∼Q
+
+log Q(s)
+P(y)
+
+= Es∼Q
+h
+∆s(s) + log Es′∼Q[e−∆s(s′)]
+i
+= log Es∼Q[e−∆s(s)] −Es∼Q[−∆s(s)],
+(12)
+which is precisely the Jensen Gap J (ex; −∆s) ≥0. The divergence is strictly zero if and only if
+∆s(s) is constant almost surely over S, implying the model is insensitive to spurious features. While
+Eq. (12) provides an exact measure, it can be interpreted best at a low hallucination scenario, i.e., the
+model is trained well enough to produce relatively smaller |∆s(s)|, which results in Eq. 3.
+Part 2: Convergence to Variance (Proof of Eq. (3))
+Proof. Let K−∆(t) = log Es∼Q[et(−∆s(s))] be the Cumulant Generating Function (CGF) of the
+random variable −∆s(s). From Theorem 1, we identify that:
+DKL(Q∥P) = K−∆(1) −Es∼Q[−∆s(s)] = K−∆(1) + Es∼Q[∆s(s)]
+(13)
+14
+
+
+We apply Taylor’s Theorem with the Lagrange form of the remainder to K−∆(t) on the interval [0, 1].
+There exists some ξ ∈(0, 1) such that:
+K−∆(1) = K−∆(0) + K′
+−∆(0)(1) + K′′
+−∆(0)
+2!
+(1)2 + K′′′
+−∆(ξ)
+3!
+(1)3
+(14)
+Using the properties of cumulants, we have K−∆(0) = 0, K′
+−∆(0) = EQ[−∆s(s)], and K′′
+−∆(0) =
+VarQ(−∆s(s)). Given the assumption that the shift is bounded by sup |∆s(s)| ≤ϵ, the third
+derivative satisfies |K(3)
+−∆(ξ)| ≤Cϵ3 for some constant C, effectively bounding the remainder term
+by O(ϵ3). Substituting these values:
+K−∆(1) = −EQ[∆s(s)] + 1
+2VarQ(∆s(s)) + O(ϵ3)
+(15)
+Substituting this expansion back into the KL equation, the linear expectation terms cancel:
+DKL(Q∥P) =
+
+−EQ[∆s(s)] + 1
+2VarQ(∆s(s)) + O(ϵ3)
+
++ EQ[∆s(s)]
+= 1
+2Vars∼Q[∆s(s)] + O(ϵ3)
+(16)
+A.3
+Proof of Lemma 3.5 (KL Divergence of vMF Distributions)
+Proof. By definition, the KL divergence is:
+DKL(Q∥P) =
+Z
+Sd−1 q(z) log q(z)
+p(z)dz
+=
+Z
+Sd−1 q(z)
+ 
+log Cd(κ)eκµ⊤
+Qz
+Cd(κ)eκµ⊤
+P z
+!
+dz
+=
+Z
+Sd−1 q(z)
+ κµ⊤
+Qz −κµ⊤
+P z
+
+dz
+= κ(µQ −µP )⊤
+Z
+Sd−1 zq(z)dz.
+(17)
+A property of the vMF distribution is that the expected vector is Ez∼Q[z] = Ad(κ)µQ. Substituting
+this into the integral:
+DKL(Q∥P) = κ(µQ −µP )⊤(Ad(κ)µQ)
+= κAd(κ)(µ⊤
+QµQ −µ⊤
+P µQ).
+(18)
+Since µQ is a unit vector, µ⊤
+QµQ = 1. Thus, DKL(Q∥P) = κAd(κ)(1 −µ⊤
+P µQ).
+A.4
+Proof of Theorem 3.6 (Geometric Proxy Equivalence)
+Proof. The EED metric computes the expectation of the cosine distance over the sampled trajectory
+from Q. Taking the expectation of Eq. (6) with respect to yt ∼Q:
+Eyt∼Q[UEED] = 1 −Eyt∼Q[eyt]⊤µP
+= 1 −(Ad(κ)µQ)⊤µP .
+(19)
+Rearranging terms for µ⊤
+QµP and substituting into Lemma 3.5:
+DKL(Q∥P) = κAd(κ)
+
+1 −1 −E[UEED]
+Ad(κ)
+
+= κEyt∼Q[UEED] −κ(1 −Ad(κ)).
+(20)
+The divergence relates to EED via an affine transformation. The term κ(1 −Ad(κ)) is a constant
+dependent only on concentration κ and dimension d. Under high concentration (κ →∞), Ad(κ) →1,
+and the relation simplifies to exact linearity. Thus, minimizing EED strictly minimizes the divergence
+between the semantic distributions.
+15
+
+
+B
+Detailed Experiment Setup
+Computational Resources
+We carried out all experiments on 4 NVIDIA RTX A6000 GPUs.
+Model Parameters
+The implementation uses an inference temperature of 0.1, while the sampling
+temperature is 0.5. The RoI transform uses GroundingDINO with detection threshold 0.3, which
+filters boxes labeled as the whole image when they cover more than 95% of the image area and uses a
+central crop fallback when no valid detection remains.
+Prompts
+The dataset question is passed to the evaluated MLLM with this prompt:
+[Question] Answer this question shortly.
+The prompt used to extract key objects for grounding is:
+What are the key objects in this question-answer pair?
+Q: [Question]
+A: [Answer]
+Output in json format: {"key_objects": ["key object 1", "key object 2", ...]}
+where the placeholders are filled with the original question and the model’s original answer, and the
+judge LLM is queried with temperature 0.1. The prompt used for pairwise semantic clustering of
+sampled answers is:
+Question: [Question] True Answer: [Answer A] Is the following answer correct?
+Answer: [Answer B] Respond with ’no’ if this is totally different from the
+True Answer. Respond with ’yes’ when they are of the same meaning.
+This clustering prompt is filled with the text query and the answer pairs, using a temperature of 0.1.
+Causal-Invariant Transform.
+We use GroundingDINO as a lightweight RoI generator for the
+causal-invariant transform T(·). When no valid RoI is found, we use a central crop as the fallback
+view. This choice is not essential to the framework: task-specific or query-conditioned detectors can
+be substituted when they are available.
+Dataset Configuration.
+To keep evaluation consistent and computationally feasible, we fix the
+evaluation subsets across all methods. For hallucination-targeted benchmarks, we use the full test sets:
+3,000 POPE examples across the random, popular, and adversarial splits, and 2,374 MME examples.
+For VQAv2, OKVQA, AdVQA, and GQA, we use the first 2,000 validation examples from each
+dataset.
+Sampling Budget and Fair Comparison.
+For all sampling-based methods, we fix the total decod-
+ing budget to Ktotal = 32 sequences per query.
+• Baselines: SE, EigenScore, and UMPIRE sample only from the original distribution P(y|v),
+so we set K = 32.
+• Ours (CIM): CIM samples from both the original distribution P(y|v) and the causally-
+filtered distribution P(y|v′). We use K = 16 original-view samples and K′ = 16 filtered-
+view samples, keeping K + K′ = 32.
+Metric Interpolation.
+The K = 16 original-view samples used by CIM can also estimate standard
+Semantic Entropy without extra decoding. We therefore report a mixed score Ufinal = λUours,K′=16 +
+(1 −λ) · USE,K=16, where Uours is either Usem or UEED. Here, λ is set to 0.05. This score retains
+sensitivity to aleatoric uncertainty while adding the epistemic signal measured by CIM.
+16
+
+
+50
+60
+70
+80
+90
+Scores
+Verbalized Confidence
+Perplexity
+Self Evaluation
+UMPIRE
+EigenScore
+Uncertainty-o
+Semantic Entropy
+Ours (EED)
+Ours
+49.9
+63.1
+63.4
+65.6
+65.9
+70.2
+73.9
+74.3
+74.7
+80.0
+86.5
+85.9
+87.8
+87.9
+89.3
+90.0
+90.0
+90.3
+Benchmark MME Performance
+AUROC
+AURAC
+Figure 7: Uncertainty estimation performance (%) on the MME benchmark.
+C
+More Experiments and Results
+C.1
+Additional MME Results
+Figure 7 reports hallucination detection on MME. CIM achieves the best performance (74.7%),
+showing that the uncertainty signal generalizes beyond the VQA datasets in the main tables.
+C.2
+Case Study
+Metrics | SE: Low, 𝑈𝑈𝑠𝑠𝑠𝑠𝑠𝑠: High
+Query 
+| What color are the stool?
+GT.   
+| Red.
+Pred. 
+| The background stools are yellow.
+Metrics | SE: Low, 𝑈𝑈𝑠𝑠𝑠𝑠𝑠𝑠: High
+Query 
+| What is this meal?
+GT.   
+| Beef burgundy.
+Pred. 
+| A Japanese dish, possibly a curry rice…
+Metrics | SE: Low, 𝑈𝑈𝑠𝑠𝑠𝑠𝑠𝑠: High
+Query 
+| How many bikes?
+GT.
+| 5
+Pred. 
+| There are 4 bikes in the image.
+Figure 8: Representative instances of SE vs. Usem on hallucinated samples. In all instances,
+our proposed CIM uncertainty is high despite the standard SE remains low, indicating epistemic
+uncertainty that common sampling-based uncertainty metric fails to identify.
+To better understand the behavior of CIM in practice, we present a case analysis of SE’s failure cases
+in Fig. 8. As illustrated, the MLLM frequently generates incorrect answers with high confidence,
+leading to extremely low SE scores. For instance, in the left example, the model consistently
+mispredicts ‘Japanese dish,’ likely misled by background Japanese text. Similarly, in the right
+example, the model hallucinates the color possibly by looking at an incorrect object. Empirically,
+counting complex objects can often hallucinate but result in a stable number or low semantic entropy,
+as shown in the middle instance. In these scenarios, standard metrics fail but the proposed method
+consistently peaks. Such behavior confirms the successful detection of epistemic failure with our
+CIM.
+17
+
+
+C.3
+Gaussian Noise Perturbation
+We compare RoI masking with the commonly used gaussian noise perturbation under the same
+VQAv2 and AdVQA settings as the main masking ablation. Table 4 reports the final mixed uncertainty
+score. Gaussian noise perturbs the entire image and therefore cannot selectively preserve xc while
+suppressing xs. Its performance stays close to random masking and below RoI masking across
+benchmarks. This supports the main conclusion that the improvement is not caused by simply
+changing the image, but by constructing an evidence-preserving view that removes non-causal
+context.
+Table 4: Gaussian noise perturbation ablation. Results are AUROC/AURAC on VQAv2 and
+AdVQA.
+BENCHMARK
+VQAV2
+ADVQA
+MLLM
+INTERNVL
+QWENVL
+INTERNVL
+QWENVL
+METRIC
+AUROC
+AURAC
+AUROC
+AURAC
+AUROC
+AURAC
+AUROC
+AURAC
+RANDOM MASKING
+80.2
+83.6
+77.9
+81.6
+75.7
+66.7
+71.9
+61.5
+GAUSSIAN NOISE
+80.3
+84.0
+77.8
+80.7
+75.5
+66.5
+73.4
+63.0
+REVERSED MASKING
+77.6
+81.5
+76.1
+79.2
+74.8
+65.0
+71.9
+61.3
+OURS (ROI MASKING)
+81.3
+85.2
+78.5
+81.9
+76.8
+66.9
+74.5
+64.8
+C.4
+Detector Failure Sensitivity
+We next test how performance changes when RoI quality is deliberately degraded. Starting from GT
+boxes on GQA, we replace an increasing fraction of boxes with random crops. We evaluate and show
+the uncertainty detection performance in Table 5.
+Table 5: GQA detector-failure sensitivity. A higher failure ratio means that more GT RoIs are
+replaced by random crops.
+FAILURE RATIO (%)
+INTERNVL AUROC
+QWENVL AUROC
+0
+72.1
+66.3
+20
+69.4
+62.8
+40
+67.1
+61.4
+60
+65.1
+59.7
+80
+63.3
+58.7
+100
+61.0
+57.5
+The AUROC drops steadily as valid RoIs are replaced, confirming that CIM relies on preserving
+causal evidence rather than arbitrary perturbations such as random cropping. Meanwhile, In the
+actual pipeline, the detector fallback rate is low across benchmarks, as shown in Table 6.
+Table 6: GroundingDINO fallback rate. Fallback means no valid RoI is detected and the central
+crop is used.
+BENCHMARK
+VQAV2
+OKVQA
+ADVQA
+MME
+FAILURE (%)
+1.10
+0.62
+1.52
+1.54
+C.5
+Relational and Global GQA Questions
+A concern with RoI cropping is that it may remove relationships or scene context. Our implementation
+uses the union box over detected query-relevant objects, so the spatial region between objects is
+preserved. We evaluate this directly on GQA by comparing common questions with relational/global
+questions.
+From the results in Table 7, we can see the gain is still maintained when testing relational/global
+questions, suggesting that the union box in our implementation keeps enough contextual structure for
+CIM to remain effective.
+18
+
+
+Table 7: GQA relational/global analysis. AUROC on common questions and complex questions
+involving relational or global reasoning.
+SETTING
+GQA-COMMON
+GQA-REL-GLOBAL
+METRIC
+INTERNVL
+QWENVL
+INTERNVL
+QWENVL
+SE
+78.4
+69.2
+79.2
+69.4
+OURS (K + K′)
+79.9
+70.2
+80.2
+71.5
+C.6
+Alternative Grounding with Florence-2
+CIM does not require GroundingDINO or a union box specifically. To test whether the framework is
+sensitive to the detector choice, we replace GroundingDINO with the query-conditioned Florence-2
+detector [44].
+Table 8: Query-conditioned detector analysis. Results are AUROC/AURAC. GD denotes Ground-
+ingDINO and FL denotes Florence-2.
+BENCHMARK
+INTERNVL (GD)
+INTERNVL (FL)
+QWENVL (GD)
+QWENVL (FL)
+VQAV2
+81.3/85.2
+82.2/85.9
+78.4/81.5
+77.2/82.6
+ADVQA
+76.8/66.9
+77.7/68.3
+74.5/64.8
+73.5/65.0
+In the results shown in Table 8, the changes are small, indicating that CIM mainly depends on
+preserving query-relevant evidence and is not tied to a particular RoI detector.
+C.7
+Empirical Validations for Energy Assumptions
+Practical causal energy could shift and spurious elements might remain. To further verify the influence
+of the decomposition assumption empirically, we evaluated logit causal energy by comparing our
+crops against vacant-background views whose area outside the crop is masked to black. We estimate
+causal and non-causal logit-energy shifts and compare their median magnitudes with the median
+top-1/top-2 logit gap. The results in Table 9 show that the shift is relatively small, validating the
+decomposition accuracy.
+Table 9: Causal-energy shift scale. Median ∥∆c∥compared with median logit top-1/top-2 gap.
+BENCHMARK
+INTERNVL
+QWENVL
+∥∆c∥
+LOGIT GAP
+∥∆c∥
+LOGIT GAP
+OKVQA
+0.75
+3.62
+0.38
+4.21
+ADVQA
+0.50
+4.57
+0.50
+4.81
+To validate the bounded non-causal energy in Theorem 3.3, we empirically evaluated its magnitude,
+i.e., the logit difference between original and masked views, on hallucinated samples. The results are
+shown in Table 10. Note that this value is accurate under our causal-invariance assumption. For scale
+anchoring, we compared |∆s| against the median top-1/top-2 logit gap. The median |∆s| (0.50-1.00)
+is consistently much smaller than the median decision margin (3.62-4.81). Based on these results, the
+theoretical bound ϵ can be estimated at ϵ ≈1.0. This value is sufficiently small relative to the logit
+scale, confirming our theoretical approximation holds in practice.
+Both ∥∆c∥and ∥∆s∥are substantially smaller than the corresponding decision margins. These
+estimates support the small-shift approximation in Theorem 3.3 and suggest that causal-energy
+leakage remains limited when query-relevant regions are preserved.
+19
+
+
+Table 10: Non-causal shift scale. Median ∥∆s∥on hallucinated samples compared with median
+logit top-1/top-2 gap.
+BENCHMARK
+INTERNVL
+QWENVL
+∥∆s∥
+LOGIT GAP
+∥∆s∥
+LOGIT GAP
+OKVQA
+0.75
+3.62
+0.50
+4.21
+ADVQA
+1.00
+4.57
+0.62
+4.81
+C.8
+POPE Entropy Distributions
+Table 11 reports the average token-level entropy during decoding on POPE. QwenVL has a much
+sharper output distribution than InternVL, which helps explain why discrete semantic clustering can
+be less stable on QwenVL and why EED is particularly effective for this model.
+Table 11: Average token-level entropy on POPE.
+MLLM
+RANDOM
+POPULAR
+ADVERSARIAL
+INTERNVL-8B
+0.51
+0.51
+0.54
+QWEN2.5-VL-7B
+0.06
+0.07
+0.08
+C.9
+NLI Model Ablation
+Table 12: NLI model ablation. ∆(SD Qwen, SD DeBERTa) represents the metric value difference
+between "SD w/ Qwen-7B" and "SD w/ DeBERTa-small".
+METRIC
+VQAV2
+OKVQA
+AUROC
+AURAC
+AUROC
+AURAC
+SE W/ DEBERTA-SMALL
+74.5
+78.0
+77.5
+83.5
+SD W/ DEBERTA-SMALL
+76.2
+80.4
+78.6
+84.4
+SE W/ QWEN-7B
+76.5
+79.5
+78.6
+83.8
+SD W/ QWEN-7B
+78.4
+81.5
+79.6
+84.2
+∆(SD QWEN, SD DEBERTA)
+2.2
+1.1
+1.0
+-0.2
+Zero (~0)
+0.01–0.16
+0.16–0.27
+0.27–0.51
+0.51–0.83
+0.83–1.26
+1.26–1.93
+1.93–3.00
+3.00–5.08
+5.08–10.47
+Semantic Divergence Bins
+0.0
+0.5
+1.0
+1.5
+2.0
+2.5
+3.0
+EED Distribution
+Conditional Distribution
+KL(Q|P)
+L2(Q|P)
+JSD(P|Q)
+KL(P|Q)
+Distribution Metric
+81.00
+81.25
+81.50
+81.75
+Harmonic Mean Score (%)
+Metric Performance
+Figure 9: Left: Expected Embedding Drift (EED) as a proxy for Semantic Divergence. Right:
+Harmonic mean of AUROC and AURAC for different distribution distances, averaged across 2
+MLLMs and 7 benchmarks.
+Semantic clustering depends on an entailment model, so we compare the default Qwen-7B entailment
+model with a much smaller DeBERTa-small model [16]. Table 12 shows that the weaker entailment
+model slightly changes performance, but SD remains competitive and continues to outperform SE
+under the same NLI model.
+20
+
+
+C.10
+EED Proxy and Distance Metrics
+Figure 9 left validates the connection between EED and Semantic Divergence by grouping samples
+according to Usem and plotting the corresponding EED values. The mean EED increases with Semantic
+Divergence, supporting EED as an efficient proxy for semantic distribution shift.
+Figure 9 right compares squared L2 distance, Jensen-Shannon Divergence, reverse KL DKL(P∥Q),
+and forward KL DKL(Q∥P). The method is not highly sensitive to the exact distance, but forward
+KL performs best in our experiments, consistent with its role as an information-gain measure from
+the causally-filtered view to the original view.
+D
+Licenses for Existing Assets
+We use existing public datasets, models, and detector assets for research evaluation only and do not
+redistribute their data or checkpoints. We cite the original creators in the main paper and follow the
+licenses or terms listed by their official project pages:
+• VQAv2 [15]: the VQA Consortium states that VQA annotations are licensed under Creative
+Commons Attribution 4.0 International, and its software is distributed under BSD-style
+redistribution terms; see https://visualqa.org/terms.html. The associated images
+are COCO images and remain subject to the original COCO/image-source terms.
+• OK-VQA [31]: the official download page provides OK-VQA annotations/questions and
+COCO images, but does not state a separate OK-VQA annotation license; see https:
+//okvqa.allenai.org/download.html. We therefore use the benchmark under the
+official access terms and the underlying COCO image terms.
+• AdVQA [25]: the official release page lists the AdVQA/AVQA data and image sources, but
+does not state a separate dataset license; see https://adversarialvqa.org/download.
+html. We use it under the official access terms and the source-image terms for COCO,
+Conceptual Captions, Fakeddit, and VCR as applicable.
+• GQA [18]: the official GQA website provides images that come from COCO and Flickr
+and scene graphs based on Visual Genome; see https://cs.stanford.edu/people/
+dorarad/gqa/index.html and https://cs.stanford.edu/people/dorarad/gqa/
+download.html. We could not find a separate license statement; the LMMs-Lab Hugging
+Face mirror lists MIT, but we treat the original COCO, Flickr, and Visual Genome terms as
+applicable to them.
+• POPE [26]: the official RUCAIBox/POPE repository is released under the MIT license; see
+https://github.com/RUCAIBox/POPE. Its COCO-derived components also inherit the
+relevant COCO image/annotation terms.
+• MME [14]:
+the project page links to the Hugging Face dataset release, which
+lists
+Apache-2.0
+as
+the
+dataset
+license;
+see
+https://github.com/BradyFU/
+Awesome-Multimodal-Large-Language-Models/tree/Evaluation and https://
+huggingface.co/datasets/darkyarding/MME.
+• InternVL2-8B [11]: the official Hugging Face model card lists an MIT license and notes
+that its InternLM2.5-7B-Chat component is licensed under Apache-2.0; see https://
+huggingface.co/OpenGVLab/InternVL2-8B.
+• Qwen2.5-VL-7B-Instruct and Qwen2.5-7B-Instruct [3]:
+their official Hugging
+Face model cards list Apache-2.0;
+see https://huggingface.co/Qwen/Qwen2.
+5-VL-7B-Instruct and https://huggingface.co/Qwen/Qwen2.5-7B-Instruct.
+• GroundingDINO [29]: the official repository license file is Apache-2.0; see https://
+github.com/IDEA-Research/GroundingDINO/blob/main/LICENSE.
+• Florence-2 [44]: the official Microsoft Hugging Face model card lists an MIT license; see
+https://huggingface.co/microsoft/Florence-2-large.
+• DeBERTa-small
+[16]:
+the
+Microsoft
+DeBERTa
+repository
+and
+the
+microsoft/deberta-v3-small Hugging Face checkpoint list the MIT license;
+see
+https://github.com/microsoft/DeBERTa/blob/master/LICENSE
+and
+https://huggingface.co/microsoft/deberta-v3-small.
+21

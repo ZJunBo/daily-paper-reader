@@ -6,32 +6,27 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-04
-- 运行时间：2026-10-04 22:22:11 UTC
+- 最新运行日期：2026-10-06
+- 运行时间：2026-10-06 00:44:10 UTC
 - 运行状态：成功
-- 本次总论文数：3
+- 本次总论文数：2
 - 精读区：0
-- 速读区：3
+- 速读区：2
 
 ### 今日简报（AI）
-10月4日速读3篇：LLM推理不确定性、微调文本必要性与对齐可监控性，无精读。  
-最值得看的是7.0分《Probability is Not Enough...》，聚焦用发散token做推理不确定性量化；两篇6.0分则分别追问人类可读文本是否必要、对齐训练能否不牺牲可监控性。  
-普通读者可先读7分那篇抓不确定性量化思路，再用两篇6分速读补足微调与对齐视角。
-- 详情：[/202610/04/README](/202610/04/README)
+今日速读两篇 7.0 分论文，聚焦大模型价值观调控与多模态不确定性识别。最值得关注的是用单向混合把价值观从语义中剥离以实现低损伤引导，以及通过因果不变掩码揭示多模态大模型的认知不确定性。普通读者可优先了解"低损伤引导"思路，判断其是否能降低模型改价值观时的能力损耗。
+- 详情：[/202610/06/README](/202610/06/README)
 
 ### 精读区论文标签
 - 本次无精读推荐。
 
 ### 速读区论文标签
-1. [Probability is Not Enough: Exploring and Counting Divergent Tokens for Reasoning Uncertainty Quantification in LLMs](/202610/04/2609.38070v1-probability-is-not-enough-exploring-and-counting-divergent-tokens-for-reasoning-uncertainty-quantification-in-llms)  
-   标签：评分：7.0/10、query:luq
-   evidence：面向LLM推理的置信度估计与不确定性量化
-2. [Is Human-Readable Text Necessary for Effective LLM Fine-Tuning?](/202610/04/2609.35868v1-is-human-readable-text-necessary-for-effective-llm-fine-tuning)  
-   标签：评分：6.0/10、query:dg
-   evidence：基于激活梯度反馈的合成微调数据生成
-3. [Alignment via Training Against Probes Without Losing Monitorability](/202610/04/2609.38645v2-alignment-via-training-against-probes-without-losing-monitorability)  
-   标签：评分：6.0/10、query:smd
-   evidence：以探针为训练信号的微调以保持无害与诚实对齐
+1. [Values as Style: Disentangling Values from Semantics with One-Way Mixing for Low-Damage LLM Steering](/202610/06/2609.39701v1-values-as-style-disentangling-values-from-semantics-with-one-way-mixing-for-low-damage-llm-steering)  
+   标签：评分：7.0/10、query:dg
+   evidence：保持语义的激活编辑价值引导接口
+2. [Revealing Epistemic Uncertainty in MLLMs via Causal-Invariant Masking](/202610/06/2610.02887v1-revealing-epistemic-uncertainty-in-mllms-via-causal-invariant-masking)  
+   标签：评分：7.0/10、query:uq-safety
+   evidence：面向多模态大模型的不确定性量化
 
 
 <div class="dpr-home-promo-card">
