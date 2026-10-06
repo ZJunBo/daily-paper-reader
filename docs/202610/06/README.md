@@ -1,21 +1,24 @@
 # 日报 · 2026-10-06
 
-- 生成时间：2026-10-06 00:44:10 UTC
-- 当次推荐总数：2
-- 精读区：0
-- 速读区：2
+- 生成时间：2026-10-06 23:44:29 UTC
+- 当次推荐总数：5
+- 精读区：2
+- 速读区：3
 
 ## 今日简报（AI）
-今日速读双 7.0：LLM 低损伤引导与 MLLM 认知不确定性成焦点，精读 0 篇、速读 2 篇。  
-最值得看的是《Values as Style》的价值/语义解耦与低损伤引导，以及《Revealing Epistemic Uncertainty in MLLMs》的因果不变掩码方向，均指向模型可控性与可靠性。  
-普通读者可先看这两篇的摘要和速读笔记，重点关注引导是否低损伤、多模态模型能否更清晰
+- 今日共生成 5 篇推荐（精读 2 篇，速读 3 篇）
+- 精读：《Conformal Prediction with Paraphrase-Aware Scoring for LLM Uncertainty Quantification》（8.0/10）, 《Safe Context Switching for Agents in the Wild: Mitigating Subspace Interference via Orthogonal Adaptation》（8.0/10）
+- 速读：《First-Order Steering: Translating Weight Adaptation into Activation Steering》（7.0/10）, 《Target-free Latent Safety Alignment》（7.0/10）, 《Revealing Epistemic Uncertainty in MLLMs via Causal-Invariant Masking》（6.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
 
 ## 精读区
-- 本次无精读推荐。
+1. [Conformal Prediction with Paraphrase-Aware Scoring for LLM Uncertainty Quantification](/202610/06/2610.04239v1-conformal-prediction-with-paraphrase-aware-scoring-for-llm-uncertainty-quantification) （8.0/10）
+2. [Safe Context Switching for Agents in the Wild: Mitigating Subspace Interference via Orthogonal Adaptation](/202610/06/2610.05219v1-safe-context-switching-for-agents-in-the-wild-mitigating-subspace-interference-via-orthogonal-adaptation) （8.0/10）
 
 ## 速读区
-1. [Values as Style: Disentangling Values from Semantics with One-Way Mixing for Low-Damage LLM Steering](/202610/06/2609.39701v1-values-as-style-disentangling-values-from-semantics-with-one-way-mixing-for-low-damage-llm-steering) （7.0/10）
-2. [Revealing Epistemic Uncertainty in MLLMs via Causal-Invariant Masking](/202610/06/2610.02887v1-revealing-epistemic-uncertainty-in-mllms-via-causal-invariant-masking) （7.0/10）
+1. [First-Order Steering: Translating Weight Adaptation into Activation Steering](/202610/06/2610.04283v1-first-order-steering-translating-weight-adaptation-into-activation-steering) （7.0/10）
+2. [Target-free Latent Safety Alignment](/202610/06/2610.04467v1-target-free-latent-safety-alignment) （7.0/10）
+3. [Revealing Epistemic Uncertainty in MLLMs via Causal-Invariant Masking](/202610/06/2610.02887v1-revealing-epistemic-uncertainty-in-mllms-via-causal-invariant-masking) （6.0/10）
 
 ---
 使用键盘方向键可在日报/论文之间快速切换。
