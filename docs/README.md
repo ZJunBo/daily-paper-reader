@@ -6,38 +6,38 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-06
-- 运行时间：2026-10-06 23:44:29 UTC
+- 最新运行日期：2026-10-07
+- 运行时间：2026-10-07 23:30:27 UTC
 - 运行状态：成功
 - 本次总论文数：5
-- 精读区：2
-- 速读区：3
+- 精读区：1
+- 速读区：4
 
 ### 今日简报（AI）
-- 今日共生成 5 篇推荐（精读 2 篇，速读 3 篇）
-- 精读：《Conformal Prediction with Paraphrase-Aware Scoring for LLM Uncertainty Quantification》（8.0/10）, 《Safe Context Switching for Agents in the Wild: Mitigating Subspace Interference via Orthogonal Adaptation》（8.0/10）
-- 速读：《First-Order Steering: Translating Weight Adaptation into Activation Steering》（7.0/10）, 《Target-free Latent Safety Alignment》（7.0/10）, 《Revealing Epistemic Uncertainty in MLLMs via Causal-Invariant Masking》（6.0/10）
+- 今日共生成 5 篇推荐（精读 1 篇，速读 4 篇）
+- 精读：《ASCENT: First-Order Optimal Fine-Tuning with Recalibration for Safety--Utility Co-Enhancement》（8.0/10）
+- 速读：《ShieldCLIP: Selective Safety Alignment for Harmful Content Mitigation in Multimodal Foundation Models》（6.0/10）, 《Training-Aware Target Coverage for Synthetic Data Selection》（6.0/10）, 《Harmful SFT Leaves a Continuous Trace in LLM Checkpoint Updates》（6.0/10）
 - 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202610/06/README](/202610/06/README)
+- 详情：[/202610/07/README](/202610/07/README)
 
 ### 精读区论文标签
-1. [Conformal Prediction with Paraphrase-Aware Scoring for LLM Uncertainty Quantification](/202610/06/2610.04239v1-conformal-prediction-with-paraphrase-aware-scoring-for-llm-uncertainty-quantification)  
-   标签：评分：8.0/10、query:uq-safety
-   evidence：释义感知的大模型不确定性量化
-2. [Safe Context Switching for Agents in the Wild: Mitigating Subspace Interference via Orthogonal Adaptation](/202610/06/2610.05219v1-safe-context-switching-for-agents-in-the-wild-mitigating-subspace-interference-via-orthogonal-adaptation)  
+1. [ASCENT: First-Order Optimal Fine-Tuning with Recalibration for Safety--Utility Co-Enhancement](/202610/07/2610.08061v1-ascent-first-order-optimal-fine-tuning-with-recalibration-for-safety--utility-co-enhancement)  
    标签：评分：8.0/10、query:smd
-   evidence：推理任务微调破坏安全对齐，用正交适配缓解
+   evidence：缓解微调安全退化的安全保持微调
 
 ### 速读区论文标签
-1. [First-Order Steering: Translating Weight Adaptation into Activation Steering](/202610/06/2610.04283v1-first-order-steering-translating-weight-adaptation-into-activation-steering)  
-   标签：评分：7.0/10、query:dg
-   evidence：将权重适配转化为激活引导
-2. [Target-free Latent Safety Alignment](/202610/06/2610.04467v1-target-free-latent-safety-alignment)  
-   标签：评分：7.0/10、query:smd
-   evidence：无目标对抗样本提升抵御越狱的安全对齐
-3. [Revealing Epistemic Uncertainty in MLLMs via Causal-Invariant Masking](/202610/06/2610.02887v1-revealing-epistemic-uncertainty-in-mllms-via-causal-invariant-masking)  
-   标签：评分：6.0/10、query:uq-safety
-   evidence：通过因果不变掩码进行多模态大模型不确定性量化
+1. [ShieldCLIP: Selective Safety Alignment for Harmful Content Mitigation in Multimodal Foundation Models](/202610/07/2609.39688v1-shieldclip-selective-safety-alignment-for-harmful-content-mitigation-in-multimodal-foundation-models)  
+   标签：评分：6.0/10、query:dg
+   evidence：生成式安全数据用于选择性安全对齐
+2. [Training-Aware Target Coverage for Synthetic Data Selection](/202610/07/2610.00814v1-training-aware-target-coverage-for-synthetic-data-selection)  
+   标签：评分：6.0/10、query:smd
+   evidence：面向大模型微调的合成数据选择与数据策管
+3. [Harmful SFT Leaves a Continuous Trace in LLM Checkpoint Updates](/202610/07/2610.07518v1-harmful-sft-leaves-a-continuous-trace-in-llm-checkpoint-updates)  
+   标签：评分：6.0/10、query:smd
+   evidence：有害SFT在检查点更新中留下可读痕迹用于审计
+4. [SIGMA: Self-Improving Alignment Generalization from a Model Spec](/202610/07/2610.07935v1-sigma-self-improving-alignment-generalization-from-a-model-spec)  
+   标签：评分：6.0/10、query:dg
+   evidence：面向安全对齐自改进的数据生成与训练流程
 
 
 <div class="dpr-home-promo-card">
