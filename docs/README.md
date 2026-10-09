@@ -6,38 +6,46 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-10-07
-- 运行时间：2026-10-07 23:30:27 UTC
+- 最新运行日期：2026-10-08
+- 运行时间：2026-10-09 00:11:58 UTC
 - 运行状态：成功
-- 本次总论文数：5
-- 精读区：1
-- 速读区：4
+- 本次总论文数：8
+- 精读区：3
+- 速读区：5
 
 ### 今日简报（AI）
-- 今日共生成 5 篇推荐（精读 1 篇，速读 4 篇）
-- 精读：《ASCENT: First-Order Optimal Fine-Tuning with Recalibration for Safety--Utility Co-Enhancement》（8.0/10）
-- 速读：《ShieldCLIP: Selective Safety Alignment for Harmful Content Mitigation in Multimodal Foundation Models》（6.0/10）, 《Training-Aware Target Coverage for Synthetic Data Selection》（6.0/10）, 《Harmful SFT Leaves a Continuous Trace in LLM Checkpoint Updates》（6.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202610/07/README](/202610/07/README)
+今日处理8篇，精读3篇、速读5篇，LLM安全对齐与不确定性来源成为双主线。
+最值得看两篇8分精读：《Beyond Refusal Patterns》谈安全角色内化，《U-Space》追问不确定性何时、为何出现。
+普通读者可先读这两篇建立框架，再按兴趣翻速读中的DNAlign、共形预测与多智能体不确定性估计。
+- 详情：[/202610/08/README](/202610/08/README)
 
 ### 精读区论文标签
-1. [ASCENT: First-Order Optimal Fine-Tuning with Recalibration for Safety--Utility Co-Enhancement](/202610/07/2610.08061v1-ascent-first-order-optimal-fine-tuning-with-recalibration-for-safety--utility-co-enhancement)  
+1. [Beyond Refusal Patterns: Safe-Role Internalization for Robust and Generalizable LLM Safety Alignment](/202610/08/2610.07023v1-beyond-refusal-patterns-safe-role-internalization-for-robust-and-generalizable-llm-safety-alignment)  
    标签：评分：8.0/10、query:smd
-   evidence：缓解微调安全退化的安全保持微调
+   evidence：构建安全角色问答数据集并微调以增强安全对齐
+2. [U-Space: Uncovering When and Why Uncertainty Arises in Language Models](/202610/08/2610.09087v1-u-space-uncovering-when-and-why-uncertainty-arises-in-language-models)  
+   标签：评分：8.0/10、query:luq
+   evidence：推理过程中的LLM不确定性量化
+3. [SLDR: Defending Against Malicious Fine-tuning via Selective Layers Recovery and Dynamic Routing](/202610/08/2610.10345v1-sldr-defending-against-malicious-fine-tuning-via-selective-layers-recovery-and-dynamic-routing)  
+   标签：评分：8.0/10、query:smd
+   evidence：防御恶意微调削弱拒绝行为
 
 ### 速读区论文标签
-1. [ShieldCLIP: Selective Safety Alignment for Harmful Content Mitigation in Multimodal Foundation Models](/202610/07/2609.39688v1-shieldclip-selective-safety-alignment-for-harmful-content-mitigation-in-multimodal-foundation-models)  
+1. [DNAlign: Dynamic Null-Space Safe Alignment for LLMs](/202610/08/2610.02844v1-dnalign-dynamic-null-space-safe-alignment-for-llms)  
    标签：评分：6.0/10、query:dg
-   evidence：生成式安全数据用于选择性安全对齐
-2. [Training-Aware Target Coverage for Synthetic Data Selection](/202610/07/2610.00814v1-training-aware-target-coverage-for-synthetic-data-selection)  
+   evidence：通过隐空间投影引导生成趋向安全
+2. [Conformal Prediction Sets Quantify Information Gain: A Theoretical Perspective](/202610/08/2610.08785v1-conformal-prediction-sets-quantify-information-gain-a-theoretical-perspective)  
+   标签：评分：6.0/10、query:uq-safety
+   evidence：用共形预测集刻画不确定性的信息论基础
+3. [Sequential Probabilistic Uncertainty Estimation for Parallel Multi-Agent Reasoning Systems](/202610/08/2610.08901v1-sequential-probabilistic-uncertainty-estimation-for-parallel-multi-agent-reasoning-systems)  
+   标签：评分：6.0/10、query:luq
+   evidence：大模型多智能体系统的不确定性估计
+4. [Removing Information Content Does Not Certify Tamper Resistance in Open-Weight Models](/202610/08/2610.09004v1-removing-information-content-does-not-certify-tamper-resistance-in-open-weight-models)  
    标签：评分：6.0/10、query:smd
-   evidence：面向大模型微调的合成数据选择与数据策管
-3. [Harmful SFT Leaves a Continuous Trace in LLM Checkpoint Updates](/202610/07/2610.07518v1-harmful-sft-leaves-a-continuous-trace-in-llm-checkpoint-updates)  
-   标签：评分：6.0/10、query:smd
-   evidence：有害SFT在检查点更新中留下可读痕迹用于审计
-4. [SIGMA: Self-Improving Alignment Generalization from a Model Spec](/202610/07/2610.07935v1-sigma-self-improving-alignment-generalization-from-a-model-spec)  
-   标签：评分：6.0/10、query:dg
-   evidence：面向安全对齐自改进的数据生成与训练流程
+   evidence：移除有害信息能否抵御微调攻击
+5. [A Tale of Two Error Categories: Exploring Concealed Trade-Offs in the Errors of Automated Judges in Evaluation of Uncertainty Quantifiers](/202610/08/2610.09693v1-a-tale-of-two-error-categories-exploring-concealed-trade-offs-in-the-errors-of-automated-judges-in-evaluation-of-uncertainty-quantifiers)  
+   标签：评分：6.0/10、query:uq-safety
+   evidence：评估自动评判器在衡量大模型不确定性量化器时的表现
 
 
 <div class="dpr-home-promo-card">
